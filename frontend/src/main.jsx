@@ -1,8 +1,15 @@
-// ============================================================
-// main.jsx — React application entry point
-// Employee Onboarding and Probation Evaluation Management System
-// ============================================================
-// TODO: Implementation begins in Sprint 4
-// This file will render the root React component, wrap the app
-// in AuthContext and React Router, and mount to #root.
-// ============================================================
+// =============================================================================
+// src/main.jsx
+// Application entry point — mounts <App /> into the #root div.
+// =============================================================================
+
+import React    from 'react'
+import ReactDOM from 'react-dom/client'
+import App      from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+)
