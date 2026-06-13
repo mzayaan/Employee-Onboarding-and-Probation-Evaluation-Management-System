@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext'
 import { Users, BarChart3, ClipboardList, AlertTriangle, Loader2, AlertCircle } from 'lucide-react'
 import { getOnboardingProgress } from '@/api/dashboardApi'
 import { getAllAssignments } from '@/api/taskApi'
+import { getMyTeam } from '@/api/evaluationApi'
 
 function formatDate(d) {
   if (!d) return '—'
@@ -48,25 +49,38 @@ export default function ManagerDashboard() {
   const { user } = useAuth()
 
   const [teamData,     setTeamData]     = useState([])
+  const [teamMembers,  setTeamMembers]  = useState([])
   const [assignments,  setAssignments]  = useState([])
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
 
   useEffect(() => {
-    Promise.all([getOnboardingProgress(), getAllAssignments()])
-      .then(([progress, tasks]) => {
+    Promise.all([getOnboardingProgress(), getAllAssignments(), getMyTeam()])
+      .then(([progress, tasks, members]) => {
         setTeamData(progress)
         setAssignments(tasks)
+        setTeamMembers(members)
       })
       .catch(() => setError('Failed to load dashboard data.'))
       .finally(() => setLoading(false))
   }, [])
 
-  const teamSize   = teamData.length
-  const tasksOD    = assignments.filter((a) => a.status !== 'COMPLETED' && new Date(a.due_date) < new Date()).length
-  const avgScore   = teamData.length > 0
+  const teamSize = teamData.length
+  const tasksOD  = assignments.filter(
+    (a) => a.status !== 'COMPLETED' && new Date(a.due_date) < new Date()
+  ).length
+  const avgScore = teamData.length > 0
     ? Math.round(teamData.reduce((sum, e) => sum + (e.task_progress || 0), 0) / teamData.length)
     : 0
+
+  // Count checkpoints awaiting manager evaluation across all team members
+  const pendingEvals = teamMembers.reduce((count, member) => {
+    const periods = member.probationPeriods ?? []
+    const checkpoints = periods.flatMap((p) => p.checkpoints ?? [])
+    return count + checkpoints.filter(
+      (c) => (c.status === 'PENDING' || c.status === 'OVERDUE') && !c.managerEvaluation
+    ).length
+  }, 0)
 
   const STAT_CARDS = [
     {
@@ -77,7 +91,7 @@ export default function ManagerDashboard() {
     },
     {
       label: 'Pending Evaluations',
-      value: '—',            // Evaluation module not yet implemented
+      value: loading ? '—' : pendingEvals,
       icon: BarChart3,
       color: '#f59e0b',
     },

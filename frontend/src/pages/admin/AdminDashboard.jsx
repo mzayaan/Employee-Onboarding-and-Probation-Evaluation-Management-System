@@ -10,7 +10,7 @@ import AppShell from '@/components/shared/AppShell'
 import { useAuth } from '@/context/AuthContext'
 import { getCriteria } from '@/api/criteriaApi'
 import {
-  Users, Settings, ShieldCheck, Bell,
+  Settings, ShieldCheck,
   ArrowRight, Loader2,
 } from 'lucide-react'
 
@@ -34,6 +34,7 @@ export default function AdminDashboard() {
     .reduce((sum, c) => sum + parseFloat(c.weight_percent), 0)
   const weightValid = Math.abs(totalWeight - 100) < 0.01
 
+  // User Management and Notifications links removed — pages not yet built
   const QUICK_LINKS = [
     {
       label:   'Criteria Config',
@@ -45,25 +46,11 @@ export default function AdminDashboard() {
       to:      '/admin/criteria',
     },
     {
-      label:   'User Management',
-      subtext: 'Manage system users and roles',
-      icon:    Users,
-      color:   '#3d7dd3',
-      to:      '/admin/users',
-    },
-    {
       label:   'Audit Log',
       subtext: 'Review system activity records',
       icon:    ShieldCheck,
       color:   '#f59e0b',
       to:      '/admin/audit-log',
-    },
-    {
-      label:   'Notifications',
-      subtext: 'System notification settings',
-      icon:    Bell,
-      color:   '#16a34a',
-      to:      '/admin/notifications',
     },
   ]
 

@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AppShell from '@/components/shared/AppShell'
+import { useAuth } from '@/context/AuthContext'
 import { getEmployee, updateEmployeeProfile, getDepartments, getManagers } from '@/api/employeeApi'
 import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X } from 'lucide-react'
 
@@ -42,8 +43,10 @@ const ONBOARDING_BADGE = {
 }
 
 export default function EmployeeDetailPage() {
-  const { id }   = useParams()
-  const navigate = useNavigate()
+  const { id }           = useParams()
+  const navigate         = useNavigate()
+  const { user: authUser } = useAuth()
+  const isManager        = authUser?.role === 'LINE_MANAGER'
 
   const [employee,    setEmployee]    = useState(null)
   const [departments, setDepartments] = useState([])
@@ -61,8 +64,14 @@ export default function EmployeeDetailPage() {
   })
 
   useEffect(() => {
-    Promise.all([getEmployee(id), getDepartments(), getManagers()])
-      .then(([emp, depts, mgrs]) => {
+    // Managers only need the employee record — skip HR-only lookups (departments/managers)
+    // to avoid 403 errors that would abort the whole fetch.
+    const fetches = isManager
+      ? [getEmployee(id)]
+      : [getEmployee(id), getDepartments(), getManagers()]
+
+    Promise.all(fetches)
+      .then(([emp, depts = [], mgrs = []]) => {
         setEmployee(emp)
         setDepartments(depts)
         setManagers(mgrs)
@@ -78,7 +87,7 @@ export default function EmployeeDetailPage() {
       })
       .catch(() => setError('Failed to load employee details.'))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, isManager])
 
   const set = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }))
 
@@ -135,10 +144,11 @@ export default function EmployeeDetailPage() {
       {/* Top bar: Back + Actions */}
       <div className="mb-6 flex items-center justify-between">
         <button
-          onClick={() => navigate('/hr/employees')}
+          onClick={() => navigate(isManager ? '/manager/team' : '/hr/employees')}
           className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
         >
-          <ArrowLeft className="h-4 w-4" /> Back to Employees
+          <ArrowLeft className="h-4 w-4" />
+          {isManager ? 'Back to My Team' : 'Back to Employees'}
         </button>
         <div className="flex items-center gap-2">
           <button
@@ -148,14 +158,17 @@ export default function EmployeeDetailPage() {
             <FileDown className="h-4 w-4" />
             Generate PDF Report
           </button>
-          <button
-            onClick={() => setEditing(!editing)}
-            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white"
-            style={{ backgroundColor: '#1e3a5f' }}
-          >
-            {editing ? <X className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}
-            {editing ? 'Cancel Edit' : 'Edit Profile'}
-          </button>
+          {/* Edit Profile — HR Admin only; managers have read-only access */}
+          {!isManager && (
+            <button
+              onClick={() => setEditing(!editing)}
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white"
+              style={{ backgroundColor: '#1e3a5f' }}
+            >
+              {editing ? <X className="h-4 w-4" /> : <Edit2 className="h-4 w-4" />}
+              {editing ? 'Cancel Edit' : 'Edit Profile'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -228,7 +241,7 @@ export default function EmployeeDetailPage() {
       )}
 
       {/* Personal Information (read-only view) */}
-      {!editing ? (
+      {(!editing || isManager) ? (
         <div className="rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
           <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Personal Information</h2>
           <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3">

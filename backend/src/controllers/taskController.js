@@ -11,7 +11,8 @@ const {
   User,
 } = require('../models');
 
-const { createAuditLog } = require('../utils/auditLogger');
+const { createAuditLog }       = require('../utils/auditLogger');
+const { sendTaskAssignedEmail } = require('../utils/mailer');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -64,6 +65,15 @@ const assignTask = async (req, res) => {
       description: `Task "${task.title}" assigned to profile_id ${profile_id} (assignment_id: ${assignment.assignment_id}).`,
       ipAddress:   getIp(req),
     });
+
+    // FR-09: notify the employee by email (fire-and-forget — non-critical)
+    sendTaskAssignedEmail({
+      to:              profile.user.email,
+      firstName:       profile.user.first_name,
+      taskTitle:       task.title,
+      taskDescription: task.description,
+      dueDate:         due_date,
+    }).catch(() => {});
 
     return res.status(201).json({
       success: true,
@@ -275,9 +285,9 @@ const deleteAssignment = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
-    return res.json({ success: true, message: 'Task assignment deleted.' });
+    return res.status(200).json({ success: true, message: 'Task assignment deleted successfully.' });
   } catch (error) {
-    console.error('[taskController.deleteAssignment]', error.message);
+    console.error('[taskController.deleteTaskAssignment]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to delete task assignment.' });
   }
 };

@@ -28,6 +28,22 @@ import AdminDashboard    from '@/pages/admin/AdminDashboard'
 // Admin — Criteria configuration (Block 7)
 import CriteriaConfigPage from '@/pages/admin/CriteriaConfigPage'
 
+// Admin — Audit log (Block 8 — Phase 4)
+import AuditLogPage from '@/pages/admin/AuditLogPage'
+
+// Manager — Phase 4 evaluation pages
+import MyTeamPage         from '@/pages/manager/MyTeamPage'
+import EvaluationFormPage from '@/pages/manager/EvaluationFormPage'
+
+// Manager — Evaluations list (Phase 4)
+import ManagerEvaluationsPage from '@/pages/manager/ManagerEvaluationsPage'
+
+// Manager — Task assignment (Phase 3/4 gap)
+import ManagerTasksPage from '@/pages/manager/ManagerTasksPage'
+
+// Employee — Self-assessment (Block 8 — Phase 4)
+import SelfAssessmentPage from '@/pages/employee/assessments/SelfAssessmentPage'
+
 // HR — Employee management (Block 4)
 import EmployeeListPage   from '@/pages/hr/employees/EmployeeListPage'
 import AddEmployeePage    from '@/pages/hr/employees/AddEmployeePage'
@@ -81,16 +97,27 @@ export default function App() {
             <Route path="/hr/dashboard"            element={<HRDashboard />} />
             <Route path="/hr/employees"            element={<EmployeeListPage />} />
             <Route path="/hr/employees/add"        element={<AddEmployeePage />} />
-            <Route path="/hr/employees/:id"        element={<EmployeeDetailPage />} />
             {/* Block 4 — document review */}
             <Route path="/hr/documents"            element={<DocumentReviewPage />} />
             {/* Block 5 — task management */}
             <Route path="/hr/tasks"                element={<TaskManagementPage />} />
           </Route>
 
+          {/* Employee profile detail — HR_ADMIN (full edit) + LINE_MANAGER (read-only) */}
+          <Route element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER']} />}>
+            <Route path="/hr/employees/:id"        element={<EmployeeDetailPage />} />
+          </Route>
+
           {/* ── Line Manager ───────────────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['LINE_MANAGER']} />}>
-            <Route path="/manager/dashboard" element={<ManagerDashboard />} />
+            <Route path="/manager/dashboard"               element={<ManagerDashboard />} />
+            {/* Block 8 — Phase 4: My Team overview + Evaluation form */}
+            <Route path="/manager/team"                    element={<MyTeamPage />} />
+            <Route path="/manager/evaluations/:checkpointId" element={<EvaluationFormPage />} />
+            {/* Phase 4: Evaluations list */}
+            <Route path="/manager/evaluations"             element={<ManagerEvaluationsPage />} />
+            {/* Phase 3/4 gap: Manager task assignment */}
+            <Route path="/manager/tasks"                   element={<ManagerTasksPage />} />
           </Route>
 
           {/* ── New Employee ───────────────────────────────────────── */}
@@ -101,12 +128,16 @@ export default function App() {
             <Route path="/employee/documents/upload"   element={<UploadDocumentPage />} />
             {/* Block 5 — task management */}
             <Route path="/employee/tasks"              element={<MyTasksPage />} />
+            {/* Block 8 — Phase 4: Self-assessment */}
+            <Route path="/employee/self-assessments"   element={<SelfAssessmentPage />} />
           </Route>
 
           {/* ── System Administrator ───────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['SYSTEM_ADMIN']} />}>
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/criteria"  element={<CriteriaConfigPage />} />
+            <Route path="/admin/dashboard"  element={<AdminDashboard />} />
+            <Route path="/admin/criteria"   element={<CriteriaConfigPage />} />
+            {/* Block 8 — Phase 4: Audit log */}
+            <Route path="/admin/audit-log"  element={<AuditLogPage />} />
           </Route>
 
           {/* Catch-all */}

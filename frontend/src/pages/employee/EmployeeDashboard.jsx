@@ -12,6 +12,7 @@ import { FileText, ClipboardList, BarChart3, CalendarClock, CheckCircle, Clock, 
 import { getMyProgress } from '@/api/dashboardApi'
 import { getMyDocuments } from '@/api/documentApi'
 import { getMyTasks } from '@/api/taskApi'
+import { getMyProbation } from '@/api/evaluationApi'
 
 // Circular progress ring (SVG)
 function ProgressRing({ value }) {
@@ -42,18 +43,20 @@ function ProgressRing({ value }) {
 export default function EmployeeDashboard() {
   const { user }   = useAuth()
   const navigate   = useNavigate()
-  const [progress, setProgress] = useState(null)
-  const [docs,     setDocs]     = useState([])
-  const [tasks,    setTasks]    = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState(null)
+  const [progress,  setProgress]  = useState(null)
+  const [docs,      setDocs]      = useState([])
+  const [tasks,     setTasks]     = useState([])
+  const [probation, setProbation] = useState(null)
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
 
   useEffect(() => {
-    Promise.all([getMyProgress(), getMyDocuments(), getMyTasks()])
-      .then(([prog, docList, taskList]) => {
+    Promise.all([getMyProgress(), getMyDocuments(), getMyTasks(), getMyProbation()])
+      .then(([prog, docList, taskList, prob]) => {
         setProgress(prog)
         setDocs(docList)
         setTasks(taskList)
+        setProbation(prob)
       })
       .catch(() => setError('Failed to load your dashboard.'))
       .finally(() => setLoading(false))
@@ -133,15 +136,19 @@ export default function EmployeeDashboard() {
           </div>
         </div>
 
-        {/* Evaluations */}
+        {/* Evaluations — count self-assessments submitted */}
         <div className="flex items-center gap-4 rounded-xl bg-white px-5 py-4 shadow-sm ring-1 ring-slate-200">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg flex-shrink-0"
                style={{ backgroundColor: '#7c3aed18' }}>
             <BarChart3 className="h-5 w-5" style={{ color: '#7c3aed' }} />
           </div>
           <div>
-            <p className="text-2xl font-bold" style={{ color: '#0f1c2e' }}>0</p>
-            <p className="text-xs text-slate-500 mt-0.5">Evaluations</p>
+            <p className="text-2xl font-bold" style={{ color: '#0f1c2e' }}>
+              {loading
+                ? <span className="animate-pulse text-slate-300">—</span>
+                : (probation?.checkpoints ?? []).filter((c) => c.selfAssessment).length}
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5">Self-Assessments Done</p>
           </div>
         </div>
 

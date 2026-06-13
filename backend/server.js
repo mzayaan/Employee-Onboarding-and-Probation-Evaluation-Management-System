@@ -118,11 +118,20 @@ app.use('/api/dashboard', dashboardRoutes);
 const criteriaRoutes = require('./src/routes/criteriaRoutes');
 app.use('/api/criteria', criteriaRoutes);
 
+// Evaluation routes (Block 8 — Phase 4)
+const evaluationRoutes = require('./src/routes/evaluationRoutes');
+app.use('/api/evaluations', evaluationRoutes);
+
+// Audit log routes (Block 8 — Phase 4)
+const auditRoutes = require('./src/routes/auditRoutes');
+app.use('/api/audit', auditRoutes);
+
 // Placeholder — additional routes will be registered here as modules are built:
-// app.use('/api/evaluations',require('./src/routes/evaluationRoutes'));
 // app.use('/api/reports',    require('./src/routes/reportRoutes'));
-// app.use('/api/admin',      require('./src/routes/adminRoutes'));
 // app.use('/api/notifications', require('./src/routes/notificationRoutes'));
+
+// ── Notification scheduler (FR-09) ───────────────────────────────────────────
+const { startNotificationScheduler } = require('./src/services/notificationService');
 
 // =============================================================================
 // 404 HANDLER
@@ -160,6 +169,9 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`[Server] Running on port ${PORT} in ${process.env.NODE_ENV} mode.`);
       console.log(`[Server] Health check: http://localhost:${PORT}/api/health`);
+
+      // Start scheduled email notification jobs (FR-09)
+      startNotificationScheduler();
     });
   } catch (error) {
     console.error('[DB] Unable to connect to MySQL:', error.message);
