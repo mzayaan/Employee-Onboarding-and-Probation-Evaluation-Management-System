@@ -106,12 +106,21 @@ app.use('/api/employees', employeeRoutes);
 const documentRoutes = require('./src/routes/documentRoutes');
 app.use('/api/documents', documentRoutes);
 
+// Task routes (Block 5)
+const taskRoutes = require('./src/routes/taskRoutes');
+app.use('/api/tasks', taskRoutes);
+
+// Dashboard routes (Block 6)
+const dashboardRoutes = require('./src/routes/dashboardRoutes');
+app.use('/api/dashboard', dashboardRoutes);
+
+// Criteria routes (Block 7 — System Admin)
+const criteriaRoutes = require('./src/routes/criteriaRoutes');
+app.use('/api/criteria', criteriaRoutes);
+
 // Placeholder — additional routes will be registered here as modules are built:
-// app.use('/api/documents',  require('./src/routes/documentRoutes')); // registered above
-// app.use('/api/tasks',      require('./src/routes/taskRoutes'));
 // app.use('/api/evaluations',require('./src/routes/evaluationRoutes'));
 // app.use('/api/reports',    require('./src/routes/reportRoutes'));
-// app.use('/api/dashboard',  require('./src/routes/dashboardRoutes'));
 // app.use('/api/admin',      require('./src/routes/adminRoutes'));
 // app.use('/api/notifications', require('./src/routes/notificationRoutes'));
 

@@ -199,6 +199,7 @@ export default function LoginPage() {
               <div className="flex justify-end">
                 <button
                   type="button"
+                  onClick={() => navigate('/forgot-password')}
                   className="text-xs font-medium hover:underline"
                   style={{ color: '#3d7dd3' }}
                   tabIndex={-1}

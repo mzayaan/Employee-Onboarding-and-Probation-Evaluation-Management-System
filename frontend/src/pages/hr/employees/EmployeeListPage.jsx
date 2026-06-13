@@ -20,6 +20,11 @@ const ONBOARDING_BADGE = {
   COMPLETED:   { label: 'Completed',   bg: '#dcfce7', color: '#15803d' },
 }
 
+function formatDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 export default function EmployeeListPage() {
   const navigate = useNavigate()
   const [employees,   setEmployees]   = useState([])
@@ -185,7 +190,7 @@ export default function EmployeeListPage() {
           <table className="min-w-full divide-y divide-slate-100">
             <thead>
               <tr className="bg-slate-50">
-                {['Employee', 'Job Title', 'Department', 'Onboarding', 'Status', 'Actions'].map((h) => (
+                {['Employee', 'Department', 'Start Date', 'Probation End', 'Onboarding', 'Status', 'Actions'].map((h) => (
                   <th
                     key={h}
                     className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
@@ -219,11 +224,17 @@ export default function EmployeeListPage() {
                         </div>
                       </div>
                     </td>
-                    {/* Job Title */}
-                    <td className="px-5 py-4 text-sm text-slate-600">{emp.job_title}</td>
                     {/* Department */}
                     <td className="px-5 py-4 text-sm text-slate-600">
                       {emp.department?.name ?? <span className="text-slate-400">—</span>}
+                    </td>
+                    {/* Start Date */}
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                      {formatDate(emp.start_date)}
+                    </td>
+                    {/* Probation End */}
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                      {formatDate(emp.probation_end_date)}
                     </td>
                     {/* Onboarding */}
                     <td className="px-5 py-4">

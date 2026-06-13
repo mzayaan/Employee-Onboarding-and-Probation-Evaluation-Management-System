@@ -48,11 +48,11 @@ const NAV_ITEMS = {
     { to: '/employee/profile',    icon: UserCircle,       label: 'My Profile'    },
   ],
   SYSTEM_ADMIN: [
-    { to: '/admin/dashboard',  icon: LayoutDashboard, label: 'Dashboard'   },
-    { to: '/admin/users',      icon: Users,            label: 'Users'       },
-    { to: '/admin/criteria',   icon: Settings,         label: 'Eval Criteria' },
-    { to: '/admin/audit-log',  icon: ShieldCheck,      label: 'Audit Log'   },
-    { to: '/admin/notifications', icon: Bell,          label: 'Notifications' },
+    { to: '/admin/dashboard',     icon: LayoutDashboard, label: 'Dashboard'     },
+    { to: '/admin/users',         icon: Users,            label: 'User Management' },
+    { to: '/admin/criteria',      icon: Settings,         label: 'Criteria Config' },
+    { to: '/admin/audit-log',     icon: ShieldCheck,      label: 'Audit Log'     },
+    { to: '/admin/notifications', icon: Bell,             label: 'Settings'      },
   ],
 }
 
