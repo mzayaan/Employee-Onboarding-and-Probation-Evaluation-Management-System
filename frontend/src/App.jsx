@@ -24,6 +24,11 @@ import ManagerDashboard  from '@/pages/manager/ManagerDashboard'
 import EmployeeDashboard from '@/pages/employee/EmployeeDashboard'
 import AdminDashboard    from '@/pages/admin/AdminDashboard'
 
+// HR — Employee management (Block 4)
+import EmployeeListPage   from '@/pages/hr/employees/EmployeeListPage'
+import AddEmployeePage    from '@/pages/hr/employees/AddEmployeePage'
+import EmployeeDetailPage from '@/pages/hr/employees/EmployeeDetailPage'
+
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
   const { user, isAuthenticated, loading } = useAuth()
@@ -55,8 +60,10 @@ export default function App() {
 
           {/* ── HR Administrator ───────────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['HR_ADMIN']} />}>
-            <Route path="/hr/dashboard"   element={<HRDashboard />} />
-            {/* Remaining HR pages will be added in Blocks 4–8 */}
+            <Route path="/hr/dashboard"            element={<HRDashboard />} />
+            <Route path="/hr/employees"            element={<EmployeeListPage />} />
+            <Route path="/hr/employees/add"        element={<AddEmployeePage />} />
+            <Route path="/hr/employees/:id"        element={<EmployeeDetailPage />} />
           </Route>
 
           {/* ── Line Manager ───────────────────────────────────────── */}

@@ -1,6 +1,7 @@
 // =============================================================================
 // src/seeders/seed.js
-// Development seed script — creates one test user for each of the four roles.
+// Development seed script — test users only.
+// Departments are already seeded directly in the database.
 // Run with:  node src/seeders/seed.js
 //
 // NEVER run this against a production database.
@@ -62,7 +63,6 @@ async function seed() {
         skipped++
         continue
       }
-
       const password_hash = await bcrypt.hash(u.password, 12)
       await User.create({ ...u, password_hash })
       console.log(`✅  Created  ${u.role.padEnd(14)}  ${u.email}`)

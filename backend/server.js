@@ -90,12 +90,19 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Auth routes (Block 2 — implemented next)
+// Auth routes (Block 2)
 const authRoutes = require('./src/routes/authRoutes');
 app.use('/api/auth', authLimiter, authRoutes);
 
+// Department routes (Block 4)
+const departmentRoutes = require('./src/routes/departmentRoutes');
+app.use('/api/departments', departmentRoutes);
+
+// Employee routes (Block 4)
+const employeeRoutes = require('./src/routes/employeeRoutes');
+app.use('/api/employees', employeeRoutes);
+
 // Placeholder — additional routes will be registered here as modules are built:
-// app.use('/api/employees',  require('./src/routes/employeeRoutes'));
 // app.use('/api/documents',  require('./src/routes/documentRoutes'));
 // app.use('/api/tasks',      require('./src/routes/taskRoutes'));
 // app.use('/api/evaluations',require('./src/routes/evaluationRoutes'));
