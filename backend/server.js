@@ -102,8 +102,12 @@ app.use('/api/departments', departmentRoutes);
 const employeeRoutes = require('./src/routes/employeeRoutes');
 app.use('/api/employees', employeeRoutes);
 
+// Document routes (Block 5)
+const documentRoutes = require('./src/routes/documentRoutes');
+app.use('/api/documents', documentRoutes);
+
 // Placeholder — additional routes will be registered here as modules are built:
-// app.use('/api/documents',  require('./src/routes/documentRoutes'));
+// app.use('/api/documents',  require('./src/routes/documentRoutes')); // registered above
 // app.use('/api/tasks',      require('./src/routes/taskRoutes'));
 // app.use('/api/evaluations',require('./src/routes/evaluationRoutes'));
 // app.use('/api/reports',    require('./src/routes/reportRoutes'));

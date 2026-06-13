@@ -29,6 +29,13 @@ import EmployeeListPage   from '@/pages/hr/employees/EmployeeListPage'
 import AddEmployeePage    from '@/pages/hr/employees/AddEmployeePage'
 import EmployeeDetailPage from '@/pages/hr/employees/EmployeeDetailPage'
 
+// HR — Document review (Block 5)
+import DocumentReviewPage from '@/pages/hr/documents/DocumentReviewPage'
+
+// Employee — Document management (Block 5)
+import UploadDocumentPage from '@/pages/employee/documents/UploadDocumentPage'
+import MyDocumentsPage    from '@/pages/employee/documents/MyDocumentsPage'
+
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
   const { user, isAuthenticated, loading } = useAuth()
@@ -64,6 +71,8 @@ export default function App() {
             <Route path="/hr/employees"            element={<EmployeeListPage />} />
             <Route path="/hr/employees/add"        element={<AddEmployeePage />} />
             <Route path="/hr/employees/:id"        element={<EmployeeDetailPage />} />
+            {/* Block 5 — document review */}
+            <Route path="/hr/documents"            element={<DocumentReviewPage />} />
           </Route>
 
           {/* ── Line Manager ───────────────────────────────────────── */}
@@ -73,7 +82,10 @@ export default function App() {
 
           {/* ── New Employee ───────────────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['NEW_EMPLOYEE']} />}>
-            <Route path="/employee/dashboard" element={<EmployeeDashboard />} />
+            <Route path="/employee/dashboard"          element={<EmployeeDashboard />} />
+            {/* Block 5 — document management */}
+            <Route path="/employee/documents"          element={<MyDocumentsPage />} />
+            <Route path="/employee/documents/upload"   element={<UploadDocumentPage />} />
           </Route>
 
           {/* ── System Administrator ───────────────────────────────── */}

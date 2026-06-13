@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '@/components/shared/AppShell'
-import { getEmployees, toggleUserStatus } from '@/api/employeeApi'
+import { getEmployees, getDepartments, toggleUserStatus } from '@/api/employeeApi'
 import { UserPlus, Search, Loader2, AlertCircle } from 'lucide-react'
 
 const STATUS_BADGE = {
@@ -34,16 +34,17 @@ export default function EmployeeListPage() {
 
   useEffect(() => {
     fetchEmployees()
+    fetchDepartments()
   }, [])
 
-  // Derive unique departments from loaded employees for the filter dropdown
-  useEffect(() => {
-    const seen = new Map()
-    employees.forEach((e) => {
-      if (e.department) seen.set(e.department.department_id, e.department.name)
-    })
-    setDepartments([...seen.entries()].map(([id, name]) => ({ id, name })))
-  }, [employees])
+  const fetchDepartments = async () => {
+    try {
+      const data = await getDepartments()
+      setDepartments(data)
+    } catch {
+      // Non-critical — filter simply won't show department options
+    }
+  }
 
   useEffect(() => {
     const q = search.toLowerCase()
@@ -134,7 +135,7 @@ export default function EmployeeListPage() {
         >
           <option value="">All Departments</option>
           {departments.map((d) => (
-            <option key={d.id} value={String(d.id)}>{d.name}</option>
+            <option key={d.department_id} value={String(d.department_id)}>{d.name}</option>
           ))}
         </select>
 
