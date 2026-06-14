@@ -356,6 +356,18 @@ const submitManagerEvaluation = async (req, res) => {
       criteriaMap[c.criterion_id] = c;
     }
 
+    // FR-10: Active criteria weights must sum to exactly 100% before any
+    // evaluation can be submitted — otherwise scores are not comparable.
+    const totalCriteriaWeight = allCriteria.reduce(
+      (sum, c) => sum + parseFloat(c.weight_percent), 0
+    );
+    if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
+      return res.status(422).json({
+        success: false,
+        message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+      });
+    }
+
     // Validate all submitted scores reference active criteria
     for (const s of scores) {
       if (!criteriaMap[s.criterion_id]) {

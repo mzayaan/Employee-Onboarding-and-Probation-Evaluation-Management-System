@@ -11,6 +11,7 @@ const { Op }  = require('sequelize');
 const {
   sendOverdueTaskEmail,
   sendEvaluationReminderEmail,
+  sendPendingDocumentReminderEmail,
 } = require('../utils/mailer');
 
 // Models are loaded lazily (after sequelize.sync) so we require inside functions
@@ -184,6 +185,69 @@ const runEvaluationDeadlineReminders = async () => {
   }
 };
 
+// ── Job 3: Pending document submission reminders ──────────────────────────────
+// Finds active employees who have at least one required document type with no
+// submission at all (not even PENDING), and sends them a reminder email.
+// FR-09: "pending document submissions"
+const runPendingDocumentReminders = async () => {
+  try {
+    const {
+      EmployeeProfile,
+      DocumentType,
+      OnboardingDocument,
+      User,
+    } = require('../models');
+
+    // Load all required document types once
+    const requiredTypes = await DocumentType.findAll({
+      where: { is_required: true },
+      attributes: ['type_id', 'name'],
+    });
+    if (!requiredTypes.length) return;
+
+    // Load all active employees with their document submissions
+    const profiles = await EmployeeProfile.findAll({
+      where: { onboarding_status: 'IN_PROGRESS' },
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['email', 'first_name'],
+          where: { is_active: true },
+        },
+        {
+          model: OnboardingDocument,
+          as: 'documents',
+          attributes: ['document_type_id'],
+          required: false,
+        },
+      ],
+    });
+
+    for (const profile of profiles) {
+      const submittedTypeIds = new Set(
+        (profile.documents || []).map((d) => d.document_type_id)
+      );
+
+      // Find required types that have NO submission at all
+      const missing = requiredTypes.filter(
+        (rt) => !submittedTypeIds.has(rt.type_id)
+      );
+      if (!missing.length) continue;
+
+      await sendPendingDocumentReminderEmail({
+        to:           profile.user.email,
+        firstName:    profile.user.first_name,
+        pendingTypes: missing.map((rt) => ({ name: rt.name })),
+      });
+    }
+
+    console.log(`[Notifications] Pending document reminder job completed for ${profiles.length} profile(s) checked.`);
+  } catch (err) {
+    console.error('[Notifications] Pending document reminder job failed:', err.message);
+  }
+};
+
 // ── Register cron jobs ─────────────────────────────────────────────────────────
 // Runs every day at 08:00 server time.
 const startNotificationScheduler = () => {
@@ -191,6 +255,7 @@ const startNotificationScheduler = () => {
     console.log('[Notifications] Running daily notification jobs…');
     await runOverdueTaskNotifications();
     await runEvaluationDeadlineReminders();
+    await runPendingDocumentReminders();
   });
 
   console.log('[Notifications] Scheduler registered — daily at 08:00.');

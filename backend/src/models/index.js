@@ -26,6 +26,7 @@ const PerformanceNote     = require('./PerformanceNote');
 const GeneratedReport     = require('./GeneratedReport');
 const Notification        = require('./Notification');
 const AuditLog            = require('./AuditLog');
+const AttendanceRecord    = require('./AttendanceRecord');
 
 // =============================================================================
 // ASSOCIATIONS
@@ -389,6 +390,30 @@ AuditLog.belongsTo(User, {
   as: 'actor',
 });
 
+// ── ProbationPeriod ↔ AttendanceRecord ────────────────────────────────────
+ProbationPeriod.hasMany(AttendanceRecord, {
+  foreignKey: 'period_id',
+  as: 'attendanceRecords',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+AttendanceRecord.belongsTo(ProbationPeriod, {
+  foreignKey: 'period_id',
+  as: 'probationPeriod',
+});
+
+// ── User ↔ AttendanceRecord (recorder) ───────────────────────────────────
+User.hasMany(AttendanceRecord, {
+  foreignKey: 'recorded_by',
+  as: 'recordedAttendance',
+  onDelete: 'RESTRICT',
+  onUpdate: 'CASCADE',
+});
+AttendanceRecord.belongsTo(User, {
+  foreignKey: 'recorded_by',
+  as: 'recorder',
+});
+
 // =============================================================================
 // EXPORTS
 // =============================================================================
@@ -414,4 +439,5 @@ module.exports = {
   GeneratedReport,
   Notification,
   AuditLog,
+  AttendanceRecord,
 };

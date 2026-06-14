@@ -17,6 +17,7 @@ import ProtectedRoute             from '@/routes/ProtectedRoute'
 // Auth pages
 import LoginPage          from '@/pages/auth/LoginPage'
 import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage'
+import ResetPasswordPage  from '@/pages/auth/ResetPasswordPage'
 import UnauthorizedPage   from '@/pages/auth/UnauthorizedPage'
 
 // Role dashboards
@@ -81,13 +82,14 @@ function RootRedirect() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <Routes>
           {/* Public */}
-          <Route path="/login"           element={<LoginPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/unauthorized"    element={<UnauthorizedPage />} />
+          <Route path="/login"            element={<LoginPage />} />
+          <Route path="/forgot-password"  element={<ForgotPasswordPage />} />
+          <Route path="/reset-password"   element={<ResetPasswordPage />} />
+          <Route path="/unauthorized"     element={<UnauthorizedPage />} />
 
           {/* Root → dashboard redirect */}
           <Route path="/" element={<RootRedirect />} />

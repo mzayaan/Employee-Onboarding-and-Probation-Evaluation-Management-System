@@ -126,6 +126,10 @@ app.use('/api/evaluations', evaluationRoutes);
 const auditRoutes = require('./src/routes/auditRoutes');
 app.use('/api/audit', auditRoutes);
 
+// Attendance record routes (FR-12 — Phase 4)
+const attendanceRoutes = require('./src/routes/attendanceRoutes');
+app.use('/api/attendance', attendanceRoutes);
+
 // Placeholder — additional routes will be registered here as modules are built:
 // app.use('/api/reports',    require('./src/routes/reportRoutes'));
 // app.use('/api/notifications', require('./src/routes/notificationRoutes'));

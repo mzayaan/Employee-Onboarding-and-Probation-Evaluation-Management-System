@@ -5,7 +5,7 @@
 // =============================================================================
 
 const bcrypt    = require('bcrypt');
-const { sequelize, User, EmployeeProfile, Department, ProbationPeriod } = require('../models');
+const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint } = require('../models');
 const { createAuditLog } = require('../utils/auditLogger');
 
 const getIp = (req) =>
@@ -116,12 +116,32 @@ const createEmployee = async (req, res) => {
     }, { transaction: t });
 
     // ── Create ProbationPeriod ─────────────────────────────────────────────
-    await ProbationPeriod.create({
+    const probation = await ProbationPeriod.create({
       profile_id: profile.profile_id,
       start_date,
       end_date:   probation_end_date,
       status:     'ACTIVE',
     }, { transaction: t });
+
+    // ── Auto-create 30/60/90-day evaluation checkpoints (FR-11) ──────────
+    const startDateObj = new Date(start_date);
+    const checkpointDefs = [
+      { day_number: 30,  checkpoint_label: '30-Day Review'  },
+      { day_number: 60,  checkpoint_label: '60-Day Review'  },
+      { day_number: 90,  checkpoint_label: '90-Day Review'  },
+    ];
+    const checkpointRows = checkpointDefs.map(({ day_number, checkpoint_label }) => {
+      const due = new Date(startDateObj);
+      due.setDate(due.getDate() + day_number);
+      return {
+        period_id:        probation.period_id,
+        checkpoint_label,
+        day_number,
+        due_date:         due.toISOString().slice(0, 10),
+        status:           'PENDING',
+      };
+    });
+    await EvaluationCheckpoint.bulkCreate(checkpointRows, { transaction: t });
 
     await t.commit();
 
@@ -221,6 +241,12 @@ const getEmployee = async (req, res) => {
           model: User,
           as: 'manager',
           attributes: ['user_id', 'first_name', 'last_name', 'email'],
+        },
+        {
+          model: ProbationPeriod,
+          as: 'probationPeriods',
+          attributes: ['period_id', 'start_date', 'end_date', 'status'],
+          required: false,
         },
       ],
     });

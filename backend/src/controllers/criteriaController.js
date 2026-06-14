@@ -7,7 +7,7 @@
 
 const { EvaluationCriterion } = require('../models');
 const { Op }                   = require('sequelize');
-const logAudit                 = require('../utils/auditLogger');
+const { createAuditLog }       = require('../utils/auditLogger');
 
 // ── GET /api/criteria ─────────────────────────────────────────────────────────
 // List all criteria ordered by display_order then name.
@@ -61,13 +61,11 @@ const createCriterion = async (req, res) => {
       created_by:    req.user.user_id,
     });
 
-    await logAudit({
-      userId:     req.user.user_id,
-      actionType: 'CRITERIA_CREATED',
-      entityType: 'EvaluationCriterion',
-      entityId:   criterion.criterion_id,
-      details:    `Created criterion "${criterion.name}" with weight ${weight}%`,
-      req,
+    await createAuditLog({
+      userId:      req.user.user_id,
+      actionType:  'CRITERIA_CREATED',
+      description: `Created criterion "${criterion.name}" with weight ${weight}%.`,
+      ipAddress:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress,
     });
 
     res.status(201).json({ success: true, data: criterion });
@@ -125,13 +123,11 @@ const updateCriterion = async (req, res) => {
 
     await criterion.save();
 
-    await logAudit({
-      userId:     req.user.user_id,
-      actionType: 'CRITERIA_UPDATED',
-      entityType: 'EvaluationCriterion',
-      entityId:   criterion.criterion_id,
-      details:    `Updated criterion "${criterion.name}"`,
-      req,
+    await createAuditLog({
+      userId:      req.user.user_id,
+      actionType:  'CRITERIA_UPDATED',
+      description: `Updated criterion "${criterion.name}".`,
+      ipAddress:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress,
     });
 
     res.json({ success: true, data: criterion });
@@ -156,13 +152,11 @@ const deactivateCriterion = async (req, res) => {
     criterion.updated_at  = new Date();
     await criterion.save();
 
-    await logAudit({
-      userId:     req.user.user_id,
-      actionType: 'CRITERIA_DEACTIVATED',
-      entityType: 'EvaluationCriterion',
-      entityId:   criterion.criterion_id,
-      details:    `Deactivated criterion "${criterion.name}"`,
-      req,
+    await createAuditLog({
+      userId:      req.user.user_id,
+      actionType:  'CRITERIA_DEACTIVATED',
+      description: `Deactivated criterion "${criterion.name}".`,
+      ipAddress:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress,
     });
 
     res.json({ success: true, message: 'Criterion deactivated.' });

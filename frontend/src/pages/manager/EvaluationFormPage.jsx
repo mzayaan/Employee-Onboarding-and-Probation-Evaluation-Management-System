@@ -68,16 +68,23 @@ const fmtDate = (iso) => {
 }
 
 // ── Checkpoint history entry ──────────────────────────────────────────────────
-function HistoryEntry({ cp, currentId }) {
+function HistoryEntry({ cp, currentId, onSelect }) {
   const score = cp.managerEvaluation?.weighted_score
   const isCurrent = cp.checkpoint_id === currentId
   return (
-    <div className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-sm ${isCurrent ? 'ring-1 ring-blue-300 bg-blue-50' : 'bg-slate-50'}`}>
+    <div
+      onClick={() => !isCurrent && onSelect(cp.checkpoint_id)}
+      className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors ${
+        isCurrent
+          ? 'ring-1 ring-blue-300 bg-blue-50'
+          : 'bg-slate-50 hover:bg-slate-100 cursor-pointer'
+      }`}
+    >
       <div>
         <p className={`font-medium ${isCurrent ? 'text-blue-700' : 'text-slate-700'}`}>
           {cp.checkpoint_label}
         </p>
-        <p className="text-xs text-slate-400">{fmtDate(cp.checkpoint_date)}</p>
+        <p className="text-xs text-slate-400">{fmtDate(cp.due_date)}</p>
       </div>
       {score != null ? (
         <span
@@ -224,7 +231,7 @@ export default function EvaluationFormPage() {
           <p className="mt-1 text-sm text-slate-500">
             {employee.user?.first_name} {employee.user?.last_name} ·{' '}
             {employee.job_title || '—'} ·{' '}
-            Due {fmtDate(checkpoint.checkpoint_date)}
+            Due {fmtDate(checkpoint.due_date)}
           </p>
         )}
       </div>
@@ -376,7 +383,12 @@ export default function EvaluationFormPage() {
               <h2 className="mb-3 font-semibold text-slate-800">Checkpoint History</h2>
               <div className="space-y-2">
                 {allCheckpoints.map((cp) => (
-                  <HistoryEntry key={cp.checkpoint_id} cp={cp} currentId={checkpointIdNum} />
+                  <HistoryEntry
+                    key={cp.checkpoint_id}
+                    cp={cp}
+                    currentId={checkpointIdNum}
+                    onSelect={(id) => navigate(`/manager/evaluations/${id}`)}
+                  />
                 ))}
               </div>
             </div>

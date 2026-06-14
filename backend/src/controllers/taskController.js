@@ -161,11 +161,22 @@ const getAllAssignments = async (req, res) => {
 // =============================================================================
 // GET /api/tasks/assignments/employee/:profileId
 // HR or Manager views tasks for a specific employee.
+// Line Managers may only view assignments for employees they manage (NFR-03).
 // FR-07, FR-08 | NFR-03
 // =============================================================================
 const getAssignmentsByEmployee = async (req, res) => {
   try {
     const { profileId } = req.params;
+
+    // NFR-03: Line Managers can only view their own managed employees' tasks
+    if (req.user.role === 'LINE_MANAGER') {
+      const profile = await EmployeeProfile.findByPk(profileId, {
+        attributes: ['manager_id'],
+      });
+      if (!profile || profile.manager_id !== req.user.user_id) {
+        return res.status(403).json({ success: false, message: 'Access denied.' });
+      }
+    }
 
     const assignments = await TaskAssignment.findAll({
       where: { profile_id: profileId },

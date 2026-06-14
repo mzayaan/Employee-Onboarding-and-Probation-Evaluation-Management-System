@@ -243,7 +243,7 @@ export default function SelfAssessmentPage() {
         </h1>
         <p className="mt-1 text-sm text-slate-500">
           Rate yourself honestly on each evaluation criterion
-          {checkpoint?.checkpoint_date ? ` · Due ${fmtDate(checkpoint.checkpoint_date)}` : ''}
+          {checkpoint?.due_date ? ` · Due ${fmtDate(checkpoint.due_date)}` : ''}
         </p>
       </div>
 

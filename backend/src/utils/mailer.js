@@ -162,6 +162,61 @@ const sendEvaluationReminderEmail = async ({
   });
 };
 
+/**
+ * Remind an employee that they have required onboarding documents still pending.
+ * pendingTypes: [{ name: string }]
+ */
+const sendPendingDocumentReminderEmail = async ({ to, firstName, pendingTypes }) => {
+  const typeRows = pendingTypes
+    .map((t) => `<li style="margin:4px 0;">${t.name}</li>`)
+    .join('');
+  await sendMail({
+    to,
+    subject: 'Action required: outstanding onboarding documents',
+    html: `
+      <p>Dear ${firstName},</p>
+      <p>The following required onboarding document(s) have not yet been submitted:</p>
+      <ul style="margin:12px 0;padding-left:20px;">
+        ${typeRows}
+      </ul>
+      <p>Please log in to your HR Onboard portal and upload these documents at your earliest convenience
+      to complete your onboarding.</p>
+      <br/>
+      <p>Regards,<br/>HR Onboard Team</p>
+    `,
+  });
+};
+
+/**
+ * Send a password reset link to the user.
+ * rawToken is included in the link — the DB stores only the hashed version.
+ * FR-03 | NFR-02
+ */
+const sendPasswordResetEmail = async ({ to, firstName, rawToken }) => {
+  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${rawToken}`;
+  await sendMail({
+    to,
+    subject: 'Reset your HR Onboard password',
+    html: `
+      <p>Dear ${firstName},</p>
+      <p>We received a request to reset the password for your HR Onboard account.</p>
+      <p>Click the button below to choose a new password. This link is valid for <strong>1 hour</strong>.</p>
+      <p style="margin:24px 0;">
+        <a href="${resetUrl}"
+           style="background-color:#1e3a5f;color:#ffffff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">
+          Reset Password
+        </a>
+      </p>
+      <p style="font-size:13px;color:#6b7280;">
+        If you did not request a password reset, you can safely ignore this email.
+        Your password will not change.
+      </p>
+      <br/>
+      <p>Regards,<br/>HR Onboard Team</p>
+    `,
+  });
+};
+
 module.exports = {
   sendMail,
   sendDocumentApprovedEmail,
@@ -169,4 +224,6 @@ module.exports = {
   sendTaskAssignedEmail,
   sendOverdueTaskEmail,
   sendEvaluationReminderEmail,
+  sendPendingDocumentReminderEmail,
+  sendPasswordResetEmail,
 };

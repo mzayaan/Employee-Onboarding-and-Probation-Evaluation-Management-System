@@ -18,7 +18,7 @@ const {
 } = require('../controllers/criteriaController');
 
 // All criteria routes require authentication and SYSTEM_ADMIN role
-router.use(authenticate, authorize(['SYSTEM_ADMIN']));
+router.use(authenticate, authorize('SYSTEM_ADMIN'));
 
 router.get('/',     getCriteria);
 router.post('/',    createCriterion);
