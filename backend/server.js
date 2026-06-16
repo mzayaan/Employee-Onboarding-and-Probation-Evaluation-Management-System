@@ -132,7 +132,10 @@ app.use('/api/attendance', attendanceRoutes);
 
 // Placeholder — additional routes will be registered here as modules are built:
 // app.use('/api/reports',    require('./src/routes/reportRoutes'));
-// app.use('/api/notifications', require('./src/routes/notificationRoutes'));
+
+// Notification trigger route (FR-09 — manual test endpoint for dev/testing)
+const notificationRoutes = require('./src/routes/notificationRoutes');
+app.use('/api/notifications', notificationRoutes);
 
 // ── Notification scheduler (FR-09) ───────────────────────────────────────────
 const { startNotificationScheduler } = require('./src/services/notificationService');

@@ -261,4 +261,9 @@ const startNotificationScheduler = () => {
   console.log('[Notifications] Scheduler registered — daily at 08:00.');
 };
 
-module.exports = { startNotificationScheduler };
+module.exports = {
+  startNotificationScheduler,
+  runOverdueTaskNotifications,
+  runEvaluationDeadlineReminders,
+  runPendingDocumentReminders,
+};
