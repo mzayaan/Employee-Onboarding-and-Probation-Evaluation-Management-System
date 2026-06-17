@@ -38,3 +38,19 @@ export const getDocumentsByEmployee = (profileId) =>
 
 export const verifyDocument = (documentId, payload) =>
   api.patch(`/documents/${documentId}/verify`, payload).then((r) => r.data)
+
+/**
+ * Fetch a document file as a Blob via the authenticated axios instance,
+ * then open it in a new tab using a temporary object URL.
+ * This avoids exposing the JWT in a URL query param (NFR-02).
+ */
+export const openDocumentInTab = async (documentId) => {
+  const response = await api.get(`/documents/${documentId}/view`, {
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], { type: response.headers['content-type'] })
+  const url  = URL.createObjectURL(blob)
+  window.open(url, '_blank', 'noopener,noreferrer')
+  // Revoke after a short delay to allow the new tab to load the blob
+  setTimeout(() => URL.revokeObjectURL(url), 30000)
+}

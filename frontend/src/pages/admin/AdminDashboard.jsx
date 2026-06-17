@@ -10,7 +10,7 @@ import AppShell from '@/components/shared/AppShell'
 import { useAuth } from '@/context/AuthContext'
 import { getCriteria } from '@/api/criteriaApi'
 import {
-  Settings, ShieldCheck,
+  Settings, ShieldCheck, Users,
   ArrowRight, Loader2,
 } from 'lucide-react'
 
@@ -34,8 +34,14 @@ export default function AdminDashboard() {
     .reduce((sum, c) => sum + parseFloat(c.weight_percent), 0)
   const weightValid = Math.abs(totalWeight - 100) < 0.01
 
-  // User Management and Notifications links removed — pages not yet built
   const QUICK_LINKS = [
+    {
+      label:   'User Management',
+      subtext: 'View, activate or deactivate user accounts',
+      icon:    Users,
+      color:   '#7c3aed',
+      to:      '/admin/users',
+    },
     {
       label:   'Criteria Config',
       subtext: loading
@@ -67,7 +73,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Quick-action cards */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {QUICK_LINKS.map(({ label, subtext, icon: Icon, color, to }) => (
           <button
             key={label}

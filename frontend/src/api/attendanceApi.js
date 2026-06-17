@@ -18,3 +18,19 @@ export const addAttendanceRecord = (data) =>
  */
 export const getAttendanceByPeriod = (periodId) =>
   api.get(`/attendance/period/${periodId}`).then((r) => r.data.data)
+
+/**
+ * Get an aggregated attendance summary for a probation period.
+ * Optionally scoped to a date window.
+ * @param {number} periodId
+ * @param {{ from?: string, to?: string }} params
+ */
+export const getAttendanceSummary = (periodId, params = {}) => {
+  const query = new URLSearchParams()
+  if (params.from) query.set('from', params.from)
+  if (params.to)   query.set('to',   params.to)
+  const qs = query.toString()
+  return api
+    .get(`/attendance/period/${periodId}/summary${qs ? `?${qs}` : ''}`)
+    .then((r) => r.data.data)
+}

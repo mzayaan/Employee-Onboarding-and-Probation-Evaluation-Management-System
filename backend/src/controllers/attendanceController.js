@@ -5,6 +5,7 @@
 // FR-12 | NFR-02, NFR-03 | Objective 2
 // =============================================================================
 
+const { Op }                                                       = require('sequelize');
 const { AttendanceRecord, ProbationPeriod, EmployeeProfile, User } = require('../models');
 const { createAuditLog } = require('../utils/auditLogger');
 
@@ -121,4 +122,63 @@ const getAttendanceByPeriod = async (req, res) => {
   }
 };
 
-module.exports = { addAttendanceRecord, getAttendanceByPeriod };
+// =============================================================================
+// GET /api/attendance/period/:periodId/summary?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Returns an aggregated count summary (present / absent / late / half-day)
+// for a probation period, optionally filtered to a date window.
+// HR Admin and Line Manager access only.
+// FR-12 | NFR-03
+// =============================================================================
+const getAttendanceSummary = async (req, res) => {
+  try {
+    const { periodId }    = req.params;
+    const { from, to }    = req.query;
+
+    const probation = await ProbationPeriod.findByPk(periodId, {
+      include: [{ model: EmployeeProfile, as: 'employeeProfile' }],
+    });
+    if (!probation) {
+      return res.status(404).json({ success: false, message: 'Probation period not found.' });
+    }
+
+    // Line Manager restriction (NFR-03)
+    if (req.user.role === 'LINE_MANAGER') {
+      const profile = probation.employeeProfile;
+      if (!profile || profile.manager_id !== req.user.user_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'You may only view attendance for employees you manage.',
+        });
+      }
+    }
+
+    // Build optional date filter
+    const where = { period_id: periodId };
+    if (from && to) {
+      where.record_date = { [Op.between]: [from, to] };
+    } else if (from) {
+      where.record_date = { [Op.gte]: from };
+    } else if (to) {
+      where.record_date = { [Op.lte]: to };
+    }
+
+    const records = await AttendanceRecord.findAll({ where });
+
+    const summary = {
+      total_records: records.length,
+      days_present:  records.filter((r) => r.status === 'PRESENT').length,
+      days_absent:   records.filter((r) => r.status === 'ABSENT').length,
+      late_arrivals: records.filter((r) => r.status === 'LATE').length,
+      half_days:     records.filter((r) => r.status === 'HALF_DAY').length,
+      from_date:     from || null,
+      to_date:       to   || null,
+    };
+
+    return res.json({ success: true, data: summary });
+  } catch (error) {
+    console.error('[attendanceController.getAttendanceSummary]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve attendance summary.' });
+  }
+};
+
+module.exports = { addAttendanceRecord, getAttendanceByPeriod, getAttendanceSummary };

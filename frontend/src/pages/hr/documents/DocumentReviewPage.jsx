@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react'
 import AppShell from '@/components/shared/AppShell'
-import { getAllDocuments, verifyDocument } from '@/api/documentApi'
+import { getAllDocuments, verifyDocument, openDocumentInTab } from '@/api/documentApi'
 import {
   FileText, CheckCircle, XCircle, Clock,
   Loader2, AlertCircle, ExternalLink,
@@ -180,7 +180,7 @@ export default function DocumentReviewPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-slate-800 truncate">
-                        {employee?.first_name} {employee?.last_name}
+                        {employee?.user?.first_name} {employee?.user?.last_name}
                       </p>
                       <p className="text-xs text-slate-500 truncate">{doc.documentType?.name}</p>
                       <p className="mt-0.5 text-xs text-slate-400">{formatDate(doc.uploaded_at)}</p>
@@ -217,7 +217,7 @@ export default function DocumentReviewPage() {
                     <p className="mt-0.5 text-sm text-slate-500">
                       Submitted by{' '}
                       <strong className="text-slate-700">
-                        {selected.employeeProfile?.first_name} {selected.employeeProfile?.last_name}
+                        {selected.employeeProfile?.user?.first_name} {selected.employeeProfile?.user?.last_name}
                       </strong>
                       {selected.employeeProfile?.job_title && ` — ${selected.employeeProfile.job_title}`}
                     </p>
@@ -243,15 +243,14 @@ export default function DocumentReviewPage() {
                     <p className="text-xs font-medium text-slate-700">{selected.original_filename}</p>
                     <p className="text-xs text-slate-400 mt-0.5">Uploaded {formatDate(selected.uploaded_at)}</p>
                   </div>
-                  <a
-                    href={`http://localhost:5000/api/documents/${selected.document_id}/view?token=${localStorage.getItem('token')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => openDocumentInTab(selected.document_id)}
                     className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-blue-600 hover:bg-blue-50 ring-1 ring-blue-200 bg-white"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     Open File
-                  </a>
+                  </button>
                 </div>
 
                 {/* Existing feedback if rejected */}

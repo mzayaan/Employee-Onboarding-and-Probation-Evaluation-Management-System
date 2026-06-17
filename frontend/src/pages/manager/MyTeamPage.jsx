@@ -49,7 +49,7 @@ const isPast = (date) => date && new Date(date) < new Date()
 // Derive status from checkpoints
 const deriveStatus = (checkpoints = []) => {
   if (checkpoints.some((c) => c.status === 'OVERDUE'))  return 'OVERDUE'
-  if (checkpoints.some((c) => c.status === 'PENDING' && isPast(c.checkpoint_date))) return 'AT_RISK'
+  if (checkpoints.some((c) => c.status === 'PENDING' && isPast(c.due_date))) return 'AT_RISK'
   return 'ON_TRACK'
 }
 

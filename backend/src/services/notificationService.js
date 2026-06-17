@@ -26,6 +26,28 @@ const daysUntil = (targetDate) => {
   return Math.round((target - today) / (1000 * 60 * 60 * 24));
 };
 
+
+// ── createNotification ────────────────────────────────────────────────────────
+// Saves an in-app notification record.
+// Call this from any controller when a significant event occurs.
+// FR-09 | Objective 1 & 2
+const createNotification = async ({ userId, type, message, relatedEntityType = null, relatedEntityId = null }) => {
+  try {
+    const { Notification } = require('../models');
+    await Notification.create({
+      user_id:             userId,
+      type,
+      message,
+      related_entity_type: relatedEntityType,
+      related_entity_id:   relatedEntityId,
+      is_read:             false,
+    });
+  } catch (err) {
+    // Non-fatal — log and continue
+    console.error('[notificationService.createNotification]', err.message);
+  }
+};
+
 // ── Job 1: Overdue task notifications ─────────────────────────────────────────
 // Finds all task assignments whose due_date is in the past and status is not
 // COMPLETED, groups them by assigned employee and sends one summary email each.
@@ -94,6 +116,18 @@ const runOverdueTaskNotifications = async () => {
     // Send one email per employee
     for (const { email, firstName, tasks } of Object.values(byEmployee)) {
       await sendOverdueTaskEmail({ to: email, firstName, tasks });
+
+      // Also create in-app notification record
+      const { User } = require('../models');
+      const userRecord = await User.findOne({ where: { email }, attributes: ['user_id'] });
+      if (userRecord) {
+        await createNotification({
+          userId:  userRecord.user_id,
+          type:    'TASK_OVERDUE',
+          message: `You have ${tasks.length} overdue task${tasks.length > 1 ? 's' : ''}. Please complete them as soon as possible.`,
+          relatedEntityType: 'task',
+        });
+      }
     }
 
     console.log(`[Notifications] Overdue task emails sent to ${Object.keys(byEmployee).length} employee(s).`);
@@ -171,10 +205,23 @@ const runEvaluationDeadlineReminders = async () => {
         to:               manager.email,
         managerFirstName: manager.first_name,
         employeeFullName,
-        checkpointLabel:  checkpoint.checkpoint_label,   // correct field name
+        checkpointLabel:  checkpoint.checkpoint_label,
         dueDate:          checkpoint.due_date,
         daysUntilDue:     days,
       });
+
+      // Also create in-app notification record for the manager
+      const { User } = require('../models');
+      const managerRecord = await User.findOne({ where: { email: manager.email }, attributes: ['user_id'] });
+      if (managerRecord) {
+        await createNotification({
+          userId:  managerRecord.user_id,
+          type:    'EVAL_DUE',
+          message: `Evaluation due in ${days} day${days !== 1 ? 's' : ''}: ${checkpoint.checkpoint_label} for ${employeeFullName}.`,
+          relatedEntityType: 'checkpoint',
+          relatedEntityId:   checkpoint.checkpoint_id,
+        });
+      }
     }
 
     if (checkpoints.length) {
@@ -185,7 +232,34 @@ const runEvaluationDeadlineReminders = async () => {
   }
 };
 
-// ── Job 3: Pending document submission reminders ──────────────────────────────
+// ── Job 3: Flip overdue evaluation checkpoints ────────────────────────────────
+// Any PENDING checkpoint whose due_date has passed is promoted to OVERDUE.
+// FR-17/BUG-05 — runs daily before notification jobs so email counts are accurate.
+const runFlipOverdueCheckpoints = async () => {
+  try {
+    const { EvaluationCheckpoint } = require('../models');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [affectedCount] = await EvaluationCheckpoint.update(
+      { status: 'OVERDUE' },
+      {
+        where: {
+          status:   'PENDING',
+          due_date: { [Op.lt]: today },
+        },
+      }
+    );
+
+    if (affectedCount > 0) {
+      console.log(`[Notifications] ${affectedCount} checkpoint(s) flipped PENDING → OVERDUE.`);
+    }
+  } catch (err) {
+    console.error('[Notifications] Flip-overdue-checkpoints job failed:', err.message);
+  }
+};
+
+// ── Job 4: Pending document submission reminders ──────────────────────────────
 // Finds active employees who have at least one required document type with no
 // submission at all (not even PENDING), and sends them a reminder email.
 // FR-09: "pending document submissions"
@@ -250,9 +324,11 @@ const runPendingDocumentReminders = async () => {
 
 // ── Register cron jobs ─────────────────────────────────────────────────────────
 // Runs every day at 08:00 server time.
+// Order: flip overdue first so that emails reflect correct OVERDUE counts.
 const startNotificationScheduler = () => {
   cron.schedule('0 8 * * *', async () => {
     console.log('[Notifications] Running daily notification jobs…');
+    await runFlipOverdueCheckpoints();       // must run first — FR-17/BUG-05
     await runOverdueTaskNotifications();
     await runEvaluationDeadlineReminders();
     await runPendingDocumentReminders();
@@ -262,7 +338,9 @@ const startNotificationScheduler = () => {
 };
 
 module.exports = {
+  createNotification,
   startNotificationScheduler,
+  runFlipOverdueCheckpoints,
   runOverdueTaskNotifications,
   runEvaluationDeadlineReminders,
   runPendingDocumentReminders,

@@ -21,27 +21,46 @@ const AuditLog = sequelize.define('AuditLog', {
   },
   action_type: {
     type: DataTypes.ENUM(
+      // Auth
       'USER_CREATED',
       'USER_DEACTIVATED',
       'LOGIN',
       'LOGOUT',
       'PASSWORD_RESET',
+      'PASSWORD_RESET_REQUESTED',
+      'PASSWORD_RESET_COMPLETED',
+      'PASSWORD_CHANGED',
+      // Employee
       'EMPLOYEE_CREATED',
       'EMPLOYEE_UPDATED',
+      // Documents
       'DOCUMENT_UPLOAD',
       'DOCUMENT_APPROVED',
       'DOCUMENT_REJECTED',
+      // Tasks
       'TASK_ASSIGNED',
       'TASK_STATUS_UPDATED',
       'TASK_COMPLETED',
       'TASK_DELETED',
+      // Evaluation
       'EVALUATION_SUBMITTED',
       'SELF_ASSESSMENT_SUBMITTED',
       'RECOMMENDATION_GENERATED',
+      // Reports
       'PDF_GENERATED',
+      'REPORT_GENERATED',
+      // Criteria
       'CRITERIA_UPDATED',
+      'CRITERIA_CREATED',
+      'CRITERIA_DEACTIVATED',
+      // Probation
       'PROBATION_PERIOD_CREATED',
-      'PROBATION_STATUS_CHANGED'
+      'PROBATION_STATUS_CHANGED',
+      // Attendance
+      'ATTENDANCE_RECORDED',
+      // Department
+      'CREATE_DEPARTMENT',
+      'UPDATE_DEPARTMENT'
     ),
     allowNull: false,
   },

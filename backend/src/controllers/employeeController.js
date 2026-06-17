@@ -6,7 +6,9 @@
 
 const bcrypt    = require('bcrypt');
 const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint } = require('../models');
-const { createAuditLog } = require('../utils/auditLogger');
+const { createAuditLog }                                    = require('../utils/auditLogger');
+const { validatePasswordStrength }                          = require('../utils/passwordValidator');
+const { sendWelcomeEmail, sendManagerAssignmentEmail }      = require('../utils/mailer');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -33,6 +35,9 @@ const createEmployee = async (req, res) => {
       phone,
       start_date,
       probation_end_date,
+      // Optional: custom checkpoint schedule for NEW_EMPLOYEE (FR-11)
+      // Defaults to [30, 60, 90] when not provided.
+      checkpoint_days,
     } = req.body;
 
     // ── Validation ─────────────────────────────────────────────────────────
@@ -58,7 +63,10 @@ const createEmployee = async (req, res) => {
       });
     }
 
-    const allowedRoles = ['NEW_EMPLOYEE', 'LINE_MANAGER', 'HR_ADMIN'];
+    // FR-01: HR can create accounts for all non-SYSTEM_ADMIN roles.
+    // SYSTEM_ADMIN is included here so that HR (or a SYSTEM_ADMIN themselves)
+    // can provision additional SYSTEM_ADMIN accounts if required.
+    const allowedRoles = ['NEW_EMPLOYEE', 'LINE_MANAGER', 'HR_ADMIN', 'SYSTEM_ADMIN'];
     if (!allowedRoles.includes(role)) {
       await t.rollback();
       return res.status(400).json({
@@ -67,9 +75,10 @@ const createEmployee = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    const pwCheck = validatePasswordStrength(password);
+    if (!pwCheck.valid) {
       await t.rollback();
-      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+      return res.status(400).json({ success: false, message: pwCheck.message });
     }
 
     // Date validation — only required for NEW_EMPLOYEE
@@ -126,6 +135,11 @@ const createEmployee = async (req, res) => {
     // Line Managers and HR Admins are existing staff members who need system
     // access. They are not probationary employees and must not be assigned a
     // probation period or evaluation checkpoints. (FR-11, FR-14)
+    //
+    // capturedCheckpoints is declared here so it is accessible after commit
+    // for the manager assignment email (FR-11 / Task #31).
+    let capturedCheckpoints = [];
+
     if (role === 'NEW_EMPLOYEE') {
       const probation = await ProbationPeriod.create({
         profile_id: profile.profile_id,
@@ -134,28 +148,72 @@ const createEmployee = async (req, res) => {
         status:     'ACTIVE',
       }, { transaction: t });
 
-      // Auto-create 30/60/90-day evaluation checkpoints (FR-11)
+      // Build evaluation checkpoint schedule (FR-11)
+      // HR may supply a custom array of day numbers; default is [30, 60, 90].
+      let scheduleDays = [30, 60, 90];
+      if (Array.isArray(checkpoint_days) && checkpoint_days.length > 0) {
+        const parsed = checkpoint_days.map(Number).filter((d) => Number.isInteger(d) && d > 0);
+        if (parsed.length === 0) {
+          await t.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'checkpoint_days must be a non-empty array of positive integers.',
+          });
+        }
+        scheduleDays = [...new Set(parsed)].sort((a, b) => a - b); // dedup + sort ascending
+      }
+
       const startDateObj = new Date(start_date);
-      const checkpointDefs = [
-        { day_number: 30, checkpoint_label: '30-Day Review' },
-        { day_number: 60, checkpoint_label: '60-Day Review' },
-        { day_number: 90, checkpoint_label: '90-Day Review' },
-      ];
-      const checkpointRows = checkpointDefs.map(({ day_number, checkpoint_label }) => {
+      const checkpointRows = scheduleDays.map((day_number) => {
         const due = new Date(startDateObj);
         due.setDate(due.getDate() + day_number);
         return {
           period_id:        probation.period_id,
-          checkpoint_label,
+          checkpoint_label: `Day-${day_number} Review`,
           day_number,
           due_date:         due.toISOString().slice(0, 10),
           status:           'PENDING',
         };
       });
       await EvaluationCheckpoint.bulkCreate(checkpointRows, { transaction: t });
+
+      // Capture for post-commit manager email
+      capturedCheckpoints = checkpointRows;
     }
 
     await t.commit();
+
+    // ── Post-commit email notifications (fire-and-forget — non-critical) ───
+    if (role === 'NEW_EMPLOYEE') {
+      // FR-09 / Task #30: Welcome email includes the temporary password so the
+      // employee knows their initial credentials and is prompted to change them.
+      sendWelcomeEmail({
+        to:                newUser.email,
+        firstName:         newUser.first_name,
+        temporaryPassword: password,  // plain-text from req.body, only in memory
+      }).catch(() => {});
+
+      // FR-11 / Task #31: Notify the assigned line manager about their new team
+      // member and the evaluation checkpoint schedule.
+      if (manager_id && capturedCheckpoints.length > 0) {
+        User.findByPk(manager_id, { attributes: ['email', 'first_name'] })
+          .then((mgr) => {
+            if (!mgr) return;
+            return sendManagerAssignmentEmail({
+              to:               mgr.email,
+              managerFirstName: mgr.first_name,
+              employeeFullName: `${newUser.first_name} ${newUser.last_name}`,
+              jobTitle:         job_title,
+              startDate:        start_date,
+              checkpoints:      capturedCheckpoints.map((cp) => ({
+                label:    cp.checkpoint_label,
+                due_date: cp.due_date,
+              })),
+            });
+          })
+          .catch(() => {});
+      }
+    }
 
     // ── Audit log ──────────────────────────────────────────────────────────
     await createAuditLog({
@@ -214,6 +272,12 @@ const listEmployees = async (req, res) => {
           model: User,
           as: 'manager',
           attributes: ['user_id', 'first_name', 'last_name', 'email'],
+        },
+        {
+          model: ProbationPeriod,
+          as: 'probationPeriods',
+          attributes: ['period_id', 'start_date', 'end_date', 'status'],
+          required: false,
         },
       ],
       order: [['created_at', 'DESC']],
@@ -317,15 +381,18 @@ const updateEmployeeProfile = async (req, res) => {
       }
     }
 
+    // Use explicit undefined checks so that intentional null values (e.g.
+    // unsetting a manager) are preserved instead of falling back to the
+    // existing value. The ?? operator would swallow null and prevent clearing.
     await profile.update({
-      job_title:         job_title?.trim()       ?? profile.job_title,
-      department_id:     department_id            ?? profile.department_id,
-      manager_id:        manager_id               ?? profile.manager_id,
-      phone:             phone?.trim()            ?? profile.phone,
-      start_date:        start_date               ?? profile.start_date,
-      probation_end_date: probation_end_date      ?? profile.probation_end_date,
-      onboarding_status: onboarding_status        ?? profile.onboarding_status,
-      updated_at:        new Date(),
+      job_title:          job_title         !== undefined ? job_title?.trim()       : profile.job_title,
+      department_id:      department_id     !== undefined ? department_id            : profile.department_id,
+      manager_id:         manager_id        !== undefined ? manager_id               : profile.manager_id,
+      phone:              phone             !== undefined ? phone?.trim()            : profile.phone,
+      start_date:         start_date        !== undefined ? start_date               : profile.start_date,
+      probation_end_date: probation_end_date !== undefined ? probation_end_date      : profile.probation_end_date,
+      onboarding_status:  onboarding_status !== undefined ? onboarding_status        : profile.onboarding_status,
+      updated_at:         new Date(),
     });
 
     await createAuditLog({
@@ -342,67 +409,91 @@ const updateEmployeeProfile = async (req, res) => {
   }
 };
 
+// =
 // =============================================================================
-// PATCH /api/employees/:userId/status
-// Activates or deactivates a user account. HR_ADMIN only.
-// FR-01 | NFR-03
+// PATCH /api/employees/:id/toggle-status
+// HR Admin activates or deactivates a user account.
+// FR-01, FR-18 | NFR-03
 // =============================================================================
 const toggleUserStatus = async (req, res) => {
   try {
-    const { userId } = req.params;
-    const { is_active } = req.body;
+    const { id } = req.params;
 
-    if (typeof is_active !== 'boolean') {
-      return res.status(400).json({ success: false, message: 'is_active must be a boolean.' });
-    }
-
-    const user = await User.findByPk(userId);
+    const user = await User.findByPk(id, { attributes: ['user_id', 'is_active', 'role', 'first_name', 'last_name'] });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    // HR cannot deactivate their own account
-    if (user.user_id === req.user.user_id) {
-      return res.status(400).json({ success: false, message: 'You cannot change your own account status.' });
+    // Prevent deactivating SYSTEM_ADMIN accounts
+    if (user.role === 'SYSTEM_ADMIN') {
+      return res.status(403).json({ success: false, message: 'System Administrator accounts cannot be deactivated.' });
     }
 
-    await user.update({ is_active, updated_at: new Date() });
+    const newStatus = !user.is_active;
+    await user.update({ is_active: newStatus });
 
+    const { createAuditLog } = require('../utils/auditLogger');
     await createAuditLog({
       userId:      req.user.user_id,
-      actionType:  is_active ? 'ACTIVATE_USER' : 'DEACTIVATE_USER',
-      description: `User ${user.email} ${is_active ? 'activated' : 'deactivated'}.`,
-      ipAddress:   getIp(req),
+      actionType:  newStatus ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
+      description: `User ${user.first_name} ${user.last_name} (ID: ${id}) ${newStatus ? 'activated' : 'deactivated'} by HR.`,
+      ipAddress:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress,
     });
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      message: `User account ${is_active ? 'activated' : 'deactivated'}.`,
+      message: `User account ${newStatus ? 'activated' : 'deactivated'} successfully.`,
+      data: { user_id: user.user_id, is_active: newStatus },
     });
   } catch (error) {
     console.error('[employeeController.toggleUserStatus]', error.message);
-    return res.status(500).json({ success: false, message: 'Failed to update user status.' });
+    return res.status(500).json({ success: false, message: 'Failed to toggle user status.' });
   }
 };
 
 // =============================================================================
 // GET /api/employees/managers
-// Returns all LINE_MANAGER users for the manager dropdown. HR_ADMIN only.
-// FR-04
+// Returns all active LINE_MANAGER accounts — used when creating employee profiles.
+// FR-04 | NFR-03
 // =============================================================================
 const listManagers = async (req, res) => {
   try {
     const managers = await User.findAll({
       where: { role: 'LINE_MANAGER', is_active: true },
       attributes: ['user_id', 'first_name', 'last_name', 'email'],
-      order: [['last_name', 'ASC']],
+      order: [['first_name', 'ASC'], ['last_name', 'ASC']],
     });
-    return res.status(200).json({ success: true, data: managers });
+
+    return res.json({ success: true, data: managers });
   } catch (error) {
     console.error('[employeeController.listManagers]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve managers.' });
   }
 };
+
+// =============================================================================
+// GET /api/employees/all-users
+// SYSTEM_ADMIN: list every user in the system for the User Management page.
+// FR-01 | NFR-03
+// =============================================================================
+const listAllUsers = async (req, res) => {
+  try {
+    const users = await User.findAll({
+      attributes: ['user_id', 'first_name', 'last_name', 'email', 'role', 'is_active', 'created_at'],
+      order: [['created_at', 'DESC']],
+    });
+
+    return res.json({ success: true, data: users });
+  } catch (error) {
+    console.error('[employeeController.listAllUsers]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve users.' });
+  }
+};
+
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
 
 module.exports = {
   createEmployee,
@@ -411,4 +502,5 @@ module.exports = {
   updateEmployeeProfile,
   toggleUserStatus,
   listManagers,
+  listAllUsers,
 };

@@ -8,6 +8,7 @@ const { Op } = require('sequelize')
 const {
   EmployeeProfile,
   ProbationPeriod,
+  EvaluationCheckpoint,
   OnboardingDocument,
   TaskAssignment,
   User,
@@ -21,20 +22,39 @@ const {
 // =============================================================================
 const getDashboardStats = async (req, res) => {
   try {
-    const today = new Date()
+    const today   = new Date()
+    const in7Days = new Date(today)
+    in7Days.setDate(today.getDate() + 7)
 
-    const [totalEmployees, pendingDocuments, activeProbations, overdueTasks] =
-      await Promise.all([
-        EmployeeProfile.count(),
-        OnboardingDocument.count({ where: { status: 'PENDING' } }),
-        ProbationPeriod.count({ where: { status: 'ACTIVE' } }),
-        TaskAssignment.count({
-          where: {
-            status: { [Op.ne]: 'COMPLETED' },
-            due_date: { [Op.lt]: today },
-          },
-        }),
-      ])
+    const [
+      totalEmployees,
+      pendingDocuments,
+      activeProbations,
+      overdueTasks,
+      upcomingEvaluations,
+      overdueEvaluations,
+    ] = await Promise.all([
+      EmployeeProfile.count(),
+      OnboardingDocument.count({ where: { status: 'PENDING' } }),
+      ProbationPeriod.count({ where: { status: 'ACTIVE' } }),
+      TaskAssignment.count({
+        where: {
+          status: { [Op.ne]: 'COMPLETED' },
+          due_date: { [Op.lt]: today },
+        },
+      }),
+      // Upcoming evaluations: PENDING checkpoints with due_date in the next 7 days (FR-17)
+      EvaluationCheckpoint.count({
+        where: {
+          status:   'PENDING',
+          due_date: { [Op.between]: [today, in7Days] },
+        },
+      }),
+      // Overdue evaluations: checkpoints already marked OVERDUE (FR-17)
+      EvaluationCheckpoint.count({
+        where: { status: 'OVERDUE' },
+      }),
+    ])
 
     return res.json({
       success: true,
@@ -43,6 +63,8 @@ const getDashboardStats = async (req, res) => {
         pendingDocuments,
         activeProbations,
         overdueTasks,
+        upcomingEvaluations,
+        overdueEvaluations,
       },
     })
   } catch (error) {
@@ -80,11 +102,13 @@ const getOnboardingProgress = async (req, res) => {
           model: TaskAssignment,
           as: 'taskAssignments',
           attributes: ['status', 'due_date'],
+          required: false,
         },
         {
           model: OnboardingDocument,
           as: 'documents',
           attributes: ['status'],
+          required: false,
         },
         {
           model: ProbationPeriod,
@@ -93,7 +117,10 @@ const getOnboardingProgress = async (req, res) => {
           required: false,
         },
       ],
-      order: [['created_at', 'DESC']],
+      // Use profile_id (auto-increment PK) for ordering — fully unambiguous across
+      // all joined tables. Avoids MySQL ambiguous-column errors caused by
+      // task_assignments and probation_periods both defining their own created_at.
+      order: [['profile_id', 'DESC']],
     })
 
     const today = new Date()
@@ -207,11 +234,19 @@ const getMyProgress = async (req, res) => {
         probation_days_left: probationDaysLeft,
         probation_status:    prob?.status || null,
       },
-    })
+    });
   } catch (error) {
-    console.error('[dashboardController.getMyProgress]', error.message)
-    return res.status(500).json({ success: false, message: 'Failed to load progress.' })
+    console.error('[dashboardController.getMyProgress]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve progress data.' });
   }
-}
+};
 
-module.exports = { getDashboardStats, getOnboardingProgress, getMyProgress }
+// =============================================================================
+// EXPORTS
+// =============================================================================
+
+module.exports = {
+  getDashboardStats,
+  getOnboardingProgress,
+  getMyProgress,
+};

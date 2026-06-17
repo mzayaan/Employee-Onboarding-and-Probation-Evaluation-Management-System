@@ -12,6 +12,7 @@ import { useAuth } from '@/context/AuthContext'
 import { getEmployee, updateEmployeeProfile, getDepartments, getManagers } from '@/api/employeeApi'
 import { addAttendanceRecord, getAttendanceByPeriod } from '@/api/attendanceApi'
 import { getProbationByProfile } from '@/api/evaluationApi'
+import { downloadReport } from '@/api/reportApi'
 import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X, ClipboardList, PlusCircle, BarChart3 } from 'lucide-react'
 
 // ── Attendance status display config ──────────────────────────────────────────
@@ -331,9 +332,11 @@ export default function EmployeeDetailPage() {
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState(null)
   const [editing,     setEditing]     = useState(false)
-  const [saving,      setSaving]      = useState(false)
-  const [saveError,   setSaveError]   = useState('')
-  const [saveSuccess, setSaveSuccess] = useState(false)
+  const [saving,       setSaving]       = useState(false)
+  const [saveError,    setSaveError]    = useState('')
+  const [saveSuccess,  setSaveSuccess]  = useState(false)
+  const [downloading,  setDownloading]  = useState(false)
+  const [reportError,  setReportError]  = useState('')
 
   const [form, setForm] = useState({
     job_title: '', department_id: '', manager_id: '', phone: '',
@@ -391,6 +394,36 @@ export default function EmployeeDetailPage() {
     }
   }
 
+  // FR-16: Download PDF evaluation report for the active probation period
+  const handleDownloadReport = async () => {
+    setReportError('')
+    // Find the active (or most recent) probation period
+    const periods = employee?.probationPeriods || []
+    const activePeriod = periods.find((p) => p.status === 'ACTIVE') || periods[periods.length - 1]
+    if (!activePeriod) {
+      setReportError('No probation period found for this employee.')
+      return
+    }
+    setDownloading(true)
+    try {
+      const blob = await downloadReport(activePeriod.period_id)
+      // Create a temporary anchor element to trigger the browser download
+      const url  = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href     = url
+      link.download = `probation-report-${employee.user?.first_name}-${employee.user?.last_name}-${new Date().toISOString().slice(0, 10)}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to generate PDF report. Ensure at least one checkpoint has been completed.'
+      setReportError(msg)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   if (loading) {
     return (
       <AppShell>
@@ -429,11 +462,13 @@ export default function EmployeeDetailPage() {
         </button>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.open(`http://localhost:5000/api/employees/${id}/report?token=${localStorage.getItem('token')}`, '_blank')}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            onClick={handleDownloadReport}
+            disabled={downloading}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           >
-            <FileDown className="h-4 w-4" />
-            Generate PDF Report
+            {downloading
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating…</>
+              : <><FileDown className="h-4 w-4" /> Generate PDF Report</>}
           </button>
           {/* Edit Profile — HR Admin only; managers have read-only access */}
           {!isManager && (
@@ -510,6 +545,14 @@ export default function EmployeeDetailPage() {
       {saveSuccess && (
         <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700 ring-1 ring-green-200">
           Profile updated successfully.
+        </div>
+      )}
+
+      {/* PDF report error banner (FR-16) */}
+      {reportError && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <span>{reportError}</span>
         </div>
       )}
 

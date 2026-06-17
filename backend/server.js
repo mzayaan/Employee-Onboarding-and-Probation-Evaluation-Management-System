@@ -40,24 +40,42 @@ app.use(cors({
   credentials: true,
 }));
 
-// Global rate limiter — 200 requests per 15 minutes per IP (NFR-01, NFR-02)
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many requests. Please try again later.' },
-});
-app.use(globalLimiter);
+// Global rate limiter — applied in production only (NFR-01, NFR-02).
+// In development all browser requests share the same localhost IP, so a strict
+// per-IP window would be exhausted within minutes of normal testing.
+// The auth-specific limiter (10 attempts / 15 min on /login) remains active
+// in all environments as the primary brute-force protection.
+if (process.env.NODE_ENV === 'production') {
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15-minute rolling window
+    max:      200,             // 200 requests per IP per window
+    standardHeaders: true,
+    legacyHeaders:   false,
+    message: { success: false, message: 'Too many requests. Please try again later.' },
+  });
+  app.use(globalLimiter);
+}
 
-// Tighter rate limit for auth endpoints — 20 attempts per 15 minutes per IP
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many login attempts. Please try again later.' },
-});
+// Auth-specific rate limiting is handled at the route level inside authRoutes.js
+// (10 attempts / 15-minute window on /login and /forgot-password).
+// No separate limiter is needed here.
+
+// =============================================================================
+// RESPONSE-TIME LOGGING MIDDLEWARE (NFR-01)
+// Logs method, path, status code and response time for every request.
+// Only active in development to avoid log verbosity in production.
+// =============================================================================
+
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - start;
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+    });
+    next();
+  });
+}
 
 // =============================================================================
 // BODY PARSING MIDDLEWARE
@@ -91,8 +109,11 @@ app.get('/api/health', async (req, res) => {
 });
 
 // Auth routes (Block 2)
+// NOTE: authLimiter is NOT applied here — authRoutes.js already applies a
+// stricter per-route limiter (10/15 min) to /login and /forgot-password.
+// Adding it here would double-count requests against the window counter.
 const authRoutes = require('./src/routes/authRoutes');
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', authRoutes);
 
 // Department routes (Block 4)
 const departmentRoutes = require('./src/routes/departmentRoutes');
@@ -130,8 +151,9 @@ app.use('/api/audit', auditRoutes);
 const attendanceRoutes = require('./src/routes/attendanceRoutes');
 app.use('/api/attendance', attendanceRoutes);
 
-// Placeholder — additional routes will be registered here as modules are built:
-// app.use('/api/reports',    require('./src/routes/reportRoutes'));
+// PDF evaluation report routes (FR-15, FR-16 — Phase 5)
+const pdfRoutes = require('./src/routes/pdfRoutes');
+app.use('/api/reports', pdfRoutes);
 
 // Notification trigger route (FR-09 — manual test endpoint for dev/testing)
 const notificationRoutes = require('./src/routes/notificationRoutes');
@@ -169,7 +191,6 @@ app.use((err, req, res, next) => {
 
 const startServer = async () => {
   try {
-    // Verify DB connection without altering any tables
     await sequelize.authenticate();
     console.log('[DB] MySQL connection established successfully.');
 

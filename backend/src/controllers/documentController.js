@@ -16,6 +16,7 @@ const {
 const { uploadToCloudinary, deleteFromCloudinary, getSignedUrl } = require('../utils/cloudinary');
 const { sendDocumentApprovedEmail, sendDocumentRejectedEmail } = require('../utils/mailer');
 const { createAuditLog } = require('../utils/auditLogger');
+const { createNotification } = require('../services/notificationService');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -180,7 +181,7 @@ const getAllDocuments = async (req, res) => {
         {
           model: EmployeeProfile,
           as: 'employeeProfile',
-          attributes: ['profile_id'],
+          attributes: ['profile_id', 'job_title'],
           include: [
             {
               model: User,
@@ -309,6 +310,18 @@ const verifyDocument = async (req, res) => {
           feedback:         feedback.trim(),
         });
       }
+      // In-app notification for the employee
+      if (employee) {
+        await createNotification({
+          userId:  employee.user_id,
+          type:    status === 'APPROVED' ? 'DOCUMENT_APPROVED' : 'DOCUMENT_REJECTED',
+          message: status === 'APPROVED'
+            ? `Your document "${doc.documentType.name}" has been approved.`
+            : `Your document "${doc.documentType.name}" was rejected. Feedback: ${feedback.trim()}`,
+          relatedEntityType: 'document',
+          relatedEntityId:   doc.document_id,
+        });
+      }
     }
 
     return res.json({
@@ -351,10 +364,22 @@ const viewDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Document not found.' });
     }
 
-    // Access control: employee may only view their own documents
+    // Access control (NFR-03):
+    //   NEW_EMPLOYEE → own documents only
+    //   LINE_MANAGER → documents belonging to employees they manage
+    //   HR_ADMIN     → unrestricted
     if (req.user.role === 'NEW_EMPLOYEE') {
       const profile = await EmployeeProfile.findOne({ where: { user_id: req.user.user_id } });
       if (!profile || doc.profile_id !== profile.profile_id) {
+        return res.status(403).json({ success: false, message: 'Access denied.' });
+      }
+    } else if (req.user.role === 'LINE_MANAGER') {
+      // Verify the document's owner is assigned to this manager
+      const ownerProfile = await EmployeeProfile.findOne({
+        where: { profile_id: doc.profile_id },
+        attributes: ['manager_id'],
+      });
+      if (!ownerProfile || ownerProfile.manager_id !== req.user.user_id) {
         return res.status(403).json({ success: false, message: 'Access denied.' });
       }
     }
@@ -367,17 +392,26 @@ const viewDocument = async (req, res) => {
     const cloudinaryResponse = await axios.get(signedUrl, {
       responseType: 'stream',
       timeout:      30000,
-    });
+    })
+    // Forward content-type and content-disposition so the browser handles the
+    // file correctly (inline display or download where appropriate).
+    const contentType = cloudinaryResponse.headers['content-type'];
+    if (contentType) res.setHeader('Content-Type', contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${doc.original_filename || 'document'}"`
+    );
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${doc.original_filename}"`);
     cloudinaryResponse.data.pipe(res);
-
   } catch (error) {
-    console.error('[documentController.viewDocument]', error.response?.status, error.message);
-    return res.status(500).json({ success: false, message: 'Failed to retrieve file.' });
+    console.error('[documentController.viewDocument]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve document.' });
   }
 };
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
 
 module.exports = {
   getDocumentTypes,

@@ -60,13 +60,15 @@ export default function ManagerDashboard() {
         if (progress.status === 'fulfilled') setTeamData(progress.value)
         if (tasks.status   === 'fulfilled') setAssignments(tasks.value)
         if (members.status === 'fulfilled') setTeamMembers(members.value)
-        // Only surface an error if all three calls failed
-        if (
-          progress.status === 'rejected' &&
-          tasks.status    === 'rejected' &&
-          members.status  === 'rejected'
-        ) {
-          setError('Failed to load dashboard data.')
+
+        // Surface any individual failure so silent API errors are visible
+        const failures = [
+          progress.status === 'rejected' && 'team progress',
+          tasks.status    === 'rejected' && 'task assignments',
+          members.status  === 'rejected' && 'team members',
+        ].filter(Boolean)
+        if (failures.length) {
+          setError(`Failed to load: ${failures.join(', ')}. Some dashboard data may be incomplete.`)
         }
       })
       .finally(() => setLoading(false))
@@ -171,9 +173,13 @@ export default function ManagerDashboard() {
             <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
           </div>
         ) : teamData.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-xs text-slate-400">
-            <Users className="h-10 w-10 text-slate-200 mb-2" />
-            No team members found.
+          <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+            <Users className="h-10 w-10 text-slate-200 mb-3" />
+            <p className="text-sm font-medium text-slate-500 mb-1">No team members assigned yet</p>
+            <p className="text-xs text-slate-400 max-w-sm">
+              Your dashboard will populate once HR assigns employees to you. Ask your HR Administrator
+              to select your account as the Line Manager when creating or editing an employee profile.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">

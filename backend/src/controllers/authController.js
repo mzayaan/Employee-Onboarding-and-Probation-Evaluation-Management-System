@@ -9,8 +9,9 @@ const crypto  = require('crypto');
 const jwt     = require('jsonwebtoken');
 const { Op }  = require('sequelize');
 const { User } = require('../models');
-const { createAuditLog }         = require('../utils/auditLogger');
-const { sendPasswordResetEmail } = require('../utils/mailer');
+const { createAuditLog }           = require('../utils/auditLogger');
+const { sendPasswordResetEmail }   = require('../utils/mailer');
+const { validatePasswordStrength } = require('../utils/passwordValidator');
 
 // Helper: extract real IP from request (handles reverse proxies)
 const getIp = (req) =>
@@ -222,8 +223,9 @@ const resetPassword = async (req, res) => {
     if (!token || !password) {
       return res.status(400).json({ success: false, message: 'Token and password are required.' });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+    const pwCheck = validatePasswordStrength(password);
+    if (!pwCheck.valid) {
+      return res.status(400).json({ success: false, message: pwCheck.message });
     }
 
     // Hash the incoming raw token and look it up
@@ -266,4 +268,60 @@ const resetPassword = async (req, res) => {
   }
 };
 
-module.exports = { login, logout, getMe, forgotPassword, resetPassword };
+// =============================================================================
+// POST /api/auth/change-password
+// Authenticated user changes their own password by providing the current one.
+// Body: { currentPassword, newPassword }
+// NFR-02 | FR-01
+// =============================================================================
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'currentPassword and newPassword are required.',
+      });
+    }
+
+    const pwCheck = validatePasswordStrength(newPassword);
+    if (!pwCheck.valid) {
+      return res.status(400).json({ success: false, message: pwCheck.message });
+    }
+
+    const user = await User.findByPk(req.user.user_id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!passwordMatch) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be different from the current password.',
+      });
+    }
+
+    const password_hash = await bcrypt.hash(newPassword, 12);
+    await user.update({ password_hash });
+
+    await createAuditLog({
+      userId:      user.user_id,
+      actionType:  'PASSWORD_CHANGED',
+      description: `User ${user.email} changed their password.`,
+      ipAddress:   getIp(req),
+    });
+
+    return res.status(200).json({ success: true, message: 'Password changed successfully.' });
+  } catch (error) {
+    console.error('[authController.changePassword]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to change password.' });
+  }
+};
+
+module.exports = { login, logout, getMe, forgotPassword, resetPassword, changePassword };

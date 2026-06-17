@@ -1,14 +1,23 @@
 // =============================================================================
 // src/pages/hr/employees/AddEmployeePage.jsx
 // HR creates a new user account + employee profile in one form.
-// FR-01, FR-04 | NFR-02, NFR-03 | Objective 1
+// FR-01, FR-03, FR-04, FR-11 | NFR-02, NFR-03 | Objective 1
 // =============================================================================
 
 import { useEffect, useState } from 'react'
 import { useNavigate }         from 'react-router-dom'
 import AppShell                from '@/components/shared/AppShell'
 import { createEmployee, getDepartments, getManagers } from '@/api/employeeApi'
-import { ArrowLeft, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, Loader2, CheckCircle2, Plus, X } from 'lucide-react'
+
+// ── FR-03: Password complexity rules (mirrors backend passwordValidator.js) ──
+const checkPassword = (pw) => {
+  if (!pw || pw.length < 8)       return 'Password must be at least 8 characters long.'
+  if (!/[A-Z]/.test(pw))         return 'Password must contain at least one uppercase letter.'
+  if (!/[0-9]/.test(pw))         return 'Password must contain at least one number.'
+  if (!/[^A-Za-z0-9]/.test(pw)) return 'Password must contain at least one special character (e.g. !@#$%).'
+  return ''
+}
 
 const ROLES = [
   { value: 'NEW_EMPLOYEE', label: 'New Employee' },
@@ -42,13 +51,17 @@ export default function AddEmployeePage() {
     start_date:        '',
     probation_end_date: '',
   })
-  const [errors,      setErrors]      = useState({})
-  const [showPwd,     setShowPwd]     = useState(false)
-  const [loading,     setLoading]     = useState(false)
-  const [success,     setSuccess]     = useState(false)
-  const [departments, setDepartments] = useState([])
-  const [managers,    setManagers]    = useState([])
-  const [serverError, setServerError] = useState('')
+  const [errors,          setErrors]          = useState({})
+  const [showPwd,         setShowPwd]         = useState(false)
+  const [loading,         setLoading]         = useState(false)
+  const [success,         setSuccess]         = useState(false)
+  const [departments,     setDepartments]     = useState([])
+  const [managers,        setManagers]        = useState([])
+  const [serverError,     setServerError]     = useState('')
+  // FR-11: configurable evaluation checkpoint schedule
+  const [checkpointDays,  setCheckpointDays]  = useState([30, 60, 90])
+  const [newDayInput,     setNewDayInput]     = useState('')
+  const [dayInputError,   setDayInputError]   = useState('')
 
   useEffect(() => {
     Promise.all([getDepartments(), getManagers()])
@@ -71,7 +84,7 @@ export default function AddEmployeePage() {
     if (!form.email.trim())       e.email       = 'Email is required.'
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email.'
     if (!form.password)           e.password    = 'Password is required.'
-    else if (form.password.length < 8) e.password = 'Password must be at least 8 characters.'
+    else { const msg = checkPassword(form.password); if (msg) e.password = msg }
     if (!form.job_title.trim())   e.job_title   = 'Job title is required.'
     if (!form.start_date)         e.start_date  = 'Start date is required.'
     // Probation end date is only required for new employees
@@ -98,8 +111,10 @@ export default function AddEmployeePage() {
     try {
       const payload = {
         ...form,
-        department_id: form.department_id ? Number(form.department_id) : null,
-        manager_id:    form.manager_id    ? Number(form.manager_id)    : null,
+        department_id:   form.department_id ? Number(form.department_id) : null,
+        manager_id:      form.manager_id    ? Number(form.manager_id)    : null,
+        // FR-11: send checkpoint schedule only for new employees
+        ...(form.role === 'NEW_EMPLOYEE' && { checkpoint_days: checkpointDays }),
       }
       await createEmployee(payload)
       setSuccess(true)
@@ -130,7 +145,7 @@ export default function AddEmployeePage() {
               View All Employees
             </button>
             <button
-              onClick={() => { setSuccess(false); setForm({ first_name: '', last_name: '', email: '', password: '', role: 'NEW_EMPLOYEE', job_title: '', department_id: '', manager_id: '', phone: '', start_date: '', probation_end_date: '' }) }}
+              onClick={() => { setSuccess(false); setCheckpointDays([30, 60, 90]); setNewDayInput(''); setDayInputError(''); setForm({ first_name: '', last_name: '', email: '', password: '', role: 'NEW_EMPLOYEE', job_title: '', department_id: '', manager_id: '', phone: '', start_date: '', probation_end_date: '' }) }}
               className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Add Another
@@ -204,7 +219,7 @@ export default function AddEmployeePage() {
                   type={showPwd ? 'text' : 'password'}
                   value={form.password}
                   onChange={set('password')}
-                  placeholder="Min. 8 characters"
+                  placeholder="Min. 8 chars, uppercase, number, symbol"
                   className="w-full rounded-lg border border-slate-200 px-3 py-2.5 pr-10 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 />
                 <button
@@ -215,6 +230,11 @@ export default function AddEmployeePage() {
                   {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {!errors.password && (
+                <p className="mt-1 text-xs text-slate-400">
+                  Must be ≥8 characters and include an uppercase letter, a number and a special character.
+                </p>
+              )}
             </FIELD>
             <FIELD label="System Role" required error={errors.role}>
               <select
@@ -310,9 +330,76 @@ export default function AddEmployeePage() {
             )}
           </div>
           {isNewEmployee && (
-            <p className="mt-2 text-xs text-slate-400">
-              A probation record with 30, 60 and 90-day evaluation checkpoints will be created automatically.
-            </p>
+            <div className="mt-5 border-t border-slate-100 pt-5">
+              <p className="mb-3 text-sm font-medium text-slate-700">
+                Evaluation Checkpoints
+                <span className="ml-2 text-xs font-normal text-slate-400">(days from start date)</span>
+              </p>
+
+              {/* Current checkpoint tags */}
+              <div className="mb-3 flex flex-wrap gap-2">
+                {checkpointDays.map((day) => (
+                  <span
+                    key={day}
+                    className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700"
+                  >
+                    Day {day}
+                    <button
+                      type="button"
+                      onClick={() => setCheckpointDays((prev) => prev.filter((d) => d !== day))}
+                      className="ml-0.5 text-blue-400 hover:text-blue-700"
+                      aria-label={`Remove day ${day}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                {checkpointDays.length === 0 && (
+                  <span className="text-xs text-red-500">At least one checkpoint is required.</span>
+                )}
+              </div>
+
+              {/* Add checkpoint input */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={newDayInput}
+                  onChange={(e) => { setNewDayInput(e.target.value); setDayInputError('') }}
+                  placeholder="e.g. 45"
+                  className="w-28 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = parseInt(newDayInput, 10)
+                    if (!val || val < 1 || val > 365) {
+                      setDayInputError('Enter a day number between 1 and 365.')
+                      return
+                    }
+                    if (checkpointDays.includes(val)) {
+                      setDayInputError('That day is already in the list.')
+                      return
+                    }
+                    setCheckpointDays((prev) => [...prev, val].sort((a, b) => a - b))
+                    setNewDayInput('')
+                    setDayInputError('')
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Plus className="h-4 w-4" /> Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCheckpointDays([30, 60, 90]); setNewDayInput(''); setDayInputError('') }}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  Reset to 30/60/90
+                </button>
+              </div>
+              {dayInputError && <p className="mt-1 text-xs text-red-600">{dayInputError}</p>}
+            </div>
           )}
         </section>
 

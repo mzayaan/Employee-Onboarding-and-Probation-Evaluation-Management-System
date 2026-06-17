@@ -20,7 +20,10 @@ import {
 } from 'lucide-react'
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
-function CriterionModal({ existing, onClose, onSaved }) {
+// usedWeight = sum of all OTHER active criteria weights (excluding the one being
+// edited, if editing).  Allows the modal to show how much budget is left and
+// validate that the new weight won't exceed 100%.
+function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
   const [form, setForm] = useState({
     name:          existing?.name          ?? '',
     description:   existing?.description   ?? '',
@@ -32,11 +35,20 @@ function CriterionModal({ existing, onClose, onSaved }) {
 
   const set = (field) => (e) => setForm((p) => ({ ...p, [field]: e.target.value }))
 
+  // How much weight budget is available for this criterion
+  const remaining = parseFloat((100 - usedWeight).toFixed(2))
+  const enteredW  = parseFloat(form.weight_percent)
+  const budgetOk  = !isNaN(enteredW) && enteredW > 0 && enteredW <= remaining + 0.01
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name.trim()) { setError('Criterion name is required.'); return }
     const w = parseFloat(form.weight_percent)
     if (isNaN(w) || w <= 0 || w > 100) { setError('Weight must be between 1 and 100.'); return }
+    if (w > remaining + 0.01) {
+      setError(`Weight would exceed the remaining budget of ${remaining}%. Adjust other criteria first.`)
+      return
+    }
 
     setSubmitting(true); setError('')
     try {
@@ -113,13 +125,24 @@ function CriterionModal({ existing, onClose, onSaved }) {
               <input
                 type="number"
                 min="1"
-                max="100"
+                max={remaining}
                 step="0.01"
                 value={form.weight_percent}
                 onChange={set('weight_percent')}
-                placeholder="e.g. 30"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                placeholder={`max ${remaining}%`}
+                className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
+                  !isNaN(enteredW) && enteredW > 0
+                    ? budgetOk
+                      ? 'border-green-300 focus:border-green-400 focus:ring-green-100'
+                      : 'border-red-300 focus:border-red-400 focus:ring-red-100'
+                    : 'border-slate-200 focus:border-blue-400 focus:ring-blue-100'
+                }`}
               />
+              <p className={`mt-1 text-xs ${remaining <= 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                {remaining <= 0
+                  ? 'No budget remaining — deactivate a criterion first.'
+                  : `${remaining}% remaining`}
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Display Order</label>
@@ -203,6 +226,15 @@ export default function CriteriaConfigPage() {
           existing={modal === 'add' ? null : modal}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); fetchCriteria() }}
+          // Pass weight already used by OTHER active criteria so the modal can
+          // show the remaining budget and prevent exceeding 100% (FR-10).
+          usedWeight={
+            modal === 'add'
+              ? totalWeight
+              : activeCriteria
+                  .filter((c) => c.criterion_id !== modal?.criterion_id)
+                  .reduce((s, c) => s + parseFloat(c.weight_percent), 0)
+          }
         />
       )}
 

@@ -14,6 +14,8 @@ import {
   Settings,
   LogOut,
   ShieldCheck,
+  CalendarDays,
+  Bell,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -24,17 +26,21 @@ const NAV_ITEMS = {
   // HR_ADMIN: evaluations, reports and audit-log removed — no pages built yet
   // (audit log is SYSTEM_ADMIN only; evaluations/reports are Phase 5)
   HR_ADMIN: [
-    { to: '/hr/dashboard',   icon: LayoutDashboard, label: 'Dashboard'    },
-    { to: '/hr/employees',   icon: Users,            label: 'Employees'   },
-    { to: '/hr/documents',   icon: FileText,         label: 'Documents'   },
-    { to: '/hr/tasks',       icon: ClipboardList,    label: 'Tasks'       },
+    { to: '/hr/dashboard',      icon: LayoutDashboard, label: 'Dashboard'     },
+    { to: '/hr/employees',      icon: Users,            label: 'Employees'    },
+    { to: '/hr/documents',      icon: FileText,         label: 'Documents'    },
+    { to: '/hr/tasks',          icon: ClipboardList,    label: 'Tasks'        },
+    { to: '/manager/attendance',icon: CalendarDays,     label: 'Attendance'   },
+    { to: '/notifications',     icon: Bell,             label: 'Notifications'},
   ],
   // LINE_MANAGER: reports removed (Phase 5)
   LINE_MANAGER: [
-    { to: '/manager/dashboard',   icon: LayoutDashboard, label: 'Dashboard'   },
-    { to: '/manager/team',        icon: Users,           label: 'My Team'     },
-    { to: '/manager/evaluations', icon: BarChart3,       label: 'Evaluations' },
-    { to: '/manager/tasks',       icon: ClipboardList,   label: 'Tasks'       },
+    { to: '/manager/dashboard',   icon: LayoutDashboard, label: 'Dashboard'     },
+    { to: '/manager/team',        icon: Users,           label: 'My Team'       },
+    { to: '/manager/evaluations', icon: BarChart3,       label: 'Evaluations'   },
+    { to: '/manager/tasks',       icon: ClipboardList,   label: 'Tasks'         },
+    { to: '/manager/attendance',  icon: CalendarDays,    label: 'Attendance'    },
+    { to: '/notifications',       icon: Bell,            label: 'Notifications' },
   ],
   // NEW_EMPLOYEE: profile removed — no EmployeeProfilePage built yet
   NEW_EMPLOYEE: [
@@ -42,12 +48,14 @@ const NAV_ITEMS = {
     { to: '/employee/documents',       icon: FileText,         label: 'My Documents'   },
     { to: '/employee/tasks',           icon: ClipboardList,    label: 'My Tasks'       },
     { to: '/employee/self-assessments',icon: BarChart3,        label: 'Self-Assessment'},
+    { to: '/notifications',            icon: Bell,             label: 'Notifications'  },
   ],
-  // SYSTEM_ADMIN: users and notifications removed — no pages built yet (Phase 5+)
   SYSTEM_ADMIN: [
     { to: '/admin/dashboard',  icon: LayoutDashboard, label: 'Dashboard'      },
+    { to: '/admin/users',      icon: Users,            label: 'User Management'},
     { to: '/admin/criteria',   icon: Settings,         label: 'Criteria Config'},
     { to: '/admin/audit-log',  icon: ShieldCheck,      label: 'Audit Log'     },
+    { to: '/notifications',    icon: Bell,             label: 'Notifications'  },
   ],
 }
 

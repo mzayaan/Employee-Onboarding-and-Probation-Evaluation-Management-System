@@ -32,6 +32,9 @@ import CriteriaConfigPage from '@/pages/admin/CriteriaConfigPage'
 // Admin — Audit log (Block 8 — Phase 4)
 import AuditLogPage from '@/pages/admin/AuditLogPage'
 
+// Admin — User management (FR-01 / Task #29)
+import UserManagementPage from '@/pages/admin/UserManagementPage'
+
 // Manager — Phase 4 evaluation pages
 import MyTeamPage         from '@/pages/manager/MyTeamPage'
 import EvaluationFormPage from '@/pages/manager/EvaluationFormPage'
@@ -41,6 +44,10 @@ import ManagerEvaluationsPage from '@/pages/manager/ManagerEvaluationsPage'
 
 // Manager — Task assignment (Phase 3/4 gap)
 import ManagerTasksPage from '@/pages/manager/ManagerTasksPage'
+
+// Attendance — HR Admin + Line Manager (FR-12)
+import AttendanceLogPage      from '@/pages/attendance/AttendanceLogPage'
+import AttendanceOverviewPage from '@/pages/attendance/AttendanceOverviewPage'
 
 // Employee — Self-assessment (Block 8 — Phase 4)
 import SelfAssessmentPage from '@/pages/employee/assessments/SelfAssessmentPage'
@@ -62,6 +69,9 @@ import MyDocumentsPage    from '@/pages/employee/documents/MyDocumentsPage'
 
 // Employee — Task management (Block 5)
 import MyTasksPage from '@/pages/employee/tasks/MyTasksPage'
+
+// Notifications — all authenticated roles (FR-09)
+import NotificationsPage from '@/pages/notifications/NotificationsPage'
 
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
@@ -110,6 +120,12 @@ export default function App() {
             <Route path="/hr/employees/:id"        element={<EmployeeDetailPage />} />
           </Route>
 
+          {/* Attendance — shared for HR Admin and Line Manager (FR-12) */}
+          <Route element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER']} />}>
+            <Route path="/manager/attendance"          element={<AttendanceOverviewPage />} />
+            <Route path="/attendance/period/:periodId" element={<AttendanceLogPage />} />
+          </Route>
+
           {/* ── Line Manager ───────────────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['LINE_MANAGER']} />}>
             <Route path="/manager/dashboard"               element={<ManagerDashboard />} />
@@ -136,10 +152,19 @@ export default function App() {
 
           {/* ── System Administrator ───────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['SYSTEM_ADMIN']} />}>
-            <Route path="/admin/dashboard"  element={<AdminDashboard />} />
-            <Route path="/admin/criteria"   element={<CriteriaConfigPage />} />
+            <Route path="/admin/dashboard"      element={<AdminDashboard />} />
+            <Route path="/admin/criteria"       element={<CriteriaConfigPage />} />
             {/* Block 8 — Phase 4: Audit log */}
-            <Route path="/admin/audit-log"  element={<AuditLogPage />} />
+            <Route path="/admin/audit-log"      element={<AuditLogPage />} />
+            {/* FR-01: User management — view all accounts, activate/deactivate */}
+            <Route path="/admin/users"          element={<UserManagementPage />} />
+          </Route>
+
+          {/* ── Notifications — all authenticated roles (FR-09) ───────── */}
+          <Route
+            element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN']} />}
+          >
+            <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* Catch-all */}

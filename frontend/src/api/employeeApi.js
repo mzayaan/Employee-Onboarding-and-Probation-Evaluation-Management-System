@@ -33,3 +33,9 @@ export const toggleUserStatus = (userId, is_active) =>
 
 export const getManagers = () =>
   api.get('/employees/managers').then((r) => r.data.data)
+
+// ── SYSTEM_ADMIN — all users (FR-01) ─────────────────────────────────────────
+
+export const getAllUsers = () =>
+  api.get('/employees/all-users').then((r) => r.data.data)
+

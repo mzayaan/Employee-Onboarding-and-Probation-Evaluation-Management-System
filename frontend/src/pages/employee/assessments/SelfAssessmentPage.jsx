@@ -68,7 +68,10 @@ const fmtDate = (iso) => {
 
 // ── Checkpoint selector ───────────────────────────────────────────────────────
 function CheckpointSelector({ checkpoints, selected, onSelect }) {
-  const pending = checkpoints.filter((c) => c.status !== 'COMPLETED')
+  // FR-13: show checkpoints where the employee has not yet submitted a self-assessment,
+  // regardless of whether the manager has already evaluated (checkpoint.status may be
+  // 'COMPLETED' after manager evaluation, but the employee's self-assessment is independent).
+  const pending = checkpoints.filter((c) => !c.selfAssessment?.assessment_id)
   if (!pending.length) return null
   return (
     <div className="mb-6">
@@ -121,8 +124,8 @@ export default function SelfAssessmentPage() {
     getMyProbation()
       .then((data) => {
         setProbation(data)
-        // Auto-select first non-completed checkpoint
-        const first = data?.checkpoints?.find((c) => c.status !== 'COMPLETED')
+        // Auto-select first checkpoint where employee has not yet submitted a self-assessment
+        const first = data?.checkpoints?.find((c) => !c.selfAssessment?.assessment_id)
         if (first) setSelectedCheckpoint(first.checkpoint_id)
       })
       .catch(() => setError('Failed to load your probation details.'))
@@ -213,7 +216,10 @@ export default function SelfAssessmentPage() {
   }
 
   const checkpoints  = probation.checkpoints || []
-  const allCompleted = checkpoints.every((c) => c.status === 'COMPLETED')
+  // allCompleted: true only when the employee has submitted self-assessments for every checkpoint.
+  // Checking checkpoint.status would be wrong — a manager may have submitted evaluations
+  // (which sets status to COMPLETED) before the employee self-assessed.
+  const allCompleted = checkpoints.length > 0 && checkpoints.every((c) => !!c.selfAssessment?.assessment_id)
 
   if (allCompleted) {
     return (

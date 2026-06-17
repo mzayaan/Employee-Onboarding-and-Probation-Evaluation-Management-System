@@ -217,6 +217,101 @@ const sendPasswordResetEmail = async ({ to, firstName, rawToken }) => {
   });
 };
 
+/**
+ * Welcome email sent to a new employee when HR creates their account.
+ * Includes their login email, temporary password, and portal URL.
+ * FR-09 / BUG-08
+ */
+const sendWelcomeEmail = async ({ to, firstName, temporaryPassword }) => {
+  const portalUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  await sendMail({
+    to,
+    subject: 'Welcome to HR Onboard — your account is ready',
+    html: `
+      <p>Dear ${firstName},</p>
+      <p>Your HR Onboard employee account has been created. You can log in immediately using the
+      credentials below.</p>
+      <table style="border-collapse:collapse;margin:12px 0;font-family:sans-serif;">
+        <tr>
+          <td style="padding:4px 16px 4px 0;font-weight:bold;">Portal:</td>
+          <td><a href="${portalUrl}">${portalUrl}</a></td>
+        </tr>
+        <tr>
+          <td style="padding:4px 16px 4px 0;font-weight:bold;">Email:</td>
+          <td>${to}</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 16px 4px 0;font-weight:bold;">Temporary password:</td>
+          <td style="font-family:monospace;letter-spacing:0.05em;">${temporaryPassword}</td>
+        </tr>
+      </table>
+      <p style="color:#b45309;font-size:13px;">
+        ⚠ Please change your password after your first login using the Settings page.
+      </p>
+      <p>Your line manager and HR team will guide you through your onboarding tasks and
+      required document submissions. If you have any questions, please contact HR directly.</p>
+      <br/>
+      <p>Regards,<br/>HR Onboard Team</p>
+    `,
+  });
+};
+
+/**
+ * Notify a line manager that a new employee has been assigned to them and
+ * that evaluation checkpoints have been scheduled.
+ * FR-11 / FR-09
+ */
+const sendManagerAssignmentEmail = async ({
+  to,
+  managerFirstName,
+  employeeFullName,
+  jobTitle,
+  startDate,
+  checkpoints,  // [{ label, due_date }]
+}) => {
+  const startDateStr = startDate
+    ? new Date(startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    : 'N/A';
+
+  const checkpointRows = checkpoints
+    .map(
+      (cp) =>
+        `<tr>
+          <td style="padding:4px 12px 4px 0;">${cp.label}</td>
+          <td>${new Date(cp.due_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</td>
+        </tr>`
+    )
+    .join('');
+
+  await sendMail({
+    to,
+    subject: `New team member assigned: ${employeeFullName}`,
+    html: `
+      <p>Dear ${managerFirstName},</p>
+      <p>A new employee has been assigned to your team:</p>
+      <table style="border-collapse:collapse;margin:12px 0;">
+        <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Name:</td><td>${employeeFullName}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Job title:</td><td>${jobTitle}</td></tr>
+        <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Start date:</td><td>${startDateStr}</td></tr>
+      </table>
+      ${checkpoints.length > 0 ? `
+      <p>The following probation evaluation checkpoints have been scheduled for this employee:</p>
+      <table style="border-collapse:collapse;margin:12px 0;">
+        <tr style="font-weight:bold;border-bottom:1px solid #e2e8f0;">
+          <td style="padding:4px 12px 4px 0;">Checkpoint</td>
+          <td>Due Date</td>
+        </tr>
+        ${checkpointRows}
+      </table>
+      <p>You will receive reminder emails 3 days and 1 day before each evaluation deadline.
+      Please log in to your HR Onboard portal to complete evaluation forms on time.</p>
+      ` : ''}
+      <br/>
+      <p>Regards,<br/>HR Onboard Team</p>
+    `,
+  });
+};
+
 module.exports = {
   sendMail,
   sendDocumentApprovedEmail,
@@ -226,4 +321,6 @@ module.exports = {
   sendEvaluationReminderEmail,
   sendPendingDocumentReminderEmail,
   sendPasswordResetEmail,
+  sendWelcomeEmail,
+  sendManagerAssignmentEmail,
 };

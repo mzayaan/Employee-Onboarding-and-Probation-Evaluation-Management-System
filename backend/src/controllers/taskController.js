@@ -12,6 +12,7 @@ const {
 } = require('../models');
 
 const { createAuditLog }       = require('../utils/auditLogger');
+const { createNotification }    = require('../services/notificationService');
 const { sendTaskAssignedEmail } = require('../utils/mailer');
 
 const getIp = (req) =>
@@ -39,6 +40,14 @@ const assignTask = async (req, res) => {
     });
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+    }
+
+    // NFR-03: LINE_MANAGER may only assign tasks to employees they manage.
+    if (req.user.role === 'LINE_MANAGER' && profile.manager_id !== req.user.user_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You may only assign tasks to employees in your team.',
+      });
     }
 
     // Create task template
@@ -73,6 +82,15 @@ const assignTask = async (req, res) => {
       taskTitle:       task.title,
       taskDescription: task.description,
       dueDate:         due_date,
+    }).catch(() => {});
+
+    // In-app notification
+    createNotification({
+      userId:  profile.user.user_id,
+      type:    'TASK_ASSIGNED',
+      message: `You have been assigned a new task: "${task.title}". Due: ${due_date ? new Date(due_date).toDateString() : 'No deadline'}.`,
+      relatedEntityType: 'task',
+      relatedEntityId:   assignment.assignment_id,
     }).catch(() => {});
 
     return res.status(201).json({
@@ -125,7 +143,7 @@ const getMyTasks = async (req, res) => {
 
 // =============================================================================
 // GET /api/tasks/assignments
-// HR views all task assignments across all employees.
+// HR views all task assignments; LINE_MANAGER sees only their own team (NFR-03).
 // Optional query: ?profile_id=X to filter by employee.
 // FR-07, FR-08 | NFR-03
 // =============================================================================
@@ -136,17 +154,35 @@ const getAllAssignments = async (req, res) => {
       where.profile_id = Number(req.query.profile_id);
     }
 
+    // NFR-03: LINE_MANAGER may only see assignments for employees they manage.
+    const profileWhere = req.user.role === 'LINE_MANAGER'
+      ? { manager_id: req.user.user_id }
+      : {};
+
     const assignments = await TaskAssignment.findAll({
       where,
+      subQuery: false,
       include: [
-        { model: OnboardingTask, as: 'task', attributes: ['task_id', 'title', 'description', 'priority'] },
+        {
+          model: OnboardingTask,
+          as: 'task',
+          attributes: ['task_id', 'title', 'description', 'priority'],
+        },
         {
           model: EmployeeProfile,
           as: 'employeeProfile',
+          where: profileWhere,
+          required: Object.keys(profileWhere).length > 0,
           attributes: ['profile_id', 'job_title'],
-          include: [{ model: User, as: 'user', attributes: ['user_id', 'first_name', 'last_name', 'email'] }],
+          include: [
+            { model: User, as: 'user', attributes: ['user_id', 'first_name', 'last_name', 'email'] },
+          ],
         },
-        { model: User, as: 'assigner', attributes: ['user_id', 'first_name', 'last_name'] },
+        {
+          model: User,
+          as: 'assigner',
+          attributes: ['user_id', 'first_name', 'last_name'],
+        },
       ],
       order: [['due_date', 'ASC']],
     });
@@ -273,8 +309,8 @@ const updateTaskStatus = async (req, res) => {
 
 // =============================================================================
 // DELETE /api/tasks/assignments/:id
-// HR Admin removes a task assignment.
-// FR-07
+// HR Admin removes a task assignment entirely.
+// FR-07, FR-18
 // =============================================================================
 const deleteAssignment = async (req, res) => {
   try {
@@ -287,18 +323,21 @@ const deleteAssignment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Task assignment not found.' });
     }
 
+    const taskTitle = assignment.task?.title || `ID ${id}`;
+    const profileId = assignment.profile_id;
+
     await assignment.destroy();
 
     await createAuditLog({
       userId:      req.user.user_id,
       actionType:  'TASK_DELETED',
-      description: `Task assignment ${id} ("${assignment.task?.title}") deleted by HR.`,
+      description: `Task assignment "${taskTitle}" (assignment_id: ${id}) deleted from profile_id ${profileId}.`,
       ipAddress:   getIp(req),
     });
 
-    return res.status(200).json({ success: true, message: 'Task assignment deleted successfully.' });
+    return res.json({ success: true, message: 'Task assignment deleted.' });
   } catch (error) {
-    console.error('[taskController.deleteTaskAssignment]', error.message);
+    console.error('[taskController.deleteAssignment]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to delete task assignment.' });
   }
 };

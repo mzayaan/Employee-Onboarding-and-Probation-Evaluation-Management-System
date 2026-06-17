@@ -232,7 +232,54 @@ const getCheckpoint = async (req, res) => {
       order:  [['display_order', 'ASC'], ['criterion_id', 'ASC']],
     });
 
-    return res.json({ success: true, data: checkpoint, criteria });
+    // ── Attendance summary for this checkpoint's date window (FR-12) ──────────
+    let attendanceSummary = null;
+    try {
+      const { AttendanceRecord } = require('../models');
+      const { Op }               = require('sequelize');
+
+      const periodId = checkpoint.probationPeriod?.period_id;
+      if (periodId) {
+        // Sort sibling checkpoints by day_number to find the previous one
+        const siblings = (checkpoint.probationPeriod?.checkpoints || [])
+          .slice()
+          .sort((a, b) => a.day_number - b.day_number);
+
+        const currentIdx = siblings.findIndex(
+          (s) => s.checkpoint_id === parseInt(checkpointId, 10)
+        );
+
+        const fromDate =
+          currentIdx > 0
+            ? siblings[currentIdx - 1].due_date           // previous checkpoint end
+            : checkpoint.probationPeriod.start_date;       // beginning of probation
+
+        const toDate = checkpoint.due_date;
+
+        const records = await AttendanceRecord.findAll({
+          where: {
+            period_id:   periodId,
+            record_date: { [Op.between]: [fromDate, toDate] },
+          },
+          attributes: ['status'],
+        });
+
+        attendanceSummary = {
+          total_records: records.length,
+          days_present:  records.filter((r) => r.status === 'PRESENT').length,
+          days_absent:   records.filter((r) => r.status === 'ABSENT').length,
+          late_arrivals: records.filter((r) => r.status === 'LATE').length,
+          half_days:     records.filter((r) => r.status === 'HALF_DAY').length,
+          from_date:     fromDate,
+          to_date:       toDate,
+        };
+      }
+    } catch (e) {
+      // Non-fatal — evaluation form can still be submitted with manually entered values
+      console.warn('[getCheckpoint] Could not compute attendance summary:', e.message);
+    }
+
+    return res.json({ success: true, data: checkpoint, criteria, attendanceSummary });
   } catch (error) {
     console.error('[evaluationController.getCheckpoint]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve checkpoint.' });
@@ -271,14 +318,25 @@ const getMyTeam = async (req, res) => {
             {
               model: EvaluationCheckpoint,
               as:    'checkpoints',
+              // NOTE: order inside nested include is not supported in Sequelize v6
+              // without separate:true — sort in JS instead (see below).
               include: [
                 { model: ManagerEvaluation, as: 'managerEvaluation', attributes: ['eval_id', 'weighted_score', 'submitted_at'] },
               ],
-              order: [['day_number', 'ASC']],
             },
           ],
         },
       ],
+    });
+
+    // Sort checkpoints by day_number ASC in JavaScript (Sequelize v6 does not
+    // support order inside a nested include without separate:true).
+    profiles.forEach((profile) => {
+      (profile.probationPeriods || []).forEach((period) => {
+        if (Array.isArray(period.checkpoints)) {
+          period.checkpoints.sort((a, b) => a.day_number - b.day_number);
+        }
+      });
     });
 
     return res.json({ success: true, data: profiles });
@@ -305,6 +363,7 @@ const submitManagerEvaluation = async (req, res) => {
       EvaluationScore,
       PerformanceNote,
       FinalRecommendation,
+      SelfAssessment,
     } = require('../models');
     const sequelize = require('../config/database');
 
@@ -340,8 +399,12 @@ const submitManagerEvaluation = async (req, res) => {
     if (!checkpoint) {
       return res.status(404).json({ success: false, message: 'Checkpoint not found.' });
     }
-    if (checkpoint.status === 'COMPLETED') {
-      return res.status(409).json({ success: false, message: 'This checkpoint has already been evaluated.' });
+    // Guard against duplicate manager evaluation.
+    // Do NOT use checkpoint.status here — a checkpoint is only COMPLETED when BOTH
+    // manager evaluation AND employee self-assessment are submitted (FR-11, FR-13).
+    const existingManagerEval = await ManagerEvaluation.findOne({ where: { checkpoint_id: checkpointId } });
+    if (existingManagerEval) {
+      return res.status(409).json({ success: false, message: 'Manager evaluation already submitted for this checkpoint.' });
     }
 
     const profile = checkpoint.probationPeriod?.employeeProfile;
@@ -421,59 +484,68 @@ const submitManagerEvaluation = async (req, res) => {
         }, { transaction: t });
       }
 
-      // Mark checkpoint as COMPLETED
-      await checkpoint.update({
-        status:       'COMPLETED',
-        completed_at: new Date(),
-      }, { transaction: t });
-
-      // Check if ALL checkpoints for this probation period are now completed.
-      // If so, generate the final recommendation automatically.
-      const period = checkpoint.probationPeriod;
-      const allCheckpoints = await EvaluationCheckpoint.findAll({
-        where: { period_id: period.period_id },
-        include: [{ model: ManagerEvaluation, as: 'managerEvaluation', attributes: ['weighted_score'] }],
+      // FR-11 + FR-13: A checkpoint is only COMPLETED when BOTH the manager evaluation
+      // and the employee self-assessment have been submitted. Check here; the same
+      // logic runs in submitSelfAssessment for the reverse order.
+      const selfAssessmentDone = await SelfAssessment.findOne({
+        where: { checkpoint_id: checkpointId },
         transaction: t,
       });
 
-      const pendingCount = allCheckpoints.filter((c) => c.status !== 'COMPLETED').length;
+      if (selfAssessmentDone) {
+        await checkpoint.update({
+          status:       'COMPLETED',
+          completed_at: new Date(),
+        }, { transaction: t });
 
-      if (pendingCount === 0) {
-        // All checkpoints done — calculate cumulative average
-        const scores = allCheckpoints
-          .map((c) => parseFloat(c.managerEvaluation?.weighted_score || 0));
-        const cumulative = parseFloat(
-          (scores.reduce((a, b) => a + b, 0) / (scores.length || 1)).toFixed(2)
-        );
-        const recommendationType = deriveRecommendation(cumulative);
-
-        // Upsert final recommendation
-        const [rec] = await FinalRecommendation.findOrCreate({
+        // Check if ALL checkpoints for this probation period are now completed.
+        // If so, generate the final recommendation automatically.
+        const period = checkpoint.probationPeriod;
+        const allCheckpoints = await EvaluationCheckpoint.findAll({
           where: { period_id: period.period_id },
-          defaults: {
-            recommendation_type: recommendationType,
-            cumulative_score:    cumulative,
-            generated_at:        new Date(),
-            generated_by:        req.user.user_id,
-          },
+          include: [{ model: ManagerEvaluation, as: 'managerEvaluation', attributes: ['weighted_score'] }],
           transaction: t,
         });
 
-        // Update probation period cumulative score + status
-        const newStatus = recommendationType === 'EXTEND' ? 'EXTENDED' : 'COMPLETED';
-        await period.update({
-          cumulative_score:    cumulative,
-          final_recommendation: recommendationType,
-          status:              newStatus,
-          updated_at:          new Date(),
-        }, { transaction: t });
+        const pendingCount = allCheckpoints.filter((c) => c.status !== 'COMPLETED').length;
 
-        await createAuditLog({
-          userId:      req.user.user_id,
-          actionType:  'RECOMMENDATION_GENERATED',
-          description: `Final recommendation ${recommendationType} generated for profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%.`,
-          ipAddress:   getIp(req),
-        });
+        if (pendingCount === 0) {
+          // All checkpoints done — calculate cumulative average of manager weighted scores
+          const evalScores = allCheckpoints
+            .map((c) => parseFloat(c.managerEvaluation?.weighted_score || 0));
+          const cumulative = parseFloat(
+            (evalScores.reduce((a, b) => a + b, 0) / (evalScores.length || 1)).toFixed(2)
+          );
+          const recommendationType = deriveRecommendation(cumulative);
+
+          // Upsert final recommendation
+          await FinalRecommendation.findOrCreate({
+            where: { period_id: period.period_id },
+            defaults: {
+              recommendation_type: recommendationType,
+              cumulative_score:    cumulative,
+              generated_at:        new Date(),
+              generated_by:        req.user.user_id,
+            },
+            transaction: t,
+          });
+
+          // Update probation period cumulative score + status
+          const newStatus = recommendationType === 'EXTEND' ? 'EXTENDED' : 'COMPLETED';
+          await period.update({
+            cumulative_score:     cumulative,
+            final_recommendation: recommendationType,
+            status:               newStatus,
+            updated_at:           new Date(),
+          }, { transaction: t });
+
+          await createAuditLog({
+            userId:      req.user.user_id,
+            actionType:  'RECOMMENDATION_GENERATED',
+            description: `Final recommendation ${recommendationType} generated for profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%.`,
+            ipAddress:   getIp(req),
+          });
+        }
       }
 
       await createAuditLog({
@@ -508,8 +580,10 @@ const submitSelfAssessment = async (req, res) => {
       ProbationPeriod,
       EmployeeProfile,
       EvaluationCriterion,
+      ManagerEvaluation,
       SelfAssessment,
       SelfAssessmentScore,
+      FinalRecommendation,
     } = require('../models');
     const sequelize = require('../config/database');
 
@@ -586,6 +660,65 @@ const submitSelfAssessment = async (req, res) => {
         scoreRows.map((r) => ({ ...r, assessment_id: assessment.assessment_id })),
         { transaction: t }
       );
+
+      // FR-11 + FR-13: Mark checkpoint COMPLETED only when BOTH the manager evaluation
+      // and the employee self-assessment have been submitted.
+      const managerDone = await ManagerEvaluation.findOne({
+        where: { checkpoint_id: checkpointId },
+        transaction: t,
+      });
+
+      if (managerDone) {
+        await checkpoint.update({
+          status:       'COMPLETED',
+          completed_at: new Date(),
+        }, { transaction: t });
+
+        // Check if ALL checkpoints for this probation period are now completed.
+        const period = checkpoint.probationPeriod;
+        const allCheckpoints = await EvaluationCheckpoint.findAll({
+          where: { period_id: period.period_id },
+          include: [{ model: ManagerEvaluation, as: 'managerEvaluation', attributes: ['weighted_score'] }],
+          transaction: t,
+        });
+
+        const pendingCount = allCheckpoints.filter((c) => c.status !== 'COMPLETED').length;
+
+        if (pendingCount === 0) {
+          const evalScores = allCheckpoints
+            .map((c) => parseFloat(c.managerEvaluation?.weighted_score || 0));
+          const cumulative = parseFloat(
+            (evalScores.reduce((a, b) => a + b, 0) / (evalScores.length || 1)).toFixed(2)
+          );
+          const recommendationType = deriveRecommendation(cumulative);
+
+          await FinalRecommendation.findOrCreate({
+            where: { period_id: period.period_id },
+            defaults: {
+              recommendation_type: recommendationType,
+              cumulative_score:    cumulative,
+              generated_at:        new Date(),
+              generated_by:        req.user.user_id,
+            },
+            transaction: t,
+          });
+
+          const newStatus = recommendationType === 'EXTEND' ? 'EXTENDED' : 'COMPLETED';
+          await period.update({
+            cumulative_score:     cumulative,
+            final_recommendation: recommendationType,
+            status:               newStatus,
+            updated_at:           new Date(),
+          }, { transaction: t });
+
+          await createAuditLog({
+            userId:      req.user.user_id,
+            actionType:  'RECOMMENDATION_GENERATED',
+            description: `Final recommendation ${recommendationType} generated for profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%.`,
+            ipAddress:   getIp(req),
+          });
+        }
+      }
     });
 
     await createAuditLog({
@@ -594,17 +727,20 @@ const submitSelfAssessment = async (req, res) => {
       description: `Self-assessment submitted for checkpoint_id ${checkpointId} (${checkpoint.checkpoint_label}). Self-score: ${totalSelfScore}%.`,
       ipAddress:   getIp(req),
     });
-
     return res.status(201).json({
       success: true,
       message: 'Self-assessment submitted successfully.',
-      data:    { checkpoint_id: checkpointId, self_score: totalSelfScore },
+      data: { checkpoint_id: checkpointId, self_score: totalSelfScore },
     });
   } catch (error) {
     console.error('[evaluationController.submitSelfAssessment]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to submit self-assessment.' });
   }
 };
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
 
 module.exports = {
   getProbationByProfile,

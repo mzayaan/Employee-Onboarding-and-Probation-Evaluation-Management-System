@@ -60,7 +60,7 @@ export default function ManagerEvaluationsPage() {
                 checkpointId:      cp.checkpoint_id,
                 employeeName:      name,
                 jobTitle,
-                label:             cp.label,
+                label:             cp.checkpoint_label,
                 dueDate:           cp.due_date,
                 status:            cp.status,
                 hasManagerEval:    !!cp.managerEvaluation,
@@ -129,9 +129,13 @@ export default function ManagerEvaluationsPage() {
             <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
           </div>
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-xs text-slate-400">
-            <BarChart3 className="h-10 w-10 text-slate-200 mb-2" />
-            No evaluation checkpoints found for your team.
+          <div className="flex flex-col items-center justify-center py-16 px-8 text-center">
+            <BarChart3 className="h-10 w-10 text-slate-200 mb-3" />
+            <p className="text-sm font-medium text-slate-500 mb-1">No evaluation checkpoints found</p>
+            <p className="text-xs text-slate-400 max-w-sm">
+              Checkpoints appear here once HR has assigned employees to you. Ask your HR Administrator
+              to set your account as the Line Manager when creating or editing employee profiles.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
