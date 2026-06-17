@@ -58,7 +58,13 @@ const getDashboardStats = async (req, res) => {
 // =============================================================================
 const getOnboardingProgress = async (req, res) => {
   try {
+    const { role, user_id } = req.user
+
+    // LINE_MANAGER sees only employees assigned to them (NFR-03)
+    const profileWhere = role === 'LINE_MANAGER' ? { manager_id: user_id } : {}
+
     const profiles = await EmployeeProfile.findAll({
+      where: profileWhere,
       include: [
         {
           model: User,
@@ -113,21 +119,22 @@ const getOnboardingProgress = async (req, res) => {
         : null
 
       return {
-        profile_id:      p.profile_id,
-        first_name:      p.user?.first_name,
-        last_name:       p.user?.last_name,
-        is_active:       p.user?.is_active,
-        job_title:       p.job_title,
-        department:      p.department?.name,
-        task_progress:   taskProgress,
-        total_tasks:     totalTasks,
-        completed_tasks: completedTasks,
-        overdue_tasks:   overdueTasks,
-        total_docs:      docs.length,
-        approved_docs:   approvedDocs,
-        pending_docs:    pendingDocs,
-        rejected_docs:   rejectedDocs,
-        probation_end:       probation?.end_date || null,
+        profile_id:          p.profile_id,
+        first_name:          p.user?.first_name,
+        last_name:           p.user?.last_name,
+        is_active:           p.user?.is_active,
+        job_title:           p.job_title,
+        department:          p.department?.name,
+        start_date:          p.start_date        || null,
+        task_progress:       taskProgress,
+        total_tasks:         totalTasks,
+        completed_tasks:     completedTasks,
+        overdue_tasks:       overdueTasks,
+        total_docs:          docs.length,
+        approved_docs:       approvedDocs,
+        pending_docs:        pendingDocs,
+        rejected_docs:       rejectedDocs,
+        probation_end_date:  probation?.end_date || null,
         probation_status:    probation?.status   || null,
         probation_days_left: probationDaysLeft,
       }

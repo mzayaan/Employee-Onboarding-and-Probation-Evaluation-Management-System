@@ -55,13 +55,20 @@ export default function ManagerDashboard() {
   const [error,        setError]        = useState(null)
 
   useEffect(() => {
-    Promise.all([getOnboardingProgress(), getAllAssignments(), getMyTeam()])
+    Promise.allSettled([getOnboardingProgress(), getAllAssignments(), getMyTeam()])
       .then(([progress, tasks, members]) => {
-        setTeamData(progress)
-        setAssignments(tasks)
-        setTeamMembers(members)
+        if (progress.status === 'fulfilled') setTeamData(progress.value)
+        if (tasks.status   === 'fulfilled') setAssignments(tasks.value)
+        if (members.status === 'fulfilled') setTeamMembers(members.value)
+        // Only surface an error if all three calls failed
+        if (
+          progress.status === 'rejected' &&
+          tasks.status    === 'rejected' &&
+          members.status  === 'rejected'
+        ) {
+          setError('Failed to load dashboard data.')
+        }
       })
-      .catch(() => setError('Failed to load dashboard data.'))
       .finally(() => setLoading(false))
   }, [])
 

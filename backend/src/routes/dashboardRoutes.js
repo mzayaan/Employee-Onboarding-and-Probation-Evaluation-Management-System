@@ -17,8 +17,9 @@ const {
 // HR stat cards
 router.get('/stats',               authenticate, authorize('HR_ADMIN'),     getDashboardStats)
 
-// HR per-employee onboarding progress table
-router.get('/onboarding-progress', authenticate, authorize('HR_ADMIN'),     getOnboardingProgress)
+// HR and LINE_MANAGER per-employee onboarding progress table
+// LINE_MANAGER receives only employees assigned to them (filtered in controller)
+router.get('/onboarding-progress', authenticate, authorize('HR_ADMIN', 'LINE_MANAGER'), getOnboardingProgress)
 
 // Employee own progress summary
 router.get('/my-progress',         authenticate, authorize('NEW_EMPLOYEE'), getMyProgress)
