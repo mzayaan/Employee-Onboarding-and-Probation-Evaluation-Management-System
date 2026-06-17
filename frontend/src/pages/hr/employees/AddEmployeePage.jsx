@@ -62,6 +62,8 @@ export default function AddEmployeePage() {
   const set = (field) => (e) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
 
+  const isNewEmployee = form.role === 'NEW_EMPLOYEE'
+
   const validate = () => {
     const e = {}
     if (!form.first_name.trim())  e.first_name  = 'First name is required.'
@@ -72,10 +74,13 @@ export default function AddEmployeePage() {
     else if (form.password.length < 8) e.password = 'Password must be at least 8 characters.'
     if (!form.job_title.trim())   e.job_title   = 'Job title is required.'
     if (!form.start_date)         e.start_date  = 'Start date is required.'
-    if (!form.probation_end_date) e.probation_end_date = 'Probation end date is required.'
-    if (form.start_date && form.probation_end_date) {
-      if (new Date(form.probation_end_date) <= new Date(form.start_date)) {
-        e.probation_end_date = 'Must be after start date.'
+    // Probation end date is only required for new employees
+    if (isNewEmployee) {
+      if (!form.probation_end_date) e.probation_end_date = 'Probation end date is required.'
+      if (form.start_date && form.probation_end_date) {
+        if (new Date(form.probation_end_date) <= new Date(form.start_date)) {
+          e.probation_end_date = 'Must be after start date.'
+        }
       }
     }
     return e
@@ -278,10 +283,10 @@ export default function AddEmployeePage() {
           </div>
         </section>
 
-        {/* ── Probation Period ─────────────────────────────────────────────── */}
+        {/* ── Probation Period — New Employees only ────────────────────────── */}
         <section className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
           <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>
-            Probation Period
+            {isNewEmployee ? 'Probation Period' : 'Employment Dates'}
           </h2>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FIELD label="Start Date" required error={errors.start_date}>
@@ -292,19 +297,23 @@ export default function AddEmployeePage() {
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </FIELD>
-            <FIELD label="Probation End Date" required error={errors.probation_end_date}>
-              <input
-                type="date"
-                value={form.probation_end_date}
-                onChange={set('probation_end_date')}
-                min={form.start_date || undefined}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
-            </FIELD>
+            {isNewEmployee && (
+              <FIELD label="Probation End Date" required error={errors.probation_end_date}>
+                <input
+                  type="date"
+                  value={form.probation_end_date}
+                  onChange={set('probation_end_date')}
+                  min={form.start_date || undefined}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              </FIELD>
+            )}
           </div>
-          <p className="mt-2 text-xs text-slate-400">
-            A probation record will be created automatically using these dates.
-          </p>
+          {isNewEmployee && (
+            <p className="mt-2 text-xs text-slate-400">
+              A probation record with 30, 60 and 90-day evaluation checkpoints will be created automatically.
+            </p>
+          )}
         </section>
 
         {/* ── Submit ──────────────────────────────────────────────────────── */}

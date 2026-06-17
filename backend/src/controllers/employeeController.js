@@ -37,14 +37,18 @@ const createEmployee = async (req, res) => {
 
     // ── Validation ─────────────────────────────────────────────────────────
     const missing = [];
-    if (!email)             missing.push('email');
-    if (!password)          missing.push('password');
-    if (!role)              missing.push('role');
-    if (!first_name)        missing.push('first_name');
-    if (!last_name)         missing.push('last_name');
-    if (!job_title)         missing.push('job_title');
-    if (!start_date)        missing.push('start_date');
-    if (!probation_end_date) missing.push('probation_end_date');
+    if (!email)      missing.push('email');
+    if (!password)   missing.push('password');
+    if (!role)       missing.push('role');
+    if (!first_name) missing.push('first_name');
+    if (!last_name)  missing.push('last_name');
+    if (!job_title)  missing.push('job_title');
+    if (!start_date) missing.push('start_date');
+
+    // probation_end_date is only required for new employees going through onboarding
+    if (role === 'NEW_EMPLOYEE' && !probation_end_date) {
+      missing.push('probation_end_date');
+    }
 
     if (missing.length) {
       await t.rollback();
@@ -68,18 +72,21 @@ const createEmployee = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
     }
 
-    const startD  = new Date(start_date);
-    const endD    = new Date(probation_end_date);
-    if (isNaN(startD) || isNaN(endD)) {
-      await t.rollback();
-      return res.status(400).json({ success: false, message: 'Invalid date format.' });
-    }
-    if (endD <= startD) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: 'Probation end date must be after the start date.',
-      });
+    // Date validation — only required for NEW_EMPLOYEE
+    if (role === 'NEW_EMPLOYEE') {
+      const startD = new Date(start_date);
+      const endD   = new Date(probation_end_date);
+      if (isNaN(startD) || isNaN(endD)) {
+        await t.rollback();
+        return res.status(400).json({ success: false, message: 'Invalid date format.' });
+      }
+      if (endD <= startD) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Probation end date must be after the start date.',
+        });
+      }
     }
 
     // ── Check email uniqueness ─────────────────────────────────────────────
@@ -115,33 +122,38 @@ const createEmployee = async (req, res) => {
       onboarding_status: 'IN_PROGRESS',
     }, { transaction: t });
 
-    // ── Create ProbationPeriod ─────────────────────────────────────────────
-    const probation = await ProbationPeriod.create({
-      profile_id: profile.profile_id,
-      start_date,
-      end_date:   probation_end_date,
-      status:     'ACTIVE',
-    }, { transaction: t });
+    // ── Probation period + evaluation checkpoints — NEW_EMPLOYEE only ─────
+    // Line Managers and HR Admins are existing staff members who need system
+    // access. They are not probationary employees and must not be assigned a
+    // probation period or evaluation checkpoints. (FR-11, FR-14)
+    if (role === 'NEW_EMPLOYEE') {
+      const probation = await ProbationPeriod.create({
+        profile_id: profile.profile_id,
+        start_date,
+        end_date:   probation_end_date,
+        status:     'ACTIVE',
+      }, { transaction: t });
 
-    // ── Auto-create 30/60/90-day evaluation checkpoints (FR-11) ──────────
-    const startDateObj = new Date(start_date);
-    const checkpointDefs = [
-      { day_number: 30,  checkpoint_label: '30-Day Review'  },
-      { day_number: 60,  checkpoint_label: '60-Day Review'  },
-      { day_number: 90,  checkpoint_label: '90-Day Review'  },
-    ];
-    const checkpointRows = checkpointDefs.map(({ day_number, checkpoint_label }) => {
-      const due = new Date(startDateObj);
-      due.setDate(due.getDate() + day_number);
-      return {
-        period_id:        probation.period_id,
-        checkpoint_label,
-        day_number,
-        due_date:         due.toISOString().slice(0, 10),
-        status:           'PENDING',
-      };
-    });
-    await EvaluationCheckpoint.bulkCreate(checkpointRows, { transaction: t });
+      // Auto-create 30/60/90-day evaluation checkpoints (FR-11)
+      const startDateObj = new Date(start_date);
+      const checkpointDefs = [
+        { day_number: 30, checkpoint_label: '30-Day Review' },
+        { day_number: 60, checkpoint_label: '60-Day Review' },
+        { day_number: 90, checkpoint_label: '90-Day Review' },
+      ];
+      const checkpointRows = checkpointDefs.map(({ day_number, checkpoint_label }) => {
+        const due = new Date(startDateObj);
+        due.setDate(due.getDate() + day_number);
+        return {
+          period_id:        probation.period_id,
+          checkpoint_label,
+          day_number,
+          due_date:         due.toISOString().slice(0, 10),
+          status:           'PENDING',
+        };
+      });
+      await EvaluationCheckpoint.bulkCreate(checkpointRows, { transaction: t });
+    }
 
     await t.commit();
 
