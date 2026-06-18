@@ -23,6 +23,7 @@ const AuditLog = sequelize.define('AuditLog', {
     type: DataTypes.ENUM(
       // Auth
       'USER_CREATED',
+      'USER_ACTIVATED',
       'USER_DEACTIVATED',
       'LOGIN',
       'LOGOUT',

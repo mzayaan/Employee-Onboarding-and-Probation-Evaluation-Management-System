@@ -70,8 +70,14 @@ import MyDocumentsPage    from '@/pages/employee/documents/MyDocumentsPage'
 // Employee — Task management (Block 5)
 import MyTasksPage from '@/pages/employee/tasks/MyTasksPage'
 
+// Performance Notes — HR Admin + Line Manager (FR-12)
+import PerformanceNotesPage from '@/pages/performance/PerformanceNotesPage'
+
 // Notifications — all authenticated roles (FR-09)
 import NotificationsPage from '@/pages/notifications/NotificationsPage'
+
+// Settings — all authenticated roles (FR-03)
+import ChangePasswordPage from '@/pages/settings/ChangePasswordPage'
 
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
@@ -126,6 +132,11 @@ export default function App() {
             <Route path="/attendance/period/:periodId" element={<AttendanceLogPage />} />
           </Route>
 
+          {/* Performance Notes — shared for HR Admin and Line Manager (FR-12) */}
+          <Route element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER']} />}>
+            <Route path="/performance-notes" element={<PerformanceNotesPage />} />
+          </Route>
+
           {/* ── Line Manager ───────────────────────────────────────── */}
           <Route element={<ProtectedRoute allowedRoles={['LINE_MANAGER']} />}>
             <Route path="/manager/dashboard"               element={<ManagerDashboard />} />
@@ -165,6 +176,13 @@ export default function App() {
             element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN']} />}
           >
             <Route path="/notifications" element={<NotificationsPage />} />
+          </Route>
+
+          {/* ── Settings — all authenticated roles (FR-03) ─────────────── */}
+          <Route
+            element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN']} />}
+          >
+            <Route path="/settings/change-password" element={<ChangePasswordPage />} />
           </Route>
 
           {/* Catch-all */}

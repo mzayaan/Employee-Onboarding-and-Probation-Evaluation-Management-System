@@ -40,12 +40,15 @@ app.use(cors({
   credentials: true,
 }));
 
-// Global rate limiter — applied in production only (NFR-01, NFR-02).
-// In development all browser requests share the same localhost IP, so a strict
-// per-IP window would be exhausted within minutes of normal testing.
-// The auth-specific limiter (10 attempts / 15 min on /login) remains active
-// in all environments as the primary brute-force protection.
-if (process.env.NODE_ENV === 'production') {
+// Global rate limiter (NFR-01, NFR-02).
+// Active in production by default. In development, all browser requests share
+// the same localhost IP so a strict per-IP window would be exhausted within
+// minutes of normal testing — therefore it is off by default in development.
+// Set ENABLE_GLOBAL_RATE_LIMIT=true in .env to activate it locally for manual
+// rate-limit testing without changing NODE_ENV.
+// The auth-specific limiter (10 attempts / 15 min on /login and /forgot-password)
+// remains active in ALL environments as the primary brute-force protection.
+if (process.env.NODE_ENV === 'production' || process.env.ENABLE_GLOBAL_RATE_LIMIT === 'true') {
   const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15-minute rolling window
     max:      200,             // 200 requests per IP per window
@@ -159,6 +162,10 @@ app.use('/api/reports', pdfRoutes);
 const notificationRoutes = require('./src/routes/notificationRoutes');
 app.use('/api/notifications', notificationRoutes);
 
+// Performance note routes (FR-12 — Phase 4)
+const performanceNoteRoutes = require('./src/routes/performanceNoteRoutes');
+app.use('/api/performance-notes', performanceNoteRoutes);
+
 // ── Notification scheduler (FR-09) ───────────────────────────────────────────
 const { startNotificationScheduler } = require('./src/services/notificationService');
 
@@ -198,8 +205,20 @@ const startServer = async () => {
       console.log(`[Server] Running on port ${PORT} in ${process.env.NODE_ENV} mode.`);
       console.log(`[Server] Health check: http://localhost:${PORT}/api/health`);
 
-      // Start scheduled email notification jobs (FR-09)
-      startNotificationScheduler();
+      // Start scheduled email notification jobs (FR-09).
+      // Guard: skip in test environments so Jest doesn't hang on open handles,
+      // and skip unless ENABLE_SCHEDULER=true is explicitly set in development
+      // (avoids sending emails during local development unless intentional).
+      const shouldStartScheduler =
+        process.env.NODE_ENV !== 'test' &&
+        (process.env.NODE_ENV === 'production' || process.env.ENABLE_SCHEDULER === 'true');
+
+      if (shouldStartScheduler) {
+        startNotificationScheduler();
+        console.log('[Scheduler] Notification scheduler started.');
+      } else {
+        console.log('[Scheduler] Notification scheduler skipped (set ENABLE_SCHEDULER=true to activate in development).');
+      }
     });
   } catch (error) {
     console.error('[DB] Unable to connect to MySQL:', error.message);

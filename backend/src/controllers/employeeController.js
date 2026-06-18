@@ -218,7 +218,7 @@ const createEmployee = async (req, res) => {
     // ── Audit log ──────────────────────────────────────────────────────────
     await createAuditLog({
       userId:      req.user.user_id,
-      actionType:  'CREATE_EMPLOYEE',
+      actionType:  'EMPLOYEE_CREATED',
       description: `HR created employee account for ${newUser.email} (${role}).`,
       ipAddress:   getIp(req),
     });
@@ -397,7 +397,7 @@ const updateEmployeeProfile = async (req, res) => {
 
     await createAuditLog({
       userId:      req.user.user_id,
-      actionType:  'UPDATE_EMPLOYEE_PROFILE',
+      actionType:  'EMPLOYEE_UPDATED',
       description: `Profile ID ${id} updated by HR.`,
       ipAddress:   getIp(req),
     });

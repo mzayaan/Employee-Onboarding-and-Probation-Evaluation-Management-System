@@ -323,6 +323,19 @@ const deleteAssignment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Task assignment not found.' });
     }
 
+    // NFR-03: LINE_MANAGER may only delete tasks assigned to employees they manage.
+    if (req.user.role === 'LINE_MANAGER') {
+      const profile = await EmployeeProfile.findByPk(assignment.profile_id, {
+        attributes: ['manager_id'],
+      });
+      if (!profile || profile.manager_id !== req.user.user_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. You may only delete tasks for employees in your team.',
+        });
+      }
+    }
+
     const taskTitle = assignment.task?.title || `ID ${id}`;
     const profileId = assignment.profile_id;
 

@@ -25,8 +25,17 @@ const createAuditLog = async ({ userId, actionType, description, ipAddress = nul
       ip_address: ipAddress,
     });
   } catch (error) {
-    // Audit failures must not crash the main request — log silently
-    console.error('[AuditLog] Failed to write audit entry:', error.message);
+    // Audit failures must not crash the main request — log and continue.
+    // In development, expose the full error and the attempted actionType so
+    // ENUM mismatches and validation errors are immediately visible.
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(
+        `[AuditLog] Failed to write audit entry — actionType attempted: "${actionType}"`,
+        error
+      );
+    } else {
+      console.error('[AuditLog] Failed to write audit entry:', error.message);
+    }
   }
 };
 

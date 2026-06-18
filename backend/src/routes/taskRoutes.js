@@ -41,9 +41,9 @@ router.get('/assignments/employee/:profileId',
   getAssignmentsByEmployee
 );
 
-// Delete a task assignment
+// Delete a task assignment (HR_ADMIN unrestricted; LINE_MANAGER within their team)
 router.delete('/assignments/:id',
-  authorize('HR_ADMIN'),
+  authorize('HR_ADMIN', 'LINE_MANAGER'),
   deleteAssignment
 );
 
