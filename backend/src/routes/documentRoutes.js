@@ -58,9 +58,9 @@ router.patch('/:id/verify',
   verifyDocument
 );
 
-// View/proxy document — requires standard Bearer auth (NFR-02).
-// Frontend must use the Axios instance (blob responseType) rather than
-// a plain <a href> so the Authorization header is sent correctly.
+// View/proxy document — authenticate middleware accepts the JWT from either
+// the Authorization header (Axios calls) or the ?token= query param
+// (direct browser navigation via <a target="_blank">). NFR-02.
 // LINE_MANAGER may view documents belonging to their team members (NFR-03/BUG-06).
 router.get('/:id/view',
   authorize('NEW_EMPLOYEE', 'HR_ADMIN', 'LINE_MANAGER'),

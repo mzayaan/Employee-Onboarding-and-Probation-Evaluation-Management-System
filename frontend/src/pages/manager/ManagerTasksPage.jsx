@@ -6,16 +6,16 @@
 // FR-07, FR-08 | NFR-03 | Objective 1 | LINE_MANAGER
 //
 // Uses getMyTeam() for employee dropdown (manager sees only their team).
-// Managers cannot delete assignments — backend restricts delete to HR_ADMIN.
+// Managers can delete assignments for their own team (backend enforces scope).
 // =============================================================================
 
 import { useEffect, useState } from 'react'
 import AppShell from '@/components/shared/AppShell'
-import { getAllAssignments, assignTask } from '@/api/taskApi'
+import { getAllAssignments, assignTask, deleteAssignment } from '@/api/taskApi'
 import { getMyTeam } from '@/api/evaluationApi'
 import {
   ClipboardList, Plus, Loader2, AlertCircle,
-  CheckCircle, Clock, AlertTriangle, X, Users,
+  CheckCircle, Clock, AlertTriangle, X, Users, Trash2,
 } from 'lucide-react'
 
 const PRIORITY_CONFIG = {
@@ -178,23 +178,69 @@ function AssignTaskModal({ teamMembers, onClose, onSaved }) {
   )
 }
 
-// ── Kanban Card (no delete — managers cannot remove assignments) ───────────────
-function TaskCard({ assignment }) {
+// ── Kanban Card ───────────────────────────────────────────────────────────────
+function TaskCard({ assignment, onDelete }) {
   const emp         = assignment.employeeProfile
   const priorityCfg = PRIORITY_CONFIG[assignment.task?.priority] || PRIORITY_CONFIG.MEDIUM
   const overdue     = isOverdue(assignment.due_date, assignment.status)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting,      setDeleting]      = useState(false)
+  const [deleteError,   setDeleteError]   = useState('')
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await deleteAssignment(assignment.assignment_id)
+      onDelete(assignment.assignment_id)
+    } catch (err) {
+      setDeleteError(err.response?.data?.message || 'Failed to delete task.')
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
 
   return (
     <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-      {/* Priority badge */}
-      <div className="mb-2">
+      {/* Priority badge + delete button row */}
+      <div className="mb-2 flex items-center justify-between">
         <span
           className="rounded-full px-2 py-0.5 text-xs font-medium"
           style={{ backgroundColor: priorityCfg.bg, color: priorityCfg.color }}
         >
           {priorityCfg.label}
         </span>
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            title="Delete assignment"
+            className="rounded-lg p-1 text-slate-300 hover:bg-red-50 hover:text-red-500 transition-colors"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="rounded px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-60"
+            >
+              {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Delete'}
+            </button>
+            <button
+              onClick={() => { setConfirmDelete(false); setDeleteError('') }}
+              className="rounded px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Delete error */}
+      {deleteError && (
+        <p className="mb-2 text-xs text-red-500">{deleteError}</p>
+      )}
 
       {/* Task title */}
       <p className="text-sm font-semibold text-slate-800 leading-tight mb-1">
@@ -244,6 +290,11 @@ export default function ManagerTasksPage() {
       })
       .catch(() => setError('Failed to load tasks.'))
       .finally(() => setLoading(false))
+  }
+
+  // Remove a deleted assignment from local state without a full re-fetch
+  const handleDeleteAssignment = (assignmentId) => {
+    setAssignments((prev) => prev.filter((a) => a.assignment_id !== assignmentId))
   }
 
   useEffect(() => { fetchData() }, [])
@@ -346,7 +397,7 @@ export default function ManagerTasksPage() {
                     </div>
                   ) : (
                     cards.map((a) => (
-                      <TaskCard key={a.assignment_id} assignment={a} />
+                      <TaskCard key={a.assignment_id} assignment={a} onDelete={handleDeleteAssignment} />
                     ))
                   )}
                 </div>

@@ -15,16 +15,23 @@ const { User } = require('../models');
  */
 const authenticate = async (req, res, next) => {
   try {
+    // Primary: Authorization header (all API calls from Axios interceptor).
+    // Fallback: ?token= query param, used only for direct browser navigation
+    // to file-view endpoints (e.g. GET /documents/:id/view opened in a new tab).
+    let token;
     const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.query.token) {
+      token = req.query.token;
+    }
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!token) {
       return res.status(401).json({
         success: false,
         message: 'Authentication required. No token provided.',
       });
     }
-
-    const token = authHeader.split(' ')[1];
 
     let decoded;
     try {
