@@ -5,7 +5,8 @@
 // FR-08, FR-17 | Objective 4
 // =============================================================================
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Chart from 'chart.js/auto'
 import AppShell from '@/components/shared/AppShell'
 import { useAuth } from '@/context/AuthContext'
 import { Users, BarChart3, ClipboardList, AlertTriangle, Loader2, AlertCircle } from 'lucide-react'
@@ -43,6 +44,149 @@ function ProgressBar({ value }) {
       <span className="text-xs font-medium text-slate-600">{value}%</span>
     </div>
   )
+}
+
+// ── Team onboarding distribution doughnut (FR-17 / Chart.js) ─────────────────
+function TeamOnboardingChart({ teamData }) {
+  const canvasRef = useRef(null)
+  const chartRef  = useRef(null)
+
+  useEffect(() => {
+    if (!canvasRef.current || !teamData.length) return
+
+    const completed  = teamData.filter((e) => (e.task_progress ?? 0) === 100).length
+    const inProgress = teamData.filter((e) => (e.task_progress ?? 0) > 0 && (e.task_progress ?? 0) < 100).length
+    const notStarted = teamData.filter((e) => (e.task_progress ?? 0) === 0).length
+
+    if (chartRef.current) {
+      chartRef.current.destroy()
+    }
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'doughnut',
+      data: {
+        labels: ['Completed', 'In Progress', 'Not Started'],
+        datasets: [{
+          data: [completed, inProgress, notStarted],
+          backgroundColor: ['#16a34a', '#3d7dd3', '#e2e8f0'],
+          borderWidth: 2,
+          borderColor: '#ffffff',
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '65%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              font: { size: 11, family: 'Inter, sans-serif' },
+              color: '#475569',
+              padding: 14,
+              usePointStyle: true,
+              pointStyleWidth: 10,
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.label}: ${ctx.parsed} member${ctx.parsed !== 1 ? 's' : ''}`,
+            },
+          },
+        },
+      },
+    })
+
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy()
+        chartRef.current = null
+      }
+    }
+  }, [teamData])
+
+  return <canvas ref={canvasRef} />
+}
+
+// ── Probation status doughnut (FR-17 / Chart.js) ──────────────────────────────
+function ProbationStatusChart({ teamData }) {
+  const canvasRef = useRef(null)
+  const chartRef  = useRef(null)
+
+  useEffect(() => {
+    if (!canvasRef.current || !teamData.length) return
+
+    const counts = teamData.reduce((acc, e) => {
+      const s = e.probation_status || 'NONE'
+      acc[s] = (acc[s] || 0) + 1
+      return acc
+    }, {})
+
+    const labels = []
+    const data   = []
+    const colors = []
+    const colorMap = {
+      ACTIVE:    '#3d7dd3',
+      COMPLETED: '#16a34a',
+      EXTENDED:  '#f59e0b',
+      DISMISSED: '#dc2626',
+      NONE:      '#e2e8f0',
+    }
+
+    for (const [status, count] of Object.entries(counts)) {
+      labels.push(status.charAt(0) + status.slice(1).toLowerCase())
+      data.push(count)
+      colors.push(colorMap[status] ?? '#94a3b8')
+    }
+
+    if (chartRef.current) {
+      chartRef.current.destroy()
+    }
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: colors,
+          borderWidth: 2,
+          borderColor: '#ffffff',
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '65%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              font: { size: 11, family: 'Inter, sans-serif' },
+              color: '#475569',
+              padding: 14,
+              usePointStyle: true,
+              pointStyleWidth: 10,
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.label}: ${ctx.parsed} member${ctx.parsed !== 1 ? 's' : ''}`,
+            },
+          },
+        },
+      },
+    })
+
+    return () => {
+      if (chartRef.current) {
+        chartRef.current.destroy()
+        chartRef.current = null
+      }
+    }
+  }, [teamData])
+
+  return <canvas ref={canvasRef} />
 }
 
 export default function ManagerDashboard() {
@@ -160,6 +304,33 @@ export default function ManagerDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Charts row — only rendered when team data is available */}
+      {!loading && teamData.length > 0 && (
+        <div className="mt-8 grid grid-cols-1 gap-5 lg:grid-cols-2">
+          {/* Onboarding distribution */}
+          <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <h2 className="text-sm font-semibold text-slate-800">Onboarding Progress Distribution</h2>
+              <p className="mt-0.5 text-xs text-slate-400">Task completion breakdown across your team</p>
+            </div>
+            <div className="px-6 py-5" style={{ height: '230px' }}>
+              <TeamOnboardingChart teamData={teamData} />
+            </div>
+          </div>
+
+          {/* Probation status */}
+          <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
+            <div className="border-b border-slate-100 px-6 py-4">
+              <h2 className="text-sm font-semibold text-slate-800">Probation Status Overview</h2>
+              <p className="mt-0.5 text-xs text-slate-400">Current probation standing for your team members</p>
+            </div>
+            <div className="px-6 py-5" style={{ height: '230px' }}>
+              <ProbationStatusChart teamData={teamData} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Team table */}
       <div className="mt-8 rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">

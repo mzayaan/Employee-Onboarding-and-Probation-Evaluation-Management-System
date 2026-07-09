@@ -79,6 +79,9 @@ import NotificationsPage from '@/pages/notifications/NotificationsPage'
 // Settings — all authenticated roles (FR-03)
 import ChangePasswordPage from '@/pages/settings/ChangePasswordPage'
 
+// Profile — all authenticated roles
+import ProfilePage from '@/pages/profile/ProfilePage'
+
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
   const { user, isAuthenticated, loading } = useAuth()
@@ -183,6 +186,7 @@ export default function App() {
             element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN']} />}
           >
             <Route path="/settings/change-password" element={<ChangePasswordPage />} />
+            <Route path="/profile"                  element={<ProfilePage />} />
           </Route>
 
           {/* Catch-all */}

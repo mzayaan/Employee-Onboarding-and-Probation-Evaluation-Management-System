@@ -89,7 +89,7 @@ export default function Sidebar() {
       <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
         <div
           className="flex h-8 w-8 items-center justify-center rounded-md text-white text-sm font-bold flex-shrink-0"
-          style={{ backgroundColor: '#3d7dd3' }}
+          style={{ backgroundColor: '#1e4fa8' }}
         >
           HR
         </div>

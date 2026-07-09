@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate }         from 'react-router-dom'
 import Sidebar                 from './Sidebar'
-import { Bell, KeyRound }      from 'lucide-react'
+import { Bell, KeyRound, UserCircle } from 'lucide-react'
 import { getUnreadCount }      from '@/api/notificationApi'
 
 export default function AppShell({ children }) {
@@ -39,6 +39,15 @@ export default function AppShell({ children }) {
 
         {/* Top bar */}
         <header className="flex items-center justify-end gap-1 px-6 py-3 bg-white border-b border-slate-100 flex-shrink-0">
+          {/* View profile */}
+          <button
+            onClick={() => navigate('/profile')}
+            className="flex items-center justify-center h-9 w-9 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            title="My Profile"
+          >
+            <UserCircle className="h-5 w-5" />
+          </button>
+
           {/* Change password */}
           <button
             onClick={() => navigate('/settings/change-password')}

@@ -8,7 +8,7 @@ const bcrypt  = require('bcrypt');
 const crypto  = require('crypto');
 const jwt     = require('jsonwebtoken');
 const { Op }  = require('sequelize');
-const { User } = require('../models');
+const { User, EmployeeProfile, Department } = require('../models');
 const { createAuditLog }           = require('../utils/auditLogger');
 const { sendPasswordResetEmail }   = require('../utils/mailer');
 const { validatePasswordStrength } = require('../utils/passwordValidator');
@@ -143,7 +143,21 @@ const getMe = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    return res.status(200).json({ success: true, user });
+    // For NEW_EMPLOYEE, include their employment profile details
+    let employeeProfile = null;
+    if (user.role === 'NEW_EMPLOYEE') {
+      employeeProfile = await EmployeeProfile.findOne({
+        where: { user_id: user.user_id },
+        attributes: ['job_title', 'phone', 'start_date', 'probation_end_date', 'onboarding_status'],
+        include: [{
+          model: Department,
+          as: 'department',
+          attributes: ['name'],
+        }],
+      });
+    }
+
+    return res.status(200).json({ success: true, user, employeeProfile });
   } catch (error) {
     console.error('[authController.getMe]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve user.' });
