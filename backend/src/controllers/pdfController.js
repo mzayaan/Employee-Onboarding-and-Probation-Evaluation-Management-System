@@ -234,14 +234,28 @@ const generateReport = async (req, res) => {
     });
     const criteriaList = Object.values(criteriaMap).sort((a, b) => b.weight - a.weight);
 
-    // Compute weighted score from last completed checkpoint per criterion
+    // Per-criterion weighted score: average across ALL completed checkpoints so the
+    // WEIGHTED column sums to the cumulative total displayed in the footer (FR-14).
+    // lastRaw is kept from the final checkpoint for the Manager vs Self-Assessment section.
     const lastMgrScores = lastCp?.managerEvaluation?.scores || [];
     criteriaList.forEach((c) => {
-      const lastS       = lastMgrScores.find((s) => s.criterion_id === c.criterion_id || s.criterion?.name === c.name);
-      c.lastRaw         = lastS ? parseFloat(lastS.raw_score) : null;
-      c.weightedScore   = c.lastRaw != null ? (c.lastRaw / 5) * c.weight : null;
+      const lastS   = lastMgrScores.find((s) => s.criterion_id === c.criterion_id || s.criterion?.name === c.name);
+      c.lastRaw     = lastS ? parseFloat(lastS.raw_score) : null;
+
+      // Average the raw score for this criterion across all completed checkpoints
+      const cpRaws  = completedCps
+        .map((cp) => c.cpScores[cp.checkpoint_id])
+        .filter((v) => v != null);
+      const avgRaw  = cpRaws.length > 0 ? cpRaws.reduce((a, b) => a + b, 0) / cpRaws.length : null;
+      c.weightedScore = avgRaw != null ? (avgRaw / 5) * c.weight : null;
     });
-    const cumulativeScore = criteriaList.reduce((sum, c) => sum + (c.weightedScore ?? 0), 0);
+
+    // Cumulative score: average of each checkpoint's stored weighted_score — matches the
+    // dashboard and evaluationController formula exactly (FR-14).
+    const cpWeightedScores = completedCps.map((cp) => parseFloat(cp.managerEvaluation?.weighted_score || 0));
+    const cumulativeScore = cpWeightedScores.length > 0
+      ? parseFloat((cpWeightedScores.reduce((a, b) => a + b, 0) / cpWeightedScores.length).toFixed(2))
+      : 0;
 
     // Average raw score per checkpoint (for table footer)
     const cpAvgRaw = completedCps.map((cp) => {
