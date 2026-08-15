@@ -9,28 +9,10 @@
 // =============================================================================
 
 const { createAuditLog } = require('../utils/auditLogger');
+const { calcContribution, deriveRecommendation } = require('../utils/scoringHelpers');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
-
-// ── Scoring helpers ───────────────────────────────────────────────────────────
-
-/**
- * Calculate weighted contribution for a single score.
- * Formula: (raw_score / 5.0) * weight_percent
- */
-const calcContribution = (rawScore, weightPercent) =>
-  parseFloat(((rawScore / 5.0) * parseFloat(weightPercent)).toFixed(2));
-
-/**
- * Determine recommendation from cumulative score.
- * >= 75 → CONFIRM | 50–74.99 → EXTEND | < 50 → DISMISS
- */
-const deriveRecommendation = (score) => {
-  if (score >= 75) return 'CONFIRM';
-  if (score >= 50) return 'EXTEND';
-  return 'DISMISS';
-};
 
 // =============================================================================
 // GET /api/evaluations/probation/:profileId
@@ -743,10 +725,14 @@ const submitSelfAssessment = async (req, res) => {
 // =============================================================================
 
 module.exports = {
+  // Route handlers
   getProbationByProfile,
   getMyProbation,
   getCheckpoint,
   getMyTeam,
   submitManagerEvaluation,
   submitSelfAssessment,
+  // Pure scoring helpers — exported for unit testing (FR-14)
+  calcContribution,
+  deriveRecommendation,
 };
