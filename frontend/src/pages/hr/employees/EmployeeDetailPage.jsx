@@ -683,8 +683,9 @@ export default function EmployeeDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Onboarding Status</label>
+              <label htmlFor="edit-onboarding-status" className="mb-1 block text-xs font-medium text-slate-600">Onboarding Status</label>
               <select
+                id="edit-onboarding-status"
                 value={form.onboarding_status}
                 onChange={set('onboarding_status')}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
