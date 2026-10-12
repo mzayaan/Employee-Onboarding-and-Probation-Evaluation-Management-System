@@ -70,8 +70,8 @@ const createNote = async (req, res) => {
 
     await createAuditLog({
       userId:      req.user.user_id,
-      actionType:  'EVALUATION_SUBMITTED',
-      description: `Performance note created for profile_id ${profile_id} (note_id: ${note.note_id}).`,
+      actionType:  'EVALUATION_SUBMITTED',   // closest available ENUM value — note creation
+      description: `[NOTE_CREATED] Performance note created for profile_id ${profile_id} (note_id: ${note.note_id}).`,
       ipAddress:   getIp(req),
     });
 
@@ -182,8 +182,8 @@ const deleteNote = async (req, res) => {
 
     await createAuditLog({
       userId:      req.user.user_id,
-      actionType:  'EVALUATION_SUBMITTED',
-      description: `Performance note ${noteId} deleted from profile_id ${profileId}.`,
+      actionType:  'EVALUATION_SUBMITTED',   // closest available ENUM value — note deletion
+      description: `[NOTE_DELETED] Performance note ${noteId} deleted from profile_id ${profileId}.`,
       ipAddress:   getIp(req),
     });
 

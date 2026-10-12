@@ -24,8 +24,8 @@ const getAuditLogs = async (req, res) => {
       limit       = 25,
     } = req.query;
 
-    const pageNum  = Math.max(1, parseInt(page,  10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+    const pageNum  = Math.max(1, Number.parseInt(page,  10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 25));
     const offset   = (pageNum - 1) * pageSize;
 
     // ── Build where clause ─────────────────────────────────────────────────

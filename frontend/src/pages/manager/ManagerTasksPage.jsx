@@ -83,13 +83,14 @@ function AssignTaskModal({ teamMembers, onClose, onSaved }) {
 
           {/* Team member dropdown */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label htmlFor="mgr-task-member" className="block text-sm font-medium text-slate-700 mb-1.5">
               Team Member <span className="text-red-500">*</span>
             </label>
             {teamMembers.length === 0 ? (
               <p className="text-xs text-slate-400">No team members assigned yet.</p>
             ) : (
               <select
+                id="mgr-task-member"
                 value={form.profile_id}
                 onChange={set('profile_id')}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -105,10 +106,11 @@ function AssignTaskModal({ teamMembers, onClose, onSaved }) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label htmlFor="mgr-task-title" className="block text-sm font-medium text-slate-700 mb-1.5">
               Task Title <span className="text-red-500">*</span>
             </label>
             <input
+              id="mgr-task-title"
               type="text"
               value={form.title}
               onChange={set('title')}
@@ -118,8 +120,9 @@ function AssignTaskModal({ teamMembers, onClose, onSaved }) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+            <label htmlFor="mgr-task-desc" className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
             <textarea
+              id="mgr-task-desc"
               rows={2}
               value={form.description}
               onChange={set('description')}
@@ -130,8 +133,9 @@ function AssignTaskModal({ teamMembers, onClose, onSaved }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Priority</label>
+              <label htmlFor="mgr-task-priority" className="block text-sm font-medium text-slate-700 mb-1.5">Priority</label>
               <select
+                id="mgr-task-priority"
                 value={form.priority}
                 onChange={set('priority')}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -142,10 +146,11 @@ function AssignTaskModal({ teamMembers, onClose, onSaved }) {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label htmlFor="mgr-task-due" className="block text-sm font-medium text-slate-700 mb-1.5">
                 Due Date <span className="text-red-500">*</span>
               </label>
               <input
+                id="mgr-task-due"
                 type="date"
                 value={form.due_date}
                 onChange={set('due_date')}

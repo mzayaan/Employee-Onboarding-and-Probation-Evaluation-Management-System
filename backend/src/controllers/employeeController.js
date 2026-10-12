@@ -85,7 +85,7 @@ const createEmployee = async (req, res) => {
     if (role === 'NEW_EMPLOYEE') {
       const startD = new Date(start_date);
       const endD   = new Date(probation_end_date);
-      if (isNaN(startD) || isNaN(endD)) {
+      if (Number.isNaN(startD) || Number.isNaN(endD)) {
         await t.rollback();
         return res.status(400).json({ success: false, message: 'Invalid date format.' });
       }
@@ -394,6 +394,16 @@ const updateEmployeeProfile = async (req, res) => {
       onboarding_status:  onboarding_status !== undefined ? onboarding_status        : profile.onboarding_status,
       updated_at:         new Date(),
     });
+
+    // Keep ProbationPeriod.end_date in sync with EmployeeProfile.probation_end_date.
+    // The HR dashboard reads days-left from ProbationPeriod, so both tables must
+    // reflect the same value whenever a probation end date change is saved.
+    if (probation_end_date !== undefined) {
+      const probationRecord = await ProbationPeriod.findOne({ where: { profile_id: id } });
+      if (probationRecord) {
+        await probationRecord.update({ end_date: probation_end_date });
+      }
+    }
 
     await createAuditLog({
       userId:      req.user.user_id,

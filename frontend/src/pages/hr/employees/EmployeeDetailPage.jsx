@@ -82,8 +82,9 @@ function AttendanceSection({ periodId }) {
           {formErr && <p className="text-xs text-red-600">{formErr}</p>}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Date *</label>
+              <label htmlFor="emp-att-date" className="mb-1 block text-xs font-medium text-slate-600">Date *</label>
               <input
+                id="emp-att-date"
                 type="date"
                 value={form.record_date}
                 onChange={(e) => setForm((f) => ({ ...f, record_date: e.target.value }))}
@@ -91,8 +92,9 @@ function AttendanceSection({ periodId }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Status *</label>
+              <label htmlFor="emp-att-status" className="mb-1 block text-xs font-medium text-slate-600">Status *</label>
               <select
+                id="emp-att-status"
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -104,8 +106,9 @@ function AttendanceSection({ periodId }) {
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Notes (optional)</label>
+            <label htmlFor="emp-att-notes" className="mb-1 block text-xs font-medium text-slate-600">Notes (optional)</label>
             <input
+              id="emp-att-notes"
               type="text"
               placeholder="Reason for absence, late arrival, etc."
               value={form.notes}
@@ -240,9 +243,9 @@ function ProbationCheckpointsSection({ profileId }) {
           <tbody className="divide-y divide-slate-50">
             {period.checkpoints.map((cp) => {
               const mgr  = cp.managerEvaluation?.weighted_score != null
-                ? parseFloat(cp.managerEvaluation.weighted_score) : null
+                ? Number.parseFloat(cp.managerEvaluation.weighted_score) : null
               const self = cp.selfAssessment?.self_score != null
-                ? parseFloat(cp.selfAssessment.self_score) : null
+                ? Number.parseFloat(cp.selfAssessment.self_score) : null
 
               return (
                 <tr key={cp.checkpoint_id}>
@@ -581,8 +584,15 @@ export default function EmployeeDetailPage() {
           </div>
 
           {/* Attendance records — HR Admin and Line Manager (FR-12) */}
+          {/* FRONT-ISSUE-1 fix: use ACTIVE period first, fall back to most recent —
+              same logic as handleDownloadReport. Using periods[0] (oldest) was wrong
+              for employees whose probation has been extended (multiple periods). */}
           <AttendanceSection
-            periodId={(employee.probationPeriods ?? [])[0]?.period_id ?? null}
+            periodId={(() => {
+              const periods = employee?.probationPeriods ?? []
+              const p = periods.find((x) => x.status === 'ACTIVE') ?? periods[periods.length - 1]
+              return p?.period_id ?? null
+            })()}
           />
 
           {/* Probation checkpoint scores — HR Admin (FR-13, FR-14, FR-16) */}
@@ -602,8 +612,9 @@ export default function EmployeeDetailPage() {
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Job Title *</label>
+              <label htmlFor="edit-job-title" className="mb-1 block text-xs font-medium text-slate-600">Job Title *</label>
               <input
+                id="edit-job-title"
                 type="text"
                 value={form.job_title}
                 onChange={set('job_title')}
@@ -612,8 +623,9 @@ export default function EmployeeDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
+              <label htmlFor="edit-phone" className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
               <input
+                id="edit-phone"
                 type="tel"
                 value={form.phone}
                 onChange={set('phone')}
@@ -621,8 +633,9 @@ export default function EmployeeDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Department</label>
+              <label htmlFor="edit-department" className="mb-1 block text-xs font-medium text-slate-600">Department</label>
               <select
+                id="edit-department"
                 value={form.department_id}
                 onChange={set('department_id')}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -634,8 +647,9 @@ export default function EmployeeDetailPage() {
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Manager</label>
+              <label htmlFor="edit-manager" className="mb-1 block text-xs font-medium text-slate-600">Manager</label>
               <select
+                id="edit-manager"
                 value={form.manager_id}
                 onChange={set('manager_id')}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -647,8 +661,9 @@ export default function EmployeeDetailPage() {
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Start Date *</label>
+              <label htmlFor="edit-start-date" className="mb-1 block text-xs font-medium text-slate-600">Start Date *</label>
               <input
+                id="edit-start-date"
                 type="date"
                 value={form.start_date}
                 onChange={set('start_date')}
@@ -657,8 +672,9 @@ export default function EmployeeDetailPage() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Probation End Date *</label>
+              <label htmlFor="edit-probation-end" className="mb-1 block text-xs font-medium text-slate-600">Probation End Date *</label>
               <input
+                id="edit-probation-end"
                 type="date"
                 value={form.probation_end_date}
                 onChange={set('probation_end_date')}

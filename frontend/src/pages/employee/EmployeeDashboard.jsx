@@ -77,7 +77,7 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     // Promise.allSettled ensures one failed section does not blank the entire dashboard.
-    Promise.allSettled([
+    void Promise.allSettled([
       getMyProgress(),
       getMyDocuments(),
       getMyTasks(),

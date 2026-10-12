@@ -23,7 +23,7 @@
  * @returns {number}
  */
 const calcContribution = (rawScore, weightPercent) =>
-  parseFloat(((rawScore / 5.0) * parseFloat(weightPercent)).toFixed(2));
+  Number.parseFloat(((rawScore / 5.0) * Number.parseFloat(weightPercent)).toFixed(2));
 
 /**
  * Derive a final probation recommendation from a cumulative weighted score.

@@ -167,7 +167,10 @@ export default function DocumentReviewPage() {
                 return (
                   <div
                     key={doc.document_id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => selectDoc(doc)}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && selectDoc(doc)}
                     className={`flex cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors ${
                       isActive ? 'bg-blue-50 border-l-2 border-blue-500' : 'hover:bg-slate-50'
                     }`}

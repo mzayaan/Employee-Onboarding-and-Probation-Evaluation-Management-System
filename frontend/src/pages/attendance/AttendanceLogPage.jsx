@@ -100,7 +100,7 @@ export default function AttendanceLogPage() {
     setFormOk(false)
     try {
       await addAttendanceRecord({
-        period_id:   parseInt(periodId, 10),
+        period_id:   Number.parseInt(periodId, 10),
         record_date: form.record_date,
         status:      form.status,
         notes:       form.notes.trim() || undefined,
@@ -191,10 +191,11 @@ export default function AttendanceLogPage() {
               <div className="grid grid-cols-2 gap-4">
                 {/* Date */}
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-700">
+                  <label htmlFor="att-log-date" className="mb-1.5 block text-xs font-medium text-slate-700">
                     Date <span className="text-red-500">*</span>
                   </label>
                   <input
+                    id="att-log-date"
                     type="date"
                     value={form.record_date}
                     max={today}
@@ -206,10 +207,11 @@ export default function AttendanceLogPage() {
 
                 {/* Status */}
                 <div>
-                  <label className="mb-1.5 block text-xs font-medium text-slate-700">
+                  <label htmlFor="att-log-status" className="mb-1.5 block text-xs font-medium text-slate-700">
                     Status <span className="text-red-500">*</span>
                   </label>
                   <select
+                    id="att-log-status"
                     value={form.status}
                     onChange={(e) => handleChange('status', e.target.value)}
                     required
@@ -224,10 +226,11 @@ export default function AttendanceLogPage() {
 
               {/* Notes */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-slate-700">
+                <label htmlFor="att-log-notes" className="mb-1.5 block text-xs font-medium text-slate-700">
                   Notes <span className="text-slate-400">(optional)</span>
                 </label>
                 <input
+                  id="att-log-notes"
                   type="text"
                   value={form.notes}
                   onChange={(e) => handleChange('notes', e.target.value)}

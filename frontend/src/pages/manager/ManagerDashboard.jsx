@@ -199,7 +199,7 @@ export default function ManagerDashboard() {
   const [error,        setError]        = useState(null)
 
   useEffect(() => {
-    Promise.allSettled([getOnboardingProgress(), getAllAssignments(), getMyTeam()])
+    void Promise.allSettled([getOnboardingProgress(), getAllAssignments(), getMyTeam()])
       .then(([progress, tasks, members]) => {
         if (progress.status === 'fulfilled') setTeamData(progress.value)
         if (tasks.status   === 'fulfilled') setAssignments(tasks.value)

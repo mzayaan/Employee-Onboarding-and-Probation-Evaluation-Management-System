@@ -66,4 +66,4 @@ async function seed() {
   }
 }
 
-seed();
+seed().catch(err => { console.error('[Seeder] Fatal error:', err); process.exit(1); });

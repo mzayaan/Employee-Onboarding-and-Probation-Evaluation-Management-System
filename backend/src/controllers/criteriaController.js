@@ -35,17 +35,17 @@ const createCriterion = async (req, res) => {
   if (!name || name.trim().length === 0) {
     return res.status(400).json({ success: false, message: 'Criterion name is required.' });
   }
-  const weight = parseFloat(weight_percent);
-  if (isNaN(weight) || weight <= 0 || weight > 100) {
+  const weight = Number.parseFloat(weight_percent);
+  if (Number.isNaN(weight) || weight <= 0 || weight > 100) {
     return res.status(400).json({ success: false, message: 'Weight must be a number between 1 and 100.' });
   }
 
   try {
     // Sum current active weights
     const active = await EvaluationCriterion.findAll({ where: { is_active: true } });
-    const currentTotal = active.reduce((sum, c) => sum + parseFloat(c.weight_percent), 0);
+    const currentTotal = active.reduce((sum, c) => sum + Number.parseFloat(c.weight_percent), 0);
 
-    if (parseFloat((currentTotal + weight).toFixed(2)) > 100) {
+    if (Number.parseFloat((currentTotal + weight).toFixed(2)) > 100) {
       return res.status(400).json({
         success: false,
         message: `Adding ${weight}% would exceed 100%. Current total: ${currentTotal.toFixed(2)}%.`,
@@ -89,8 +89,8 @@ const updateCriterion = async (req, res) => {
 
     // Validate new weight if provided
     if (weight_percent !== undefined) {
-      const newWeight = parseFloat(weight_percent);
-      if (isNaN(newWeight) || newWeight <= 0 || newWeight > 100) {
+      const newWeight = Number.parseFloat(weight_percent);
+      if (Number.isNaN(newWeight) || newWeight <= 0 || newWeight > 100) {
         return res.status(400).json({ success: false, message: 'Weight must be between 1 and 100.' });
       }
 
@@ -101,11 +101,11 @@ const updateCriterion = async (req, res) => {
           criterion_id: { [Op.ne]: id },
         },
       });
-      const othersTotal = others.reduce((sum, c) => sum + parseFloat(c.weight_percent), 0);
+      const othersTotal = others.reduce((sum, c) => sum + Number.parseFloat(c.weight_percent), 0);
 
       // When activating a previously inactive criterion also check
       const effectivelyActive = is_active !== undefined ? is_active : criterion.is_active;
-      if (effectivelyActive && parseFloat((othersTotal + newWeight).toFixed(2)) > 100) {
+      if (effectivelyActive && Number.parseFloat((othersTotal + newWeight).toFixed(2)) > 100) {
         return res.status(400).json({
           success: false,
           message: `Weight would push total above 100%. Other active criteria sum: ${othersTotal.toFixed(2)}%.`,

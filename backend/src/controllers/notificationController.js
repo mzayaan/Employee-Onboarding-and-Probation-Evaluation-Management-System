@@ -53,9 +53,9 @@ const getUnreadCount = async (req, res) => {
 // Marks a single notification as read. Only the owner can mark their own.
 const markAsRead = async (req, res) => {
   const userId = req.user.user_id;
-  const notifId = parseInt(req.params.id, 10);
+  const notifId = Number.parseInt(req.params.id, 10);
 
-  if (isNaN(notifId)) {
+  if (Number.isNaN(notifId)) {
     return res.status(400).json({ success: false, message: 'Invalid notification ID.' });
   }
 

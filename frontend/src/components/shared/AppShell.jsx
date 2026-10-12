@@ -24,7 +24,7 @@ export default function AppShell({ children }) {
         if (active) setCount(n)
       } catch { /* silent */ }
     }
-    poll()
+    void poll()
     const id = setInterval(poll, 60_000)
     return () => { active = false; clearInterval(id) }
   }, [])

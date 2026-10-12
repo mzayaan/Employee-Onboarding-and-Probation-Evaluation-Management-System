@@ -36,15 +36,15 @@ function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
   const set = (field) => (e) => setForm((p) => ({ ...p, [field]: e.target.value }))
 
   // How much weight budget is available for this criterion
-  const remaining = parseFloat((100 - usedWeight).toFixed(2))
-  const enteredW  = parseFloat(form.weight_percent)
-  const budgetOk  = !isNaN(enteredW) && enteredW > 0 && enteredW <= remaining + 0.01
+  const remaining = Number.parseFloat((100 - usedWeight).toFixed(2))
+  const enteredW  = Number.parseFloat(form.weight_percent)
+  const budgetOk  = !Number.isNaN(enteredW) && enteredW > 0 && enteredW <= remaining + 0.01
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name.trim()) { setError('Criterion name is required.'); return }
-    const w = parseFloat(form.weight_percent)
-    if (isNaN(w) || w <= 0 || w > 100) { setError('Weight must be between 1 and 100.'); return }
+    const w = Number.parseFloat(form.weight_percent)
+    if (Number.isNaN(w) || w <= 0 || w > 100) { setError('Weight must be between 1 and 100.'); return }
     if (w > remaining + 0.01) {
       setError(`Weight would exceed the remaining budget of ${remaining}%. Adjust other criteria first.`)
       return
@@ -94,10 +94,11 @@ function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label htmlFor="criterion-name" className="block text-sm font-medium text-slate-700 mb-1.5">
               Criterion Name <span className="text-red-500">*</span>
             </label>
             <input
+              id="criterion-name"
               type="text"
               value={form.name}
               onChange={set('name')}
@@ -107,8 +108,9 @@ function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+            <label htmlFor="criterion-desc" className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
             <textarea
+              id="criterion-desc"
               rows={2}
               value={form.description}
               onChange={set('description')}
@@ -119,10 +121,11 @@ function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              <label htmlFor="criterion-weight" className="block text-sm font-medium text-slate-700 mb-1.5">
                 Weight (%) <span className="text-red-500">*</span>
               </label>
               <input
+                id="criterion-weight"
                 type="number"
                 min="1"
                 max={remaining}
@@ -131,7 +134,7 @@ function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
                 onChange={set('weight_percent')}
                 placeholder={`max ${remaining}%`}
                 className={`w-full rounded-lg border px-3 py-2.5 text-sm outline-none focus:ring-2 ${
-                  !isNaN(enteredW) && enteredW > 0
+                  !Number.isNaN(enteredW) && enteredW > 0
                     ? budgetOk
                       ? 'border-green-300 focus:border-green-400 focus:ring-green-100'
                       : 'border-red-300 focus:border-red-400 focus:ring-red-100'
@@ -145,8 +148,9 @@ function CriterionModal({ existing, onClose, onSaved, usedWeight }) {
               </p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Display Order</label>
+              <label htmlFor="criterion-order" className="block text-sm font-medium text-slate-700 mb-1.5">Display Order</label>
               <input
+                id="criterion-order"
                 type="number"
                 min="0"
                 value={form.display_order}
@@ -215,7 +219,7 @@ export default function CriteriaConfigPage() {
   }
 
   const activeCriteria  = criteria.filter((c) => c.is_active)
-  const totalWeight     = activeCriteria.reduce((sum, c) => sum + parseFloat(c.weight_percent), 0)
+  const totalWeight     = activeCriteria.reduce((sum, c) => sum + Number.parseFloat(c.weight_percent), 0)
   const weightValid     = Math.abs(totalWeight - 100) < 0.01
   const weightPct       = totalWeight.toFixed(2)
 
@@ -233,7 +237,7 @@ export default function CriteriaConfigPage() {
               ? totalWeight
               : activeCriteria
                   .filter((c) => c.criterion_id !== modal?.criterion_id)
-                  .reduce((s, c) => s + parseFloat(c.weight_percent), 0)
+                  .reduce((s, c) => s + Number.parseFloat(c.weight_percent), 0)
           }
         />
       )}
@@ -334,7 +338,7 @@ export default function CriteriaConfigPage() {
                       className="inline-flex items-center rounded-full px-2.5 py-0.5 text-sm font-semibold"
                       style={{ backgroundColor: '#e8edf5', color: '#1e3a5f' }}
                     >
-                      {parseFloat(criterion.weight_percent)}%
+                      {Number.parseFloat(criterion.weight_percent)}%
                     </span>
                   </td>
 

@@ -76,7 +76,7 @@ function CheckpointPill({ checkpoint }) {
   if (!checkpoint) return <span className="text-slate-300 text-xs">—</span>
   const score = checkpoint.managerEvaluation?.weighted_score
   if (score != null) {
-    const s = parseFloat(score)
+    const s = Number.parseFloat(score)
     const colour = s >= 75 ? '#15803d' : s >= 50 ? '#854d0e' : '#b91c1c'
     return (
       <span

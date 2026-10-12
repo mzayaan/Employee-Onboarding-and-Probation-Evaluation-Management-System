@@ -58,7 +58,7 @@ function StarRating({ value, onChange, disabled = false }) {
 const calcScore = (scoresMap, criteria) =>
   criteria.reduce((sum, c) => {
     const raw = scoresMap[c.criterion_id] || 0
-    return sum + parseFloat(((raw / 5.0) * parseFloat(c.weight_percent)).toFixed(2))
+    return sum + Number.parseFloat(((raw / 5.0) * Number.parseFloat(c.weight_percent)).toFixed(2))
   }, 0)
 
 const fmtDate = (iso) => {
@@ -178,7 +178,7 @@ export default function SelfAssessmentPage() {
     try {
       const payload = {
         scores: Object.entries(scores).map(([criterion_id, raw_score]) => ({
-          criterion_id: parseInt(criterion_id, 10),
+          criterion_id: Number.parseInt(criterion_id, 10),
           raw_score,
         })),
         self_reflection_notes: notes.trim() || null,  // confirmed backend body param (evaluationController.js:505)
@@ -392,13 +392,13 @@ export default function SelfAssessmentPage() {
                     <div
                       className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold"
                       style={{
-                        backgroundColor: parseFloat(managerEval.weighted_score) >= 75 ? '#dcfce7'
-                          : parseFloat(managerEval.weighted_score) >= 50 ? '#fef9c3' : '#fee2e2',
-                        color: parseFloat(managerEval.weighted_score) >= 75 ? '#15803d'
-                          : parseFloat(managerEval.weighted_score) >= 50 ? '#854d0e' : '#b91c1c',
+                        backgroundColor: Number.parseFloat(managerEval.weighted_score) >= 75 ? '#dcfce7'
+                          : Number.parseFloat(managerEval.weighted_score) >= 50 ? '#fef9c3' : '#fee2e2',
+                        color: Number.parseFloat(managerEval.weighted_score) >= 75 ? '#15803d'
+                          : Number.parseFloat(managerEval.weighted_score) >= 50 ? '#854d0e' : '#b91c1c',
                       }}
                     >
-                      {parseFloat(managerEval.weighted_score).toFixed(1)}
+                      {Number.parseFloat(managerEval.weighted_score).toFixed(1)}
                     </div>
                     <p className="text-xs text-slate-500">Manager evaluation submitted</p>
                   </div>

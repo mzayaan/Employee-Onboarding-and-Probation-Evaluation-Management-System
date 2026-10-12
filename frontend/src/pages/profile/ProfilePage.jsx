@@ -71,7 +71,7 @@ export default function ProfilePage() {
         if (active) setLoading(false)
       }
     }
-    load()
+    void load()
     return () => { active = false }
   }, [])
 

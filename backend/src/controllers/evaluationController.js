@@ -155,9 +155,13 @@ const getCheckpoint = async (req, res) => {
               ],
             },
             {
-              // Sibling checkpoints — used for the history panel in the evaluation form
+              // Sibling checkpoints — used for the history panel in the evaluation form.
+              // BUG-13 fix: Sequelize v6 ignores 'order' inside a deeply nested include
+              // unless separate:true is set. Without it, checkpoints come back in insertion
+              // order rather than day_number order, breaking the history panel timeline.
               model: EvaluationCheckpoint,
               as:    'checkpoints',
+              separate: true,
               include: [
                 { model: ManagerEvaluation, as: 'managerEvaluation', attributes: ['eval_id', 'weighted_score', 'submitted_at'] },
                 { model: SelfAssessment,    as: 'selfAssessment',    attributes: ['assessment_id', 'self_score', 'submitted_at'] },
@@ -228,7 +232,7 @@ const getCheckpoint = async (req, res) => {
           .sort((a, b) => a.day_number - b.day_number);
 
         const currentIdx = siblings.findIndex(
-          (s) => s.checkpoint_id === parseInt(checkpointId, 10)
+          (s) => s.checkpoint_id === Number.parseInt(checkpointId, 10)
         );
 
         const fromDate =
@@ -404,7 +408,7 @@ const submitManagerEvaluation = async (req, res) => {
     // FR-10: Active criteria weights must sum to exactly 100% before any
     // evaluation can be submitted — otherwise scores are not comparable.
     const totalCriteriaWeight = allCriteria.reduce(
-      (sum, c) => sum + parseFloat(c.weight_percent), 0
+      (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
     );
     if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
       return res.status(422).json({
@@ -434,7 +438,7 @@ const submitManagerEvaluation = async (req, res) => {
         weighted_contribution: contribution,
       };
     });
-    totalWeighted = parseFloat(totalWeighted.toFixed(2));
+    totalWeighted = Number.parseFloat(totalWeighted.toFixed(2));
 
     // Persist in a transaction
     await sequelize.transaction(async (t) => {
@@ -494,8 +498,8 @@ const submitManagerEvaluation = async (req, res) => {
         if (pendingCount === 0) {
           // All checkpoints done — calculate cumulative average of manager weighted scores
           const evalScores = allCheckpoints
-            .map((c) => parseFloat(c.managerEvaluation?.weighted_score || 0));
-          const cumulative = parseFloat(
+            .map((c) => Number.parseFloat(c.managerEvaluation?.weighted_score || 0));
+          const cumulative = Number.parseFloat(
             (evalScores.reduce((a, b) => a + b, 0) / (evalScores.length || 1)).toFixed(2)
           );
           const recommendationType = deriveRecommendation(cumulative);
@@ -610,6 +614,19 @@ const submitSelfAssessment = async (req, res) => {
       criteriaMap[c.criterion_id] = c;
     }
 
+    // BUG-12 fix: Same weight-total validation as submitManagerEvaluation.
+    // Self-assessment scores are weighted using the same criteria, so they must
+    // also total 100% to produce a meaningful self_score.
+    const totalCriteriaWeight = allCriteria.reduce(
+      (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
+    );
+    if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
+      return res.status(422).json({
+        success: false,
+        message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+      });
+    }
+
     // Validate scores
     for (const s of scores) {
       if (!criteriaMap[s.criterion_id]) {
@@ -627,7 +644,7 @@ const submitSelfAssessment = async (req, res) => {
       totalSelfScore += contribution;
       return { criterion_id: s.criterion_id, raw_score: s.raw_score, weighted_contribution: contribution };
     });
-    totalSelfScore = parseFloat(totalSelfScore.toFixed(2));
+    totalSelfScore = Number.parseFloat(totalSelfScore.toFixed(2));
 
     await sequelize.transaction(async (t) => {
       const assessment = await SelfAssessment.create({
@@ -668,8 +685,8 @@ const submitSelfAssessment = async (req, res) => {
 
         if (pendingCount === 0) {
           const evalScores = allCheckpoints
-            .map((c) => parseFloat(c.managerEvaluation?.weighted_score || 0));
-          const cumulative = parseFloat(
+            .map((c) => Number.parseFloat(c.managerEvaluation?.weighted_score || 0));
+          const cumulative = Number.parseFloat(
             (evalScores.reduce((a, b) => a + b, 0) / (evalScores.length || 1)).toFixed(2)
           );
           const recommendationType = deriveRecommendation(cumulative);

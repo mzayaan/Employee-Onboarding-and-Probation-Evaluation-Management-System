@@ -146,7 +146,10 @@ export default function NotificationsPage() {
             return (
               <div
                 key={n.notification_id}
+                role="button"
+                tabIndex={0}
                 onClick={() => !n.is_read && handleMarkRead(n.notification_id)}
+                onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !n.is_read && handleMarkRead(n.notification_id)}
                 className={`flex items-start gap-4 rounded-xl border px-5 py-4 transition-colors cursor-pointer ${
                   n.is_read
                     ? 'bg-white border-slate-100 text-slate-500'

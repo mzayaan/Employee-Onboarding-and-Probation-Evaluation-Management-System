@@ -53,6 +53,18 @@ const addAttendanceRecord = async (req, res) => {
       }
     }
 
+    // BUG-10 fix: Prevent duplicate attendance entries for the same date.
+    // A second record for the same period + date would corrupt summary counts.
+    const existing = await AttendanceRecord.findOne({
+      where: { period_id, record_date },
+    });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: `An attendance record for ${record_date} already exists. To change it, delete the existing record first.`,
+      });
+    }
+
     const record = await AttendanceRecord.create({
       period_id,
       record_date,

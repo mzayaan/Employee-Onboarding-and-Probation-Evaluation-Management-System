@@ -82,7 +82,7 @@ export default function AddEmployeePage() {
     if (!form.first_name.trim())  e.first_name  = 'First name is required.'
     if (!form.last_name.trim())   e.last_name   = 'Last name is required.'
     if (!form.email.trim())       e.email       = 'Email is required.'
-    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email.'
+    else if (!/^[\w.%+\-]+@[\w.\-]+\.[a-zA-Z]{2,}$/.test(form.email)) e.email = 'Enter a valid email.'
     if (!form.password)           e.password    = 'Password is required.'
     else { const msg = checkPassword(form.password); if (msg) e.password = msg }
     if (!form.job_title.trim())   e.job_title   = 'Job title is required.'
@@ -373,7 +373,7 @@ export default function AddEmployeePage() {
                 <button
                   type="button"
                   onClick={() => {
-                    const val = parseInt(newDayInput, 10)
+                    const val = Number.parseInt(newDayInput, 10)
                     if (!val || val < 1 || val > 365) {
                       setDayInputError('Enter a day number between 1 and 365.')
                       return

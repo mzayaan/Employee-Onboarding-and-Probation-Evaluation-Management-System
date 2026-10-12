@@ -146,7 +146,10 @@ export default function MyDocumentsPage() {
                 return (
                   <div
                     key={dt.type_id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => selectForUpload(dt)}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && selectForUpload(dt)}
                     className={`flex cursor-pointer items-center gap-3 px-5 py-3.5 transition-colors ${
                       isSelected ? 'bg-blue-50 border-l-2 border-blue-500' : 'hover:bg-slate-50'
                     }`}
@@ -218,7 +221,10 @@ export default function MyDocumentsPage() {
                     </div>
                   )}
                   <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => fileRef.current?.click()}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
                     onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
                     onDragLeave={() => setDragging(false)}
                     onDrop={handleDrop}

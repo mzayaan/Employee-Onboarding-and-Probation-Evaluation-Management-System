@@ -218,7 +218,7 @@ export default function HRDashboard() {
         setLoading(false)
       }
     }
-    load()
+    void load()
   }, [])
 
   // Six stat cards: original 4 + 2 new evaluation cards (FR-17)

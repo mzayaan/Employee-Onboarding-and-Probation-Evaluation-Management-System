@@ -47,7 +47,7 @@ const HDR_H  = 16;
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : 'N/A';
 
-const fmtScore = (v) => (v != null ? parseFloat(v).toFixed(1) : '—');
+const fmtScore = (v) => (v != null ? Number.parseFloat(v).toFixed(1) : '—');
 
 const recLabel = (t) =>
   ({ CONFIRM: 'CONFIRM EMPLOYMENT', EXTEND: 'EXTEND PROBATION', DISMISS: 'RECOMMEND DISMISSAL' }[t] || t || 'PENDING');
@@ -224,12 +224,12 @@ const generateReport = async (req, res) => {
         if (!criteriaMap[name]) {
           criteriaMap[name] = {
             name,
-            weight:       parseFloat(s.criterion?.weight_percent || 0),
+            weight:       Number.parseFloat(s.criterion?.weight_percent || 0),
             criterion_id: s.criterion_id,
             cpScores:     {},
           };
         }
-        criteriaMap[name].cpScores[cp.checkpoint_id] = parseFloat(s.raw_score);
+        criteriaMap[name].cpScores[cp.checkpoint_id] = Number.parseFloat(s.raw_score);
       });
     });
     const criteriaList = Object.values(criteriaMap).sort((a, b) => b.weight - a.weight);
@@ -240,7 +240,7 @@ const generateReport = async (req, res) => {
     const lastMgrScores = lastCp?.managerEvaluation?.scores || [];
     criteriaList.forEach((c) => {
       const lastS   = lastMgrScores.find((s) => s.criterion_id === c.criterion_id || s.criterion?.name === c.name);
-      c.lastRaw     = lastS ? parseFloat(lastS.raw_score) : null;
+      c.lastRaw     = lastS ? Number.parseFloat(lastS.raw_score) : null;
 
       // Average the raw score for this criterion across all completed checkpoints
       const cpRaws  = completedCps
@@ -252,24 +252,24 @@ const generateReport = async (req, res) => {
 
     // Cumulative score: average of each checkpoint's stored weighted_score — matches the
     // dashboard and evaluationController formula exactly (FR-14).
-    const cpWeightedScores = completedCps.map((cp) => parseFloat(cp.managerEvaluation?.weighted_score || 0));
+    const cpWeightedScores = completedCps.map((cp) => Number.parseFloat(cp.managerEvaluation?.weighted_score || 0));
     const cumulativeScore = cpWeightedScores.length > 0
-      ? parseFloat((cpWeightedScores.reduce((a, b) => a + b, 0) / cpWeightedScores.length).toFixed(2))
+      ? Number.parseFloat((cpWeightedScores.reduce((a, b) => a + b, 0) / cpWeightedScores.length).toFixed(2))
       : 0;
 
     // Average raw score per checkpoint (for table footer)
     const cpAvgRaw = completedCps.map((cp) => {
       const scores = cp.managerEvaluation?.scores || [];
       if (!scores.length) return null;
-      return scores.reduce((s, sc) => s + parseFloat(sc.raw_score), 0) / scores.length;
+      return scores.reduce((s, sc) => s + Number.parseFloat(sc.raw_score), 0) / scores.length;
     });
 
     // Self-assessment lookup map for last checkpoint (by criterion_id, fallback name)
     const selfScoreMap = {};
     (lastCp?.selfAssessment?.scores || []).forEach((s) => {
-      if (s.criterion_id) selfScoreMap[s.criterion_id] = parseFloat(s.raw_score);
+      if (s.criterion_id) selfScoreMap[s.criterion_id] = Number.parseFloat(s.raw_score);
       const name = s.criterion?.name ?? `Criterion ${s.criterion_id}`;
-      selfScoreMap[`n:${name}`] = parseFloat(s.raw_score);
+      selfScoreMap[`n:${name}`] = Number.parseFloat(s.raw_score);
     });
 
     const getSelfScore = (c) =>
@@ -443,7 +443,7 @@ const generateReport = async (req, res) => {
 
         // Weight %
         doc.save().fillColor(GREY).font('Helvetica').fontSize(8)
-           .text(`${parseFloat(c.weight).toFixed(0)}%`, CX_WT + 2, rowY + 5, { width: WT_W - 4, align: 'center' }).restore();
+           .text(`${Number.parseFloat(c.weight).toFixed(0)}%`, CX_WT + 2, rowY + 5, { width: WT_W - 4, align: 'center' }).restore();
 
         // Per-checkpoint raw score
         completedCps.slice(0, MAX_CP).forEach((cp, ci) => {
@@ -454,7 +454,7 @@ const generateReport = async (req, res) => {
 
         // Weighted score (x.x/weight)
         const wgtTxt = c.weightedScore != null
-          ? `${fmtScore(c.weightedScore)}/${parseFloat(c.weight).toFixed(0)}`
+          ? `${fmtScore(c.weightedScore)}/${Number.parseFloat(c.weight).toFixed(0)}`
           : '—';
         doc.save().fillColor(DARK).font('Helvetica-Bold').fontSize(8)
            .text(wgtTxt, CX_WGT + 2, rowY + 5, { width: WGT_W - 4, align: 'center' }).restore();
@@ -503,7 +503,7 @@ const generateReport = async (req, res) => {
     completedCps.forEach((cp, i) => {
       const cx     = MARGIN + i * (cpCardW + CGAP);
       const cy     = cardsY;
-      const pctVal = parseFloat(cp.managerEvaluation?.weighted_score ?? 0);
+      const pctVal = Number.parseFloat(cp.managerEvaluation?.weighted_score ?? 0);
 
       doc.rect(cx, cy, cpCardW, cpCardH).fill(CARD_BG);
 
@@ -561,7 +561,7 @@ const generateReport = async (req, res) => {
       lastMgrComp.forEach((s, idx) => {
         if (t3Y + ROW_H > pH - 75) { doc.addPage(); t3Y = MARGIN; }
         const name     = s.criterion?.name ?? `Criterion ${s.criterion_id}`;
-        const mgrRaw   = parseFloat(s.raw_score);
+        const mgrRaw   = Number.parseFloat(s.raw_score);
         const selfRaw  = getSelfScore({ criterion_id: s.criterion_id, name });
         const variance = selfRaw != null ? selfRaw - mgrRaw : null;
         const varTxt   = variance == null ? '—'
@@ -785,7 +785,7 @@ const generateReport = async (req, res) => {
 
       // Record in GeneratedReport table (FR-16)
       GeneratedReport.create({
-        period_id:     parseInt(periodId, 10),
+        period_id:     Number.parseInt(periodId, 10),
         generated_by:  user_id,
         file_name:     filename,
         generated_at:  new Date(),

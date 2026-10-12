@@ -131,10 +131,11 @@ export default function UploadDocumentPage() {
 
           {/* Document type */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label htmlFor="upload-doc-type" className="block text-sm font-medium text-slate-700 mb-1.5">
               Document Type <span className="text-red-500">*</span>
             </label>
             <select
+              id="upload-doc-type"
               value={typeId}
               onChange={(e) => { setTypeId(e.target.value); setFieldErrors((p) => ({ ...p, typeId: '' })) }}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -154,11 +155,14 @@ export default function UploadDocumentPage() {
 
           {/* File drop zone */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+            <label htmlFor="upload-file-input" className="block text-sm font-medium text-slate-700 mb-1.5">
               File <span className="text-red-500">*</span>
             </label>
             <div
+              role="button"
+              tabIndex={0}
               onClick={() => fileRef.current?.click()}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
@@ -190,6 +194,7 @@ export default function UploadDocumentPage() {
               )}
             </div>
             <input
+              id="upload-file-input"
               ref={fileRef}
               type="file"
               accept={ACCEPTED}

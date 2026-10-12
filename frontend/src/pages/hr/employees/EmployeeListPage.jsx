@@ -38,8 +38,8 @@ export default function EmployeeListPage() {
   const [toggling,    setToggling]    = useState(null)
 
   useEffect(() => {
-    fetchEmployees()
-    fetchDepartments()
+    void fetchEmployees()
+    void fetchDepartments()
   }, [])
 
   const fetchDepartments = async () => {

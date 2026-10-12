@@ -77,8 +77,8 @@ function AssignTaskModal({ employees, onClose, onSaved }) {
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Employee <span className="text-red-500">*</span></label>
-            <select value={form.profile_id} onChange={set('profile_id')} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
+            <label htmlFor="task-employee" className="block text-sm font-medium text-slate-700 mb-1.5">Employee <span className="text-red-500">*</span></label>
+            <select id="task-employee" value={form.profile_id} onChange={set('profile_id')} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
               <option value="">— Select employee —</option>
               {employees.map((e) => (
                 <option key={e.profile_id} value={e.profile_id}>
@@ -88,27 +88,27 @@ function AssignTaskModal({ employees, onClose, onSaved }) {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Task Title <span className="text-red-500">*</span></label>
-            <input type="text" value={form.title} onChange={set('title')} placeholder="e.g. Complete IT equipment setup"
+            <label htmlFor="task-title" className="block text-sm font-medium text-slate-700 mb-1.5">Task Title <span className="text-red-500">*</span></label>
+            <input id="task-title" type="text" value={form.title} onChange={set('title')} placeholder="e.g. Complete IT equipment setup"
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
-            <textarea rows={2} value={form.description} onChange={set('description')} placeholder="Optional details…"
+            <label htmlFor="task-description" className="block text-sm font-medium text-slate-700 mb-1.5">Description</label>
+            <textarea id="task-description" rows={2} value={form.description} onChange={set('description')} placeholder="Optional details…"
               className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none" />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Priority</label>
-              <select value={form.priority} onChange={set('priority')} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
+              <label htmlFor="task-priority" className="block text-sm font-medium text-slate-700 mb-1.5">Priority</label>
+              <select id="task-priority" value={form.priority} onChange={set('priority')} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
                 <option value="LOW">Low</option>
                 <option value="MEDIUM">Medium</option>
                 <option value="HIGH">High</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Due Date <span className="text-red-500">*</span></label>
-              <input type="date" value={form.due_date} onChange={set('due_date')}
+              <label htmlFor="task-due-date" className="block text-sm font-medium text-slate-700 mb-1.5">Due Date <span className="text-red-500">*</span></label>
+              <input id="task-due-date" type="date" value={form.due_date} onChange={set('due_date')}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
             </div>
           </div>

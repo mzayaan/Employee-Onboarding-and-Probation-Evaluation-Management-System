@@ -53,7 +53,7 @@ function StarRating({ value, onChange, disabled = false }) {
 // ── Score helpers ─────────────────────────────────────────────────────────────
 const calcContribution = (raw, weight) => {
   if (!raw || !weight) return 0
-  return parseFloat(((raw / 5.0) * parseFloat(weight)).toFixed(2))
+  return Number.parseFloat(((raw / 5.0) * Number.parseFloat(weight)).toFixed(2))
 }
 
 const deriveRecommendation = (score) => {
@@ -73,7 +73,10 @@ function HistoryEntry({ cp, currentId, onSelect }) {
   const isCurrent = cp.checkpoint_id === currentId
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={() => !isCurrent && onSelect(cp.checkpoint_id)}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !isCurrent && onSelect(cp.checkpoint_id)}
       className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors ${
         isCurrent
           ? 'ring-1 ring-blue-300 bg-blue-50'
@@ -90,11 +93,11 @@ function HistoryEntry({ cp, currentId, onSelect }) {
         <span
           className="rounded-full px-2.5 py-0.5 text-xs font-bold"
           style={{
-            backgroundColor: parseFloat(score) >= 75 ? '#dcfce7' : parseFloat(score) >= 50 ? '#fef9c3' : '#fee2e2',
-            color:            parseFloat(score) >= 75 ? '#15803d' : parseFloat(score) >= 50 ? '#854d0e' : '#b91c1c',
+            backgroundColor: Number.parseFloat(score) >= 75 ? '#dcfce7' : Number.parseFloat(score) >= 50 ? '#fef9c3' : '#fee2e2',
+            color:            Number.parseFloat(score) >= 75 ? '#15803d' : Number.parseFloat(score) >= 50 ? '#854d0e' : '#b91c1c',
           }}
         >
-          {parseFloat(score).toFixed(1)}
+          {Number.parseFloat(score).toFixed(1)}
         </span>
       ) : (
         <span className="text-xs text-slate-400">
@@ -196,7 +199,7 @@ export default function EvaluationFormPage() {
     try {
       const payload = {
         scores: Object.entries(scores).map(([criterion_id, raw_score]) => ({
-          criterion_id: parseInt(criterion_id, 10),
+          criterion_id: Number.parseInt(criterion_id, 10),
           raw_score,
         })),
         performance_notes:       notes.trim() || null,
@@ -237,7 +240,7 @@ export default function EvaluationFormPage() {
 
   const employee = checkpoint.probationPeriod?.employeeProfile
   const rec      = deriveRecommendation(liveScore)
-  const checkpointIdNum = parseInt(checkpointId, 10)
+  const checkpointIdNum = Number.parseInt(checkpointId, 10)
 
   return (
     <AppShell>
@@ -386,7 +389,7 @@ export default function EvaluationFormPage() {
                     onChange={(e) =>
                       setAttendance((prev) => ({
                         ...prev,
-                        [key]: Math.max(0, parseInt(e.target.value) || 0),
+                        [key]: Math.max(0, Number.parseInt(e.target.value) || 0),
                       }))
                     }
                     disabled={alreadySubmitted}

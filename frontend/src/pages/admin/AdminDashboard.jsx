@@ -31,7 +31,7 @@ export default function AdminDashboard() {
   const activeCount = criteria.filter((c) => c.is_active).length
   const totalWeight = criteria
     .filter((c) => c.is_active)
-    .reduce((sum, c) => sum + parseFloat(c.weight_percent), 0)
+    .reduce((sum, c) => sum + Number.parseFloat(c.weight_percent), 0)
   const weightValid = Math.abs(totalWeight - 100) < 0.01
 
   const QUICK_LINKS = [

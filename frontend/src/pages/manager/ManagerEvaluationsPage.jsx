@@ -189,7 +189,7 @@ export default function ManagerEvaluationsPage() {
                     <td className="px-5 py-3.5 text-xs text-slate-700 whitespace-nowrap">
                       {row.hasManagerEval
                         ? <span className="font-semibold" style={{ color: '#1e3a5f' }}>
-                            {row.managerScore !== null ? `${parseFloat(row.managerScore).toFixed(1)}%` : '—'}
+                            {row.managerScore !== null ? `${Number.parseFloat(row.managerScore).toFixed(1)}%` : '—'}
                           </span>
                         : <span className="text-slate-400">Not submitted</span>}
                     </td>
