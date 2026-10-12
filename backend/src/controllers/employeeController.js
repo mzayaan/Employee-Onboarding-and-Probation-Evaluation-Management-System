@@ -427,7 +427,7 @@ const updateEmployeeProfile = async (req, res) => {
 // =============================================================================
 const toggleUserStatus = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.userId ?? req.params.id;
 
     const user = await User.findByPk(id, { attributes: ['user_id', 'is_active', 'role', 'first_name', 'last_name'] });
     if (!user) {
