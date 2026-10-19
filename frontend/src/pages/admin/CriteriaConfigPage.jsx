@@ -16,7 +16,7 @@ import {
 } from '@/api/criteriaApi'
 import {
   Plus, Loader2, AlertCircle, CheckCircle, X,
-  Settings, Pencil, PowerOff,
+  Settings, Pencil, PowerOff, Power,
 } from 'lucide-react'
 
 // ── Add / Edit Modal ──────────────────────────────────────────────────────────
@@ -194,6 +194,7 @@ export default function CriteriaConfigPage() {
   const [error,      setError]      = useState(null)
   const [modal,      setModal]      = useState(null)     // null | 'add' | criterion object
   const [deactivating, setDeactivating] = useState(null) // criterion_id being deactivated
+  const [reactivating, setReactivating] = useState(null) // criterion_id being reactivated
 
   const fetchCriteria = () => {
     setLoading(true)
@@ -215,6 +216,19 @@ export default function CriteriaConfigPage() {
       alert('Failed to deactivate criterion.')
     } finally {
       setDeactivating(null)
+    }
+  }
+
+  const handleReactivate = async (criterion) => {
+    if (!window.confirm(`Reactivate "${criterion.name}"? It will be included in new evaluations (subject to weight budget).`)) return
+    setReactivating(criterion.criterion_id)
+    try {
+      await updateCriterion(criterion.criterion_id, { is_active: true })
+      fetchCriteria()
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to reactivate criterion. Ensure the weight budget allows it.')
+    } finally {
+      setReactivating(null)
     }
   }
 
@@ -365,7 +379,7 @@ export default function CriteriaConfigPage() {
                       >
                         <Pencil className="h-3 w-3" /> Edit
                       </button>
-                      {criterion.is_active && (
+                      {criterion.is_active ? (
                         <button
                           onClick={() => handleDeactivate(criterion)}
                           disabled={deactivating === criterion.criterion_id}
@@ -375,6 +389,17 @@ export default function CriteriaConfigPage() {
                             ? <Loader2 className="h-3 w-3 animate-spin" />
                             : <PowerOff className="h-3 w-3" />}
                           Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleReactivate(criterion)}
+                          disabled={reactivating === criterion.criterion_id}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-green-200 bg-white px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 transition-colors disabled:opacity-40"
+                        >
+                          {reactivating === criterion.criterion_id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <Power className="h-3 w-3" />}
+                          Activate
                         </button>
                       )}
                     </div>
