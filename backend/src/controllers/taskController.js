@@ -36,7 +36,7 @@ const assignTask = async (req, res) => {
 
     // Verify employee profile exists
     const profile = await EmployeeProfile.findByPk(profile_id, {
-      include: [{ model: User, as: 'user', attributes: ['first_name', 'last_name', 'email'] }],
+      include: [{ model: User, as: 'user', attributes: ['user_id', 'first_name', 'last_name', 'email'] }],
     });
     if (!profile) {
       return res.status(404).json({ success: false, message: 'Employee profile not found.' });
