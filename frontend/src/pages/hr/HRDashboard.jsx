@@ -16,8 +16,13 @@ import {
   AlertTriangle,
   CalendarClock,
   XCircle,
+  User,
+  UserCheck,
+  CheckCircle2,
+  MinusCircle,
+  Clock,
 } from 'lucide-react'
-import { getDashboardStats, getOnboardingProgress } from '@/api/dashboardApi'
+import { getDashboardStats, getOnboardingProgress, getAttendanceBreakdown } from '@/api/dashboardApi'
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
 function ProgressBar({ value }) {
@@ -200,17 +205,23 @@ function TaskProgressChart({ progress }) {
 export default function HRDashboard() {
   const { user } = useAuth()
 
-  const [stats,    setStats]    = useState(null)
-  const [progress, setProgress] = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState(null)
+  const [stats,      setStats]      = useState(null)
+  const [progress,   setProgress]   = useState([])
+  const [attendance, setAttendance] = useState(null)
+  const [loading,    setLoading]    = useState(true)
+  const [error,      setError]      = useState(null)
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [s, p] = await Promise.all([getDashboardStats(), getOnboardingProgress()])
+        const [s, p, a] = await Promise.all([
+          getDashboardStats(),
+          getOnboardingProgress(),
+          getAttendanceBreakdown().catch(() => null),  // non-fatal if attendance is empty
+        ])
         setStats(s)
         setProgress(p)
+        setAttendance(a)
       } catch (err) {
         console.error(err)
         setError('Failed to load dashboard data.')
@@ -221,14 +232,29 @@ export default function HRDashboard() {
     void load()
   }, [])
 
-  // Six stat cards: original 4 + 2 new evaluation cards (FR-17)
+  // Attendance rate calculation (this month)
+  const attPresent = attendance?.summary?.present ?? null
+  const attAbsent  = attendance?.summary?.absent  ?? null
+  const attLate    = attendance?.summary?.late    ?? null
+  const attTotal   = attendance?.total_records    ?? null
+  const attRate    = attTotal > 0
+    ? `${Math.round(((attTotal - (attAbsent ?? 0)) / attTotal) * 100)}%`
+    : '—'
+
+  // Eleven stat cards: 6 operational + 2 gender headcount + 3 attendance (FR-12, FR-17)
   const STAT_CARDS = [
-    { label: 'Total Employees',        value: stats?.totalEmployees        ?? '—', icon: Users,        color: '#1e3a5f' },
-    { label: 'Pending Documents',      value: stats?.pendingDocuments      ?? '—', icon: FileText,     color: '#f59e0b' },
-    { label: 'Active Probations',      value: stats?.activeProbations      ?? '—', icon: ClipboardList, color: '#3d7dd3' },
-    { label: 'Overdue Tasks',          value: stats?.overdueTasks          ?? '—', icon: AlertTriangle, color: '#dc2626' },
-    { label: 'Upcoming Evaluations',   value: stats?.upcomingEvaluations   ?? '—', icon: CalendarClock, color: '#7c3aed' },
-    { label: 'Overdue Evaluations',    value: stats?.overdueEvaluations    ?? '—', icon: XCircle,       color: '#ea580c' },
+    { label: 'Total Employees',        value: stats?.totalEmployees                   ?? '—', icon: Users,         color: '#1e3a5f' },
+    { label: 'Pending Documents',      value: stats?.pendingDocuments                 ?? '—', icon: FileText,      color: '#f59e0b' },
+    { label: 'Active Probations',      value: stats?.activeProbations                 ?? '—', icon: ClipboardList, color: '#3d7dd3' },
+    { label: 'Overdue Tasks',          value: stats?.overdueTasks                     ?? '—', icon: AlertTriangle, color: '#dc2626' },
+    { label: 'Upcoming Evaluations',   value: stats?.upcomingEvaluations              ?? '—', icon: CalendarClock, color: '#7c3aed' },
+    { label: 'Overdue Evaluations',    value: stats?.overdueEvaluations               ?? '—', icon: XCircle,       color: '#ea580c' },
+    { label: 'Male Staff',             value: stats?.genderHeadcount?.male            ?? '—', icon: User,          color: '#0369a1' },
+    { label: 'Female Staff',           value: stats?.genderHeadcount?.female          ?? '—', icon: UserCheck,     color: '#9333ea' },
+    { label: 'Present (This Month)',   value: attPresent !== null ? attPresent : '—', icon: CheckCircle2,  color: '#16a34a' },
+    { label: 'Absent (This Month)',    value: attAbsent  !== null ? attAbsent  : '—', icon: MinusCircle,   color: '#dc2626' },
+    { label: 'Late (This Month)',      value: attLate    !== null ? attLate    : '—', icon: Clock,         color: '#f59e0b' },
+    { label: 'Attendance Rate',        value: attRate,                                icon: CheckCircle2,  color: '#0284c7' },
   ]
 
   return (
@@ -250,8 +276,8 @@ export default function HRDashboard() {
         </div>
       )}
 
-      {/* Stat cards — 6-column grid (FR-17) */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+      {/* Stat cards — 4-column grid, 3 rows of 4 (FR-12, FR-17) */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-4">
         {STAT_CARDS.map(({ label, value, icon: Icon, color }) => (
           <div
             key={label}

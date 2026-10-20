@@ -25,9 +25,10 @@ router.get('/stats',               authenticate, authorize('HR_ADMIN'),     getD
 // GET /api/dashboard/gender-headcount
 router.get('/gender-headcount',    authenticate, authorize('HR_ADMIN'),     getGenderHeadcount)
 
-// Lecturer requirement: attendance status breakdown for HR dashboard
+// Lecturer requirement: attendance status breakdown for HR and manager dashboards
 // GET /api/dashboard/attendance-breakdown[?from=YYYY-MM-DD&to=YYYY-MM-DD&profile_id=X]
-router.get('/attendance-breakdown',authenticate, authorize('HR_ADMIN'),     getAttendanceBreakdown)
+// LINE_MANAGER receives only attendance for employees in their department (filtered in controller)
+router.get('/attendance-breakdown',authenticate, authorize('HR_ADMIN', 'LINE_MANAGER'), getAttendanceBreakdown)
 
 // HR and LINE_MANAGER per-employee onboarding progress table
 // LINE_MANAGER receives only employees in their department (filtered in controller)

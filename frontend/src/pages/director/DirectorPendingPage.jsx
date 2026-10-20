@@ -52,7 +52,7 @@ function PendingCard({ rec, onRefresh }) {
   const [err,    setErr]    = useState('')
   const [ok,     setOk]     = useState(false)
 
-  const emp    = rec.employeeProfile
+  const emp    = rec.probationPeriod?.employeeProfile
   const period = rec.probationPeriod
 
   const submit = async () => {
@@ -107,7 +107,7 @@ function PendingCard({ rec, onRefresh }) {
           <p className="mt-1 text-sm">
             Cumulative score:{' '}
             <span className={`text-lg font-bold ${scoreColour(rec.cumulative_score)}`}>
-              {rec.cumulative_score?.toFixed(1) ?? '—'}%
+              {rec.cumulative_score != null ? parseFloat(rec.cumulative_score).toFixed(1) : '—'}%
             </span>
             {rec.rejection_count > 0 && (
               <span className="ml-3 text-xs text-amber-600 font-medium">
@@ -163,7 +163,7 @@ function PendingCard({ rec, onRefresh }) {
                       )}
                     </p>
                     <p className="mt-1 text-xl font-bold text-slate-700">
-                      {s.weighted_score?.toFixed(1)}%
+                      {s.weighted_score != null ? parseFloat(s.weighted_score).toFixed(1) : '—'}%
                     </p>
                     {s.checkpoint?.checkpoint_number && (
                       <p className="text-xs text-slate-400">CP {s.checkpoint.checkpoint_number}</p>

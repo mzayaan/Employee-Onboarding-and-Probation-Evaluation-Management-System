@@ -45,6 +45,9 @@ import ManagerEvaluationsPage from '@/pages/manager/ManagerEvaluationsPage'
 // Manager — Task assignment (Phase 3/4 gap)
 import ManagerTasksPage from '@/pages/manager/ManagerTasksPage'
 
+// Manager — Submitted recommendations (Block 9 — three-stage approval)
+import ManagerRecommendationsPage from '@/pages/manager/ManagerRecommendationsPage'
+
 // Attendance — HR Admin + Line Manager (FR-12)
 import AttendanceLogPage      from '@/pages/attendance/AttendanceLogPage'
 import AttendanceOverviewPage from '@/pages/attendance/AttendanceOverviewPage'
@@ -171,6 +174,8 @@ export default function App() {
             <Route path="/manager/evaluations"             element={<ManagerEvaluationsPage />} />
             {/* Phase 3/4 gap: Manager task assignment */}
             <Route path="/manager/tasks"                   element={<ManagerTasksPage />} />
+            {/* Block 9 — submitted recommendation tracking + resubmission */}
+            <Route path="/manager/recommendations"         element={<ManagerRecommendationsPage />} />
           </Route>
 
           {/* ── New Employee ───────────────────────────────────────── */}

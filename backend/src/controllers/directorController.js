@@ -577,6 +577,44 @@ const listAllRecommendations = async (req, res) => {
   }
 };
 
+// =============================================================================
+// GET /api/director/my-recommendations
+// LINE_MANAGER views all recommendations they have submitted (any status).
+// FR-15 | NFR-03 | Objective 3
+// =============================================================================
+const listMyRecommendations = async (req, res) => {
+  try {
+    const { user_id } = req.user;
+    const recs = await FinalRecommendation.findAll({
+      where: { submitted_by: user_id },
+      include: [
+        {
+          model: ProbationPeriod,
+          as:    'probationPeriod',
+          include: [
+            {
+              model: EmployeeProfile,
+              as:    'employeeProfile',
+              include: [
+                { model: User,       as: 'user',      attributes: ['first_name', 'last_name', 'email'] },
+                { model: Department, as: 'department', attributes: ['name'] },
+              ],
+            },
+          ],
+        },
+        { model: User, as: 'endorsedByHR', attributes: ['first_name', 'last_name'] },
+        { model: User, as: 'director',     attributes: ['first_name', 'last_name'] },
+      ],
+      order: [['generated_at', 'DESC']],
+    });
+
+    return res.json({ success: true, data: recs });
+  } catch (error) {
+    console.error('[directorController.listMyRecommendations]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve your recommendations.' });
+  }
+};
+
 module.exports = {
   listPendingHR,
   listPendingDirector,
@@ -587,4 +625,5 @@ module.exports = {
   approveRecommendation,
   returnByDirector,
   listAllRecommendations,
+  listMyRecommendations,
 };

@@ -23,3 +23,9 @@ export const getMyProgress = async () => {
   const res = await api.get('/dashboard/my-progress')
   return res.data.data
 }
+
+// HR + Manager: attendance status breakdown for current month (FR-12, FR-17)
+export const getAttendanceBreakdown = async () => {
+  const res = await api.get('/dashboard/attendance-breakdown')
+  return res.data.data
+}

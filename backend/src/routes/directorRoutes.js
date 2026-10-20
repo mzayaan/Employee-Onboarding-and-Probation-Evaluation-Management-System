@@ -29,6 +29,7 @@ const {
   approveRecommendation,
   returnByDirector,
   listAllRecommendations,
+  listMyRecommendations,
 } = require('../controllers/directorController');
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,16 @@ router.post(
   '/:recId/return-to-manager',
   authorise('HR_ADMIN'),
   returnToManagerByHR
+);
+
+// ---------------------------------------------------------------------------
+// Manager: list own submitted recommendations (all statuses)
+// GET /api/director/my-recommendations
+// ---------------------------------------------------------------------------
+router.get(
+  '/my-recommendations',
+  authorise('LINE_MANAGER'),
+  listMyRecommendations
 );
 
 // ---------------------------------------------------------------------------

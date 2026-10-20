@@ -48,7 +48,7 @@ function DeptRow({ dept, managers, onAssign, onRemove }) {
   const [busy,   setBusy]   = useState(false)
   const [err,    setErr]    = useState('')
 
-  const current = dept.manager   // may be null
+  const current = dept.departmentManager ?? null  // Sequelize alias: departmentManager
   const availableManagers = managers.filter(
     (m) => !current || m.user_id !== current.user_id
   )

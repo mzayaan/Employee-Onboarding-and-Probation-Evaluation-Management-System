@@ -82,14 +82,14 @@ function RecentTable({ recs }) {
         </thead>
         <tbody className="divide-y divide-slate-100">
           {recs.slice(0, 8).map((r) => {
-            const emp = r.employeeProfile
+            const emp = r.probationPeriod?.employeeProfile
             const rec = REC_LABELS[r.recommendation_type] || { label: r.recommendation_type, bg: 'bg-slate-50', text: 'text-slate-600' }
             const st  = STATUS_LABELS[r.approval_status]  || { label: r.approval_status,    bg: 'bg-slate-50', text: 'text-slate-600' }
             return (
               <tr key={r.rec_id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="px-5 py-3 font-medium text-slate-700">
                   {emp?.user?.first_name} {emp?.user?.last_name}
-                  <span className="ml-2 text-xs font-normal text-slate-400">{emp?.job_title}</span>
+                  <span className="ml-2 text-xs font-normal text-slate-400">{emp?.job_title ?? ''}</span>
                 </td>
                 <td className="px-5 py-3">
                   <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${rec.bg} ${rec.text}`}>
@@ -97,7 +97,7 @@ function RecentTable({ recs }) {
                   </span>
                 </td>
                 <td className="px-5 py-3 font-semibold text-slate-700">
-                  {r.cumulative_score?.toFixed(1) ?? '—'}%
+                  {r.cumulative_score != null ? parseFloat(r.cumulative_score).toFixed(1) : '—'}%
                 </td>
                 <td className="px-5 py-3">
                   <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${st.bg} ${st.text}`}>

@@ -628,7 +628,7 @@ const listManagers = async (req, res) => {
 const listAllUsers = async (req, res) => {
   try {
     const users = await User.findAll({
-      attributes: ['user_id', 'first_name', 'last_name', 'email', 'role', 'is_active', 'created_at'],
+      attributes: ['user_id', 'first_name', 'last_name', 'email', 'role', 'is_active', 'last_login_at', 'created_at'],
       order: [['created_at', 'DESC']],
     });
 

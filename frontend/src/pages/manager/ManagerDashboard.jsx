@@ -9,8 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 import Chart from 'chart.js/auto'
 import AppShell from '@/components/shared/AppShell'
 import { useAuth } from '@/context/AuthContext'
-import { Users, BarChart3, ClipboardList, AlertTriangle, Loader2, AlertCircle } from 'lucide-react'
-import { getOnboardingProgress } from '@/api/dashboardApi'
+import { Users, BarChart3, ClipboardList, AlertTriangle, Loader2, AlertCircle, User, UserCheck, CheckCircle2, MinusCircle, Clock } from 'lucide-react'
+import { getOnboardingProgress, getAttendanceBreakdown } from '@/api/dashboardApi'
 import { getAllAssignments } from '@/api/taskApi'
 import { getMyTeam } from '@/api/evaluationApi'
 
@@ -195,15 +195,22 @@ export default function ManagerDashboard() {
   const [teamData,     setTeamData]     = useState([])
   const [teamMembers,  setTeamMembers]  = useState([])
   const [assignments,  setAssignments]  = useState([])
+  const [attendance,   setAttendance]   = useState(null)
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
 
   useEffect(() => {
-    void Promise.allSettled([getOnboardingProgress(), getAllAssignments(), getMyTeam()])
-      .then(([progress, tasks, members]) => {
+    void Promise.allSettled([
+      getOnboardingProgress(),
+      getAllAssignments(),
+      getMyTeam(),
+      getAttendanceBreakdown(),
+    ])
+      .then(([progress, tasks, members, att]) => {
         if (progress.status === 'fulfilled') setTeamData(progress.value)
-        if (tasks.status   === 'fulfilled') setAssignments(tasks.value)
-        if (members.status === 'fulfilled') setTeamMembers(members.value)
+        if (tasks.status    === 'fulfilled') setAssignments(tasks.value)
+        if (members.status  === 'fulfilled') setTeamMembers(members.value)
+        if (att.status      === 'fulfilled') setAttendance(att.value)
 
         // Surface any individual failure so silent API errors are visible
         const failures = [
@@ -218,7 +225,9 @@ export default function ManagerDashboard() {
       .finally(() => setLoading(false))
   }, [])
 
-  const teamSize = teamData.length
+  const teamSize  = teamData.length
+  const maleCount   = teamData.filter((e) => e.gender === 'Male').length
+  const femaleCount = teamData.filter((e) => e.gender === 'Female').length
   const tasksOD  = assignments.filter(
     (a) => a.status !== 'COMPLETED' && new Date(a.due_date) < new Date()
   ).length
@@ -234,6 +243,15 @@ export default function ManagerDashboard() {
       (c) => (c.status === 'PENDING' || c.status === 'OVERDUE') && !c.managerEvaluation
     ).length
   }, 0)
+
+  // Attendance stats for the current month (from backend breakdown)
+  const attPresent = attendance?.summary?.present ?? null
+  const attAbsent  = attendance?.summary?.absent  ?? null
+  const attLate    = attendance?.summary?.late    ?? null
+  const attTotal   = attendance?.total_records    ?? null
+  const attRate    = attTotal > 0
+    ? `${Math.round(((attTotal - (attAbsent ?? 0)) / attTotal) * 100)}%`
+    : '—'
 
   const STAT_CARDS = [
     {
@@ -260,6 +278,42 @@ export default function ManagerDashboard() {
       icon: AlertTriangle,
       color: '#dc2626',
     },
+    {
+      label: 'Male Staff',
+      value: loading ? '—' : maleCount,
+      icon: User,
+      color: '#0369a1',
+    },
+    {
+      label: 'Female Staff',
+      value: loading ? '—' : femaleCount,
+      icon: UserCheck,
+      color: '#9333ea',
+    },
+    {
+      label: 'Present (This Month)',
+      value: loading ? '—' : (attPresent !== null ? attPresent : '—'),
+      icon: CheckCircle2,
+      color: '#16a34a',
+    },
+    {
+      label: 'Absent (This Month)',
+      value: loading ? '—' : (attAbsent !== null ? attAbsent : '—'),
+      icon: MinusCircle,
+      color: '#dc2626',
+    },
+    {
+      label: 'Late (This Month)',
+      value: loading ? '—' : (attLate !== null ? attLate : '—'),
+      icon: Clock,
+      color: '#f59e0b',
+    },
+    {
+      label: 'Attendance Rate',
+      value: loading ? '—' : attRate,
+      icon: CheckCircle2,
+      color: '#0284c7',
+    },
   ]
 
   return (
@@ -280,8 +334,8 @@ export default function ManagerDashboard() {
         </div>
       )}
 
-      {/* 4 Stat cards */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Stat cards — 10 total: operational stats + gender headcount + attendance (FR-12, FR-17) */}
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-5">
         {STAT_CARDS.map(({ label, value, icon: Icon, color }) => (
           <div
             key={label}

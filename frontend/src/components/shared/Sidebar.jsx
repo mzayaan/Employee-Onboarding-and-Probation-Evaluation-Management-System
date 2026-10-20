@@ -41,13 +41,14 @@ const NAV_ITEMS = {
   ],
   // LINE_MANAGER: reports removed (Phase 5)
   LINE_MANAGER: [
-    { to: '/manager/dashboard',   icon: LayoutDashboard, label: 'Dashboard'          },
-    { to: '/manager/team',        icon: Users,           label: 'My Team'            },
-    { to: '/manager/evaluations', icon: BarChart3,       label: 'Evaluations'        },
-    { to: '/manager/tasks',       icon: ClipboardList,   label: 'Tasks'              },
-    { to: '/manager/attendance',  icon: CalendarDays,    label: 'Attendance'         },
-    { to: '/performance-notes',   icon: StickyNote,      label: 'Performance Notes'  },
-    { to: '/notifications',       icon: Bell,            label: 'Notifications'      },
+    { to: '/manager/dashboard',       icon: LayoutDashboard, label: 'Dashboard'          },
+    { to: '/manager/team',            icon: Users,           label: 'My Team'            },
+    { to: '/manager/evaluations',     icon: BarChart3,       label: 'Evaluations'        },
+    { to: '/manager/recommendations', icon: BadgeCheck,      label: 'Recommendations'    },
+    { to: '/manager/tasks',           icon: ClipboardList,   label: 'Tasks'              },
+    { to: '/manager/attendance',      icon: CalendarDays,    label: 'Attendance'         },
+    { to: '/performance-notes',       icon: StickyNote,      label: 'Performance Notes'  },
+    { to: '/notifications',           icon: Bell,            label: 'Notifications'      },
   ],
   // NEW_EMPLOYEE: profile removed — no EmployeeProfilePage built yet
   NEW_EMPLOYEE: [

@@ -168,6 +168,7 @@ const getAttendanceBreakdown = async (req, res) => {
   try {
     // ── Date-range resolution ────────────────────────────────────────────────
     const { from: fromParam, to: toParam, profile_id } = req.query
+    const { role, user_id } = req.user
 
     let from = parseDate(fromParam)
     let to   = parseDate(toParam)
@@ -187,10 +188,43 @@ const getAttendanceBreakdown = async (req, res) => {
 
     // ── Base WHERE clause ───────────────────────────────────────────────────
     const where = {
-      date: { [Op.between]: [from, to] },
+      record_date: { [Op.between]: [from, to] },
     }
     if (profile_id) {
       where.profile_id = Number(profile_id)
+    }
+
+    // ── LINE_MANAGER: filter to their department's employees only (NFR-03) ──
+    if (role === 'LINE_MANAGER') {
+      const managerDept = await Department.findOne({ where: { manager_id: user_id } })
+      if (!managerDept) {
+        // Manager has no department — return zeroes rather than all records
+        return res.json({
+          success: true,
+          data: {
+            from:          from.toISOString().slice(0, 10),
+            to:            to.toISOString().slice(0, 10),
+            profile_id:    null,
+            total_records: 0,
+            breakdown:     {},
+            summary:       { present: 0, absent: 0, late: 0, on_leave: 0, public_holiday: 0 },
+          },
+        })
+      }
+      // Get profile_ids in manager's department
+      const deptProfiles = await EmployeeProfile.findAll({
+        where: { department_id: managerDept.department_id },
+        attributes: ['profile_id'],
+      })
+      const profileIds = deptProfiles.map((p) => p.profile_id)
+      // Get probation period IDs for those profiles
+      const { ProbationPeriod: PP } = require('../models')
+      const periods = await PP.findAll({
+        where: { profile_id: { [Op.in]: profileIds } },
+        attributes: ['period_id'],
+      })
+      const periodIds = periods.map((p) => p.period_id)
+      where.period_id = { [Op.in]: periodIds.length ? periodIds : [-1] }
     }
 
     // ── All WRA 2019 status values (matches AttendanceRecord.status ENUM) ───
@@ -336,6 +370,7 @@ const getOnboardingProgress = async (req, res) => {
         is_active:           p.user?.is_active,
         job_title:           p.job_title,
         department:          p.department?.name,
+        gender:              p.gender            || null,
         start_date:          p.start_date        || null,
         task_progress:       taskProgress,
         total_tasks:         totalTasks,

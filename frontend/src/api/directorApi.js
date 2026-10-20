@@ -22,6 +22,10 @@ export const listPendingDirector = () =>
 export const listAllRecommendations = () =>
   api.get('/director/all').then((r) => r.data.data)
 
+/** Manager: list own submitted recommendations (all statuses) */
+export const listMyRecommendations = () =>
+  api.get('/director/my-recommendations').then((r) => r.data.data)
+
 // ── Single recommendation ──────────────────────────────────────────────────
 
 /** Full recommendation detail including evaluation scores, employee profile, period. */

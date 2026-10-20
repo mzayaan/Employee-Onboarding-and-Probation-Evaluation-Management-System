@@ -21,6 +21,7 @@ const ROLE_ROUTES = {
   LINE_MANAGER: '/manager/dashboard',
   NEW_EMPLOYEE: '/employee/dashboard',
   SYSTEM_ADMIN: '/admin/dashboard',
+  DIRECTOR:     '/director/dashboard',
 }
 
 // Feature bullets displayed on the left panel (matches Figma Features block)
@@ -236,7 +237,7 @@ export default function LoginPage() {
               className="mt-6 rounded-lg px-4 py-3 text-center text-xs leading-relaxed"
               style={{ backgroundColor: '#f0f6fc', color: '#4a6a8a' }}
             >
-              Accessible by: HR Administrator · Line Manager · New Employee · System Administrator
+              Accessible by: HR Administrator · Line Manager · New Employee · System Administrator · Director
             </div>
           </div>
         </div>

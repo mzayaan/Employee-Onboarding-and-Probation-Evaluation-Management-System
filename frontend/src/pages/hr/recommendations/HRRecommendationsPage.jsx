@@ -72,7 +72,7 @@ function PendingRow({ rec, onRefresh }) {
   const [err,    setErr]    = useState('')
   const [ok,     setOk]     = useState(false)
 
-  const emp = rec.employeeProfile
+  const emp = rec.probationPeriod?.employeeProfile
   const period = rec.probationPeriod
 
   const submit = async () => {
@@ -116,7 +116,7 @@ function PendingRow({ rec, onRefresh }) {
           <p className="mt-0.5 text-xs text-slate-400">
             {emp?.job_title || '—'} · {emp?.department?.name || 'No dept'} ·
             {' '}Probation ends {fmtDate(period?.end_date)} ·
-            {' '}Score: <span className="font-semibold text-slate-600">{rec.cumulative_score?.toFixed(1) ?? '—'}%</span>
+            {' '}Score: <span className="font-semibold text-slate-600">{rec.cumulative_score != null ? parseFloat(rec.cumulative_score).toFixed(1) : '—'}%</span>
           </p>
           <p className="mt-0.5 text-xs text-slate-400">
             Submitted by {rec.submittedByManager?.first_name} {rec.submittedByManager?.last_name}
@@ -163,7 +163,7 @@ function PendingRow({ rec, onRefresh }) {
                     <p className="text-xs text-slate-500 truncate">
                       {s.criterion?.name || `Criterion ${s.criterion_id}`}
                     </p>
-                    <p className="text-base font-bold text-slate-700">{s.weighted_score?.toFixed(1)}%</p>
+                    <p className="text-base font-bold text-slate-700">{s.weighted_score != null ? parseFloat(s.weighted_score).toFixed(1) : '—'}%</p>
                   </div>
                 ))}
               </div>
@@ -261,7 +261,7 @@ function AllRecommendationsTable({ recs }) {
         </thead>
         <tbody className="divide-y divide-slate-100">
           {recs.map((r) => {
-            const emp = r.employeeProfile
+            const emp = r.probationPeriod?.employeeProfile
             return (
               <tr key={r.rec_id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="px-5 py-3 font-medium text-slate-700">
@@ -270,7 +270,7 @@ function AllRecommendationsTable({ recs }) {
                 </td>
                 <td className="px-5 py-3"><RecBadge type={r.recommendation_type} /></td>
                 <td className="px-5 py-3 font-semibold text-slate-700">
-                  {r.cumulative_score?.toFixed(1) ?? '—'}%
+                  {r.cumulative_score != null ? parseFloat(r.cumulative_score).toFixed(1) : '—'}%
                 </td>
                 <td className="px-5 py-3"><StatusBadge status={r.approval_status} /></td>
                 <td className="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtDate(r.generated_at)}</td>
