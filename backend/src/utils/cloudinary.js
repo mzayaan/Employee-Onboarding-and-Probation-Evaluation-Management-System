@@ -32,7 +32,7 @@ const uploadToCloudinary = (buffer, folder, originalName) => {
         folder,
         public_id:       `${timestamp}_${sanitised}`,
         resource_type:   'raw',
-        access_mode:     'public',
+        access_mode:     'authenticated',
         use_filename:    false,
         unique_filename: false,
       },

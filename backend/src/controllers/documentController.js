@@ -311,17 +311,15 @@ const verifyDocument = async (req, res) => {
         });
       }
       // In-app notification for the employee
-      if (employee) {
-        await createNotification({
-          userId:  employee.user_id,
-          type:    status === 'APPROVED' ? 'DOCUMENT_APPROVED' : 'DOCUMENT_REJECTED',
-          message: status === 'APPROVED'
-            ? `Your document "${doc.documentType.name}" has been approved.`
-            : `Your document "${doc.documentType.name}" was rejected. Feedback: ${feedback.trim()}`,
-          relatedEntityType: 'document',
-          relatedEntityId:   doc.document_id,
-        });
-      }
+      await createNotification({
+        userId:  employee.user_id,
+        type:    status === 'APPROVED' ? 'DOCUMENT_APPROVED' : 'DOCUMENT_REJECTED',
+        message: status === 'APPROVED'
+          ? `Your document "${doc.documentType.name}" has been approved.`
+          : `Your document "${doc.documentType.name}" was rejected. Feedback: ${feedback.trim()}`,
+        relatedEntityType: 'document',
+        relatedEntityId:   doc.document_id,
+      });
     }
 
     return res.json({
@@ -392,7 +390,8 @@ const viewDocument = async (req, res) => {
     const cloudinaryResponse = await axios.get(signedUrl, {
       responseType: 'stream',
       timeout:      30000,
-    })
+    });
+
     // Forward content-type and content-disposition so the browser handles the
     // file correctly (inline display or download where appropriate).
     const contentType = cloudinaryResponse.headers['content-type'];
@@ -401,6 +400,17 @@ const viewDocument = async (req, res) => {
       'Content-Disposition',
       `inline; filename="${doc.original_filename || 'document'}"`
     );
+
+    // Attach a stream error handler so that if the pipe breaks mid-transfer
+    // the response is closed cleanly rather than hanging.
+    cloudinaryResponse.data.on('error', (streamErr) => {
+      console.error('[documentController.viewDocument] Stream error:', streamErr.message);
+      if (!res.headersSent) {
+        res.status(500).json({ success: false, message: 'Failed to stream document.' });
+      } else {
+        res.destroy();
+      }
+    });
 
     cloudinaryResponse.data.pipe(res);
   } catch (error) {
