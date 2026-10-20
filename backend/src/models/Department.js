@@ -1,7 +1,9 @@
 // =============================================================================
 // src/models/Department.js
 // Table 1: departments
-// FR-04 | Objective 1
+// FR-04, FR-19 | Objective 1
+// Updated: added manager_id (UNIQUE) — each department has exactly one manager
+// per lecturer requirement and Mauritius organisational practice
 // =============================================================================
 
 const { DataTypes } = require('sequelize');
@@ -21,6 +23,12 @@ const Department = sequelize.define('Department', {
   description: {
     type: DataTypes.TEXT,
     allowNull: true,
+  },
+  manager_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    unique: true,
+    comment: 'FK to users (LINE_MANAGER) — UNIQUE enforces one manager per department',
   },
   created_at: {
     type: DataTypes.DATE,

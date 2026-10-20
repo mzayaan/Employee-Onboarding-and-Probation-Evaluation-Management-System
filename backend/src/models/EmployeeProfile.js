@@ -47,6 +47,27 @@ const EmployeeProfile = sequelize.define('EmployeeProfile', {
     allowNull: false,
     comment: 'Must be after start_date — enforced in service layer',
   },
+  gender: {
+    type: DataTypes.ENUM('Male', 'Female'),
+    allowNull: false,
+    comment: 'Required for Statistics Mauritius gender-disaggregated headcount reporting',
+  },
+  nationality: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'Employee nationality — relevant for work permit checks in Mauritius context',
+  },
+  salary_monthly: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true,
+    comment: 'Monthly salary in MUR — used to determine Vacation Leave eligibility per WRA 2019 s.47 (threshold: MUR 50,000/month)',
+  },
+  employment_status: {
+    type: DataTypes.ENUM('PROBATION', 'PERMANENT', 'DISMISSED', 'EXTENDED'),
+    allowNull: false,
+    defaultValue: 'PROBATION',
+    comment: 'Updated automatically when Director approves probation recommendation',
+  },
   onboarding_status: {
     type: DataTypes.ENUM('IN_PROGRESS', 'COMPLETED'),
     allowNull: false,

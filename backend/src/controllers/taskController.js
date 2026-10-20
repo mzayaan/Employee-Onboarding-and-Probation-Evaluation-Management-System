@@ -2,21 +2,38 @@
 // src/controllers/taskController.js
 // Handles onboarding task assignment, listing, status updates and progress.
 // FR-07, FR-08, FR-09, FR-18 | NFR-02, NFR-03 | Objective 1
+//
+// Updated (Block 4 — lecturer requirement):
+//   A LINE_MANAGER may only assign / view / delete tasks for employees who
+//   belong to the department the manager is dedicated to (Department.manager_id).
+//   The old per-employee manager_id check has been replaced by a department-
+//   level check everywhere a LINE_MANAGER acts on task data.
 // =============================================================================
 
 const {
   OnboardingTask,
   TaskAssignment,
   EmployeeProfile,
+  Department,
   User,
 } = require('../models');
 
-const { createAuditLog }       = require('../utils/auditLogger');
-const { createNotification }    = require('../services/notificationService');
-const { sendTaskAssignedEmail } = require('../utils/mailer');
+const { createAuditLog }                      = require('../utils/auditLogger');
+const { createNotification }                   = require('../services/notificationService');
+const { sendTaskAssignedEmail }                = require('../utils/mailer');
+const { checkOnboardingCompletion }            = require('./employeeController');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+
+// =============================================================================
+// HELPER: getManagerDepartment
+// Returns the Department row where manager_id = managerId, or null.
+// Used to enforce the one-department-per-manager rule across all task actions.
+// FR-19 (lecturer requirement)
+// =============================================================================
+const getManagerDepartment = (managerId) =>
+  Department.findOne({ where: { manager_id: managerId } });
 
 // =============================================================================
 // POST /api/tasks/assign
@@ -42,20 +59,33 @@ const assignTask = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Employee profile not found.' });
     }
 
-    // NFR-03: LINE_MANAGER may only assign tasks to employees they manage.
-    if (req.user.role === 'LINE_MANAGER' && profile.manager_id !== req.user.user_id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. You may only assign tasks to employees in your team.',
-      });
+    // FR-19 / NFR-03: LINE_MANAGER may only assign tasks to employees who belong
+    // to the department the manager is dedicated to (Department.manager_id).
+    // This replaces the old per-employee manager_id check with a departmental check.
+    if (req.user.role === 'LINE_MANAGER') {
+      const managerDept = await getManagerDepartment(req.user.user_id);
+      if (!managerDept) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. You are not assigned as the manager of any department.',
+        });
+      }
+      if (profile.department_id !== managerDept.department_id) {
+        return res.status(403).json({
+          success: false,
+          message: `Access denied. You may only assign tasks to employees in your department ("${managerDept.name}").`,
+        });
+      }
     }
 
-    // Create task template
+    // Create task template — stamp department_id so the task is linked to the
+    // employee's department (supports future departmental task filtering).
     const task = await OnboardingTask.create({
       title:            title.trim(),
       description:      description?.trim() || null,
       priority:         priority || 'MEDIUM',
       created_by:       req.user.user_id,
+      department_id:    profile.department_id || null,
       default_due_days: null,
     });
 
@@ -154,10 +184,12 @@ const getAllAssignments = async (req, res) => {
       where.profile_id = Number(req.query.profile_id);
     }
 
-    // NFR-03: LINE_MANAGER may only see assignments for employees they manage.
-    const profileWhere = req.user.role === 'LINE_MANAGER'
-      ? { manager_id: req.user.user_id }
-      : {};
+    // FR-19 / NFR-03: LINE_MANAGER may only see assignments for employees in their department.
+    let profileWhere = {};
+    if (req.user.role === 'LINE_MANAGER') {
+      const managerDept = await getManagerDepartment(req.user.user_id);
+      profileWhere = managerDept ? { department_id: managerDept.department_id } : { department_id: -1 }; // -1 returns nothing if unassigned
+    }
 
     const assignments = await TaskAssignment.findAll({
       where,
@@ -204,13 +236,17 @@ const getAssignmentsByEmployee = async (req, res) => {
   try {
     const { profileId } = req.params;
 
-    // NFR-03: Line Managers can only view their own managed employees' tasks
+    // FR-19 / NFR-03: LINE_MANAGER may only view tasks for employees in their department.
     if (req.user.role === 'LINE_MANAGER') {
-      const profile = await EmployeeProfile.findByPk(profileId, {
-        attributes: ['manager_id'],
-      });
-      if (!profile || profile.manager_id !== req.user.user_id) {
-        return res.status(403).json({ success: false, message: 'Access denied.' });
+      const [targetProfile, managerDept] = await Promise.all([
+        EmployeeProfile.findByPk(profileId, { attributes: ['department_id'] }),
+        getManagerDepartment(req.user.user_id),
+      ]);
+      if (!targetProfile) {
+        return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+      }
+      if (!managerDept || targetProfile.department_id !== managerDept.department_id) {
+        return res.status(403).json({ success: false, message: 'Access denied. This employee is not in your department.' });
       }
     }
 
@@ -292,6 +328,12 @@ const updateTaskStatus = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
+    // FR-08: when a task is marked COMPLETED, check if all tasks + docs are done
+    // so we can auto-set onboarding_status = 'COMPLETED' for this employee.
+    if (status === 'COMPLETED') {
+      checkOnboardingCompletion(assignment.profile_id).catch(() => {});
+    }
+
     return res.json({
       success: true,
       message: 'Task status updated.',
@@ -323,15 +365,16 @@ const deleteAssignment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Task assignment not found.' });
     }
 
-    // NFR-03: LINE_MANAGER may only delete tasks assigned to employees they manage.
+    // FR-19 / NFR-03: LINE_MANAGER may only delete tasks for employees in their department.
     if (req.user.role === 'LINE_MANAGER') {
-      const profile = await EmployeeProfile.findByPk(assignment.profile_id, {
-        attributes: ['manager_id'],
-      });
-      if (!profile || profile.manager_id !== req.user.user_id) {
+      const [targetProfile, managerDept] = await Promise.all([
+        EmployeeProfile.findByPk(assignment.profile_id, { attributes: ['department_id'] }),
+        getManagerDepartment(req.user.user_id),
+      ]);
+      if (!targetProfile || !managerDept || targetProfile.department_id !== managerDept.department_id) {
         return res.status(403).json({
           success: false,
-          message: 'Access denied. You may only delete tasks for employees in your team.',
+          message: 'Access denied. You may only delete tasks for employees in your department.',
         });
       }
     }

@@ -31,6 +31,11 @@ const OnboardingTask = sequelize.define('OnboardingTask', {
     allowNull: false,
     defaultValue: 'MEDIUM',
   },
+  department_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'FK to departments — when set, task can only be assigned to employees in this department (per lecturer requirement: managers assign tasks only within their own department)',
+  },
   created_by: {
     type: DataTypes.INTEGER,
     allowNull: false,

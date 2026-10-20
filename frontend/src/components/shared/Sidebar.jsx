@@ -17,6 +17,8 @@ import {
   CalendarDays,
   Bell,
   StickyNote,
+  Building2,
+  BadgeCheck,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -29,11 +31,13 @@ const NAV_ITEMS = {
   HR_ADMIN: [
     { to: '/hr/dashboard',       icon: LayoutDashboard, label: 'Dashboard'          },
     { to: '/hr/employees',       icon: Users,            label: 'Employees'         },
+    { to: '/hr/departments',     icon: Building2,        label: 'Departments'       },
     { to: '/hr/documents',       icon: FileText,         label: 'Documents'         },
     { to: '/hr/tasks',           icon: ClipboardList,    label: 'Tasks'             },
-    { to: '/manager/attendance', icon: CalendarDays,     label: 'Attendance'        },
-    { to: '/performance-notes',  icon: StickyNote,       label: 'Performance Notes' },
-    { to: '/notifications',      icon: Bell,             label: 'Notifications'     },
+    { to: '/manager/attendance',    icon: CalendarDays,    label: 'Attendance'         },
+    { to: '/performance-notes',    icon: StickyNote,      label: 'Performance Notes'  },
+    { to: '/hr/recommendations',   icon: BadgeCheck,      label: 'Recommendations'    },
+    { to: '/notifications',        icon: Bell,            label: 'Notifications'      },
   ],
   // LINE_MANAGER: reports removed (Phase 5)
   LINE_MANAGER: [
@@ -60,6 +64,12 @@ const NAV_ITEMS = {
     { to: '/admin/audit-log',  icon: ShieldCheck,      label: 'Audit Log'     },
     { to: '/notifications',    icon: Bell,             label: 'Notifications'  },
   ],
+  // Block 9 — Director role (lecturer requirement: Director final approval)
+  DIRECTOR: [
+    { to: '/director/dashboard', icon: LayoutDashboard, label: 'Dashboard'         },
+    { to: '/director/pending',   icon: BadgeCheck,       label: 'Pending Approvals' },
+    { to: '/notifications',      icon: Bell,             label: 'Notifications'     },
+  ],
 }
 
 const ROLE_LABELS = {
@@ -67,6 +77,7 @@ const ROLE_LABELS = {
   LINE_MANAGER: 'Line Manager',
   NEW_EMPLOYEE: 'New Employee',
   SYSTEM_ADMIN: 'System Administrator',
+  DIRECTOR:     'Director',
 }
 
 export default function Sidebar() {

@@ -121,6 +121,7 @@ const attendanceRoutes     = require('./routes/attendanceRoutes');
 const pdfRoutes            = require('./routes/pdfRoutes');
 const notificationRoutes   = require('./routes/notificationRoutes');
 const performanceNoteRoutes = require('./routes/performanceNoteRoutes');
+const directorRoutes        = require('./routes/directorRoutes');
 
 app.use('/api/auth',              authRoutes);
 app.use('/api/departments',       departmentRoutes);
@@ -135,6 +136,7 @@ app.use('/api/attendance',        attendanceRoutes);
 app.use('/api/reports',           pdfRoutes);
 app.use('/api/notifications',     notificationRoutes);
 app.use('/api/performance-notes', performanceNoteRoutes);
+app.use('/api/director',          directorRoutes);
 
 // =============================================================================
 // 404 HANDLER

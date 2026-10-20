@@ -1,7 +1,9 @@
 // =============================================================================
 // src/models/index.js
-// Loads all 19 Sequelize models and defines associations
+// Loads all 21 Sequelize models and defines associations
 // This is the single entry point for all model imports in the application.
+// Updated: added LeaveBalance model; added Director/Department manager
+//          associations for lecturer requirements
 // =============================================================================
 
 const sequelize = require('../config/database');
@@ -27,10 +29,38 @@ const GeneratedReport     = require('./GeneratedReport');
 const Notification        = require('./Notification');
 const AuditLog            = require('./AuditLog');
 const AttendanceRecord    = require('./AttendanceRecord');
+const LeaveBalance        = require('./LeaveBalance');
 
 // =============================================================================
 // ASSOCIATIONS
 // =============================================================================
+
+// ── Department ↔ User (dedicated manager — one per dept) ─────────────────
+// UNIQUE on Department.manager_id enforces one-manager-per-department at DB level
+Department.belongsTo(User, {
+  foreignKey: 'manager_id',
+  as: 'departmentManager',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+User.hasOne(Department, {
+  foreignKey: 'manager_id',
+  as: 'managedDepartment',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+
+// ── Department ↔ OnboardingTask (departmental constraint) ────────────────
+Department.hasMany(OnboardingTask, {
+  foreignKey: 'department_id',
+  as: 'departmentTasks',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+OnboardingTask.belongsTo(Department, {
+  foreignKey: 'department_id',
+  as: 'department',
+});
 
 // ── Department ↔ EmployeeProfile ──────────────────────────────────────────
 Department.hasMany(EmployeeProfile, {
@@ -282,6 +312,20 @@ SelfAssessmentScore.belongsTo(EvaluationCriterion, {
   as: 'criterion',
 });
 
+// ── ProbationPeriod self-reference (extension chain) ─────────────────────
+ProbationPeriod.belongsTo(ProbationPeriod, {
+  foreignKey: 'parent_period_id',
+  as: 'parentPeriod',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+ProbationPeriod.hasMany(ProbationPeriod, {
+  foreignKey: 'parent_period_id',
+  as: 'extensionPeriods',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+
 // ── ProbationPeriod ↔ FinalRecommendation (1:1) ───────────────────────────
 ProbationPeriod.hasOne(FinalRecommendation, {
   foreignKey: 'period_id',
@@ -294,7 +338,7 @@ FinalRecommendation.belongsTo(ProbationPeriod, {
   as: 'probationPeriod',
 });
 
-// ── User ↔ FinalRecommendation (generator) ───────────────────────────────
+// ── User ↔ FinalRecommendation (generator / backward compat) ─────────────
 User.hasMany(FinalRecommendation, {
   foreignKey: 'generated_by',
   as: 'generatedRecommendations',
@@ -304,6 +348,42 @@ User.hasMany(FinalRecommendation, {
 FinalRecommendation.belongsTo(User, {
   foreignKey: 'generated_by',
   as: 'generatedByUser',
+});
+
+// ── User (manager) ↔ FinalRecommendation (submitter) ─────────────────────
+User.hasMany(FinalRecommendation, {
+  foreignKey: 'submitted_by',
+  as: 'submittedRecommendations',
+  onDelete: 'RESTRICT',
+  onUpdate: 'CASCADE',
+});
+FinalRecommendation.belongsTo(User, {
+  foreignKey: 'submitted_by',
+  as: 'submittedByManager',
+});
+
+// ── User (HR) ↔ FinalRecommendation (endorser) ───────────────────────────
+User.hasMany(FinalRecommendation, {
+  foreignKey: 'endorsed_by',
+  as: 'endorsedRecommendations',
+  onDelete: 'RESTRICT',
+  onUpdate: 'CASCADE',
+});
+FinalRecommendation.belongsTo(User, {
+  foreignKey: 'endorsed_by',
+  as: 'endorsedByHR',
+});
+
+// ── User (Director) ↔ FinalRecommendation (approver) ─────────────────────
+User.hasMany(FinalRecommendation, {
+  foreignKey: 'director_id',
+  as: 'directorDecisions',
+  onDelete: 'RESTRICT',
+  onUpdate: 'CASCADE',
+});
+FinalRecommendation.belongsTo(User, {
+  foreignKey: 'director_id',
+  as: 'director',
 });
 
 // ── EmployeeProfile ↔ PerformanceNote ────────────────────────────────────
@@ -390,6 +470,18 @@ AuditLog.belongsTo(User, {
   as: 'actor',
 });
 
+// ── EmployeeProfile ↔ LeaveBalance ───────────────────────────────────────
+EmployeeProfile.hasMany(LeaveBalance, {
+  foreignKey: 'profile_id',
+  as: 'leaveBalances',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+LeaveBalance.belongsTo(EmployeeProfile, {
+  foreignKey: 'profile_id',
+  as: 'employeeProfile',
+});
+
 // ── ProbationPeriod ↔ AttendanceRecord ────────────────────────────────────
 ProbationPeriod.hasMany(AttendanceRecord, {
   foreignKey: 'period_id',
@@ -440,4 +532,5 @@ module.exports = {
   Notification,
   AuditLog,
   AttendanceRecord,
+  LeaveBalance,
 };

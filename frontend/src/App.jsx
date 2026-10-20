@@ -63,6 +63,16 @@ import DocumentReviewPage from '@/pages/hr/documents/DocumentReviewPage'
 // HR — Task management (Block 5)
 import TaskManagementPage from '@/pages/hr/tasks/TaskManagementPage'
 
+// HR — Department management (Block 8 — lecturer requirement: one manager per dept)
+import DepartmentManagementPage from '@/pages/hr/departments/DepartmentManagementPage'
+
+// HR — Recommendation review queue (Block 9 — 3-stage Director approval)
+import HRRecommendationsPage from '@/pages/hr/recommendations/HRRecommendationsPage'
+
+// Director — Dashboard + Pending approvals (Block 9)
+import DirectorDashboard    from '@/pages/director/DirectorDashboard'
+import DirectorPendingPage  from '@/pages/director/DirectorPendingPage'
+
 // Employee — Document management (Block 4)
 import UploadDocumentPage from '@/pages/employee/documents/UploadDocumentPage'
 import MyDocumentsPage    from '@/pages/employee/documents/MyDocumentsPage'
@@ -95,6 +105,7 @@ function RootRedirect() {
     LINE_MANAGER: '/manager/dashboard',
     NEW_EMPLOYEE: '/employee/dashboard',
     SYSTEM_ADMIN: '/admin/dashboard',
+    DIRECTOR:     '/director/dashboard',
   }
   return <Navigate to={routes[user?.role] || '/login'} replace />
 }
@@ -118,10 +129,20 @@ export default function App() {
             <Route path="/hr/dashboard"            element={<HRDashboard />} />
             <Route path="/hr/employees"            element={<EmployeeListPage />} />
             <Route path="/hr/employees/add"        element={<AddEmployeePage />} />
+            {/* Block 8 — department management (lecturer requirement) */}
+            <Route path="/hr/departments"          element={<DepartmentManagementPage />} />
             {/* Block 4 — document review */}
             <Route path="/hr/documents"            element={<DocumentReviewPage />} />
             {/* Block 5 — task management */}
             <Route path="/hr/tasks"                element={<TaskManagementPage />} />
+            {/* Block 9 — recommendation review queue (3-stage Director approval) */}
+            <Route path="/hr/recommendations"      element={<HRRecommendationsPage />} />
+          </Route>
+
+          {/* ── Director ───────────────────────────────────────────── */}
+          <Route element={<ProtectedRoute allowedRoles={['DIRECTOR']} />}>
+            <Route path="/director/dashboard" element={<DirectorDashboard />} />
+            <Route path="/director/pending"   element={<DirectorPendingPage />} />
           </Route>
 
           {/* Employee profile detail — HR_ADMIN (full edit) + LINE_MANAGER (read-only) */}
@@ -176,14 +197,14 @@ export default function App() {
 
           {/* ── Notifications — all authenticated roles (FR-09) ───────── */}
           <Route
-            element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN']} />}
+            element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN', 'DIRECTOR']} />}
           >
             <Route path="/notifications" element={<NotificationsPage />} />
           </Route>
 
           {/* ── Settings — all authenticated roles (FR-03) ─────────────── */}
           <Route
-            element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN']} />}
+            element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN', 'DIRECTOR']} />}
           >
             <Route path="/settings/change-password" element={<ChangePasswordPage />} />
             <Route path="/profile"                  element={<ProfilePage />} />

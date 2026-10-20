@@ -39,3 +39,17 @@ export const getManagers = () =>
 export const getAllUsers = () =>
   api.get('/employees/all-users').then((r) => r.data.data)
 
+// ── Department manager assignment (Block 3 / lecturer requirement) ─────────
+
+/** Assign a LINE_MANAGER as the dedicated manager of a department. */
+export const assignDepartmentManager = (departmentId, managerId) =>
+  api.patch(`/departments/${departmentId}/manager`, { manager_id: managerId }).then((r) => r.data)
+
+/** Remove the current manager from a department. */
+export const removeDepartmentManager = (departmentId) =>
+  api.delete(`/departments/${departmentId}/manager`).then((r) => r.data)
+
+/** Update department name/description. */
+export const updateDepartment = (departmentId, payload) =>
+  api.put(`/departments/${departmentId}`, payload).then((r) => r.data)
+

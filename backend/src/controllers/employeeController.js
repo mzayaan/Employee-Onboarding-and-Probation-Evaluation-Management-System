@@ -1,14 +1,85 @@
 // =============================================================================
 // src/controllers/employeeController.js
 // Employee profile management — create, list, get, update, toggle status
-// FR-01, FR-04 | NFR-02, NFR-03 | Objective 1
+// FR-01, FR-04, FR-21 | NFR-02, NFR-03 | Objective 1
+// Updated: accepts gender/nationality/salary_monthly; auto-creates LeaveBalance;
+//          adds DIRECTOR to allowedRoles; adds onboarding completion helper
 // =============================================================================
 
 const bcrypt    = require('bcrypt');
-const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint } = require('../models');
+const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint, LeaveBalance, OnboardingDocument, TaskAssignment } = require('../models');
 const { createAuditLog }                                    = require('../utils/auditLogger');
 const { validatePasswordStrength }                          = require('../utils/passwordValidator');
 const { sendWelcomeEmail, sendManagerAssignmentEmail }      = require('../utils/mailer');
+
+// =============================================================================
+// HELPER: buildLeaveBalance
+// Creates a LeaveBalance record for the given profile and calendar year.
+// Called inside the create-employee transaction for new employees.
+// WRA 2019: Annual Leave s.45, Sick Leave s.46, Vacation Leave s.47
+// =============================================================================
+const buildLeaveBalance = (profileId, year, salaryMonthly) => {
+  const VACATION_SALARY_THRESHOLD = 50000; // MUR — WRA 2019 s.47
+  const vacationEligible = salaryMonthly != null && parseFloat(salaryMonthly) <= VACATION_SALARY_THRESHOLD;
+
+  return {
+    profile_id:              profileId,
+    year,
+    annual_leave_entitled:   22.0,   // WRA 2019 s.45
+    annual_leave_used:       0.0,
+    sick_leave_entitled:     15.0,   // WRA 2019 s.46
+    sick_leave_used:         0.0,
+    sick_leave_accumulated:  0.0,
+    vacation_leave_eligible: vacationEligible,
+    vacation_leave_entitled: vacationEligible ? 6.0 : 0.0, // 30 days / 5 years = 6/year
+    vacation_leave_used:     0.0,
+  };
+};
+
+// =============================================================================
+// HELPER: checkOnboardingCompletion
+// Checks whether ALL required documents are approved AND all tasks are completed
+// for a given profile. If so, sets onboarding_status = 'COMPLETED'.
+// Called after document verification and task completion updates.
+// Returns true if status was just set to COMPLETED, false otherwise.
+// =============================================================================
+const checkOnboardingCompletion = async (profileId, transaction = null) => {
+  try {
+    const opts = transaction ? { transaction } : {};
+
+    // All submitted documents must be APPROVED (none PENDING or REJECTED)
+    const pendingOrRejected = await OnboardingDocument.count({
+      where: { profile_id: profileId, status: ['PENDING', 'REJECTED'] },
+      ...opts,
+    });
+    if (pendingOrRejected > 0) return false;
+
+    // There must be at least one approved document (guard against new employee with no docs yet)
+    const approvedCount = await OnboardingDocument.count({
+      where: { profile_id: profileId, status: 'APPROVED' },
+      ...opts,
+    });
+    if (approvedCount === 0) return false;
+
+    // All assigned tasks must be COMPLETED
+    const incompleteTasks = await TaskAssignment.count({
+      where: { profile_id: profileId, status: ['PENDING', 'IN_PROGRESS'] },
+      ...opts,
+    });
+    if (incompleteTasks > 0) return false;
+
+    // All conditions met — mark onboarding as completed
+    await EmployeeProfile.update(
+      { onboarding_status: 'COMPLETED', updated_at: new Date() },
+      { where: { profile_id: profileId }, ...opts }
+    );
+
+    return true;
+  } catch (err) {
+    console.error('[checkOnboardingCompletion] Error:', err.message);
+    return false;
+  }
+};
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -16,7 +87,7 @@ const getIp = (req) =>
 // =============================================================================
 // POST /api/employees
 // HR creates a new user account + employee profile + probation period atomically.
-// FR-01, FR-04 | NFR-02, NFR-03
+// FR-01, FR-04, FR-21 | NFR-02, NFR-03
 // =============================================================================
 const createEmployee = async (req, res) => {
   const t = await sequelize.transaction();
@@ -35,6 +106,10 @@ const createEmployee = async (req, res) => {
       phone,
       start_date,
       probation_end_date,
+      // New fields (Block 3 — FR-21 / lecturer requirements)
+      gender,           // REQUIRED for NEW_EMPLOYEE: 'Male' | 'Female'
+      nationality,      // Optional: string
+      salary_monthly,   // Optional: number — determines Vacation Leave eligibility (WRA 2019 s.47)
       // Optional: custom checkpoint schedule for NEW_EMPLOYEE (FR-11)
       // Defaults to [30, 60, 90] when not provided.
       checkpoint_days,
@@ -50,9 +125,10 @@ const createEmployee = async (req, res) => {
     if (!job_title)  missing.push('job_title');
     if (!start_date) missing.push('start_date');
 
-    // probation_end_date is only required for new employees going through onboarding
-    if (role === 'NEW_EMPLOYEE' && !probation_end_date) {
-      missing.push('probation_end_date');
+    // probation_end_date and gender are only required for new employees
+    if (role === 'NEW_EMPLOYEE') {
+      if (!probation_end_date) missing.push('probation_end_date');
+      if (!gender)             missing.push('gender');
     }
 
     if (missing.length) {
@@ -63,10 +139,15 @@ const createEmployee = async (req, res) => {
       });
     }
 
-    // FR-01: HR can create accounts for all non-SYSTEM_ADMIN roles.
-    // SYSTEM_ADMIN is included here so that HR (or a SYSTEM_ADMIN themselves)
-    // can provision additional SYSTEM_ADMIN accounts if required.
-    const allowedRoles = ['NEW_EMPLOYEE', 'LINE_MANAGER', 'HR_ADMIN', 'SYSTEM_ADMIN'];
+    // Validate gender value
+    if (gender && !['Male', 'Female'].includes(gender)) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'gender must be "Male" or "Female".' });
+    }
+
+    // FR-01: HR can create accounts for all roles including DIRECTOR.
+    // SYSTEM_ADMIN is included so that additional SYSTEM_ADMIN accounts can be provisioned.
+    const allowedRoles = ['NEW_EMPLOYEE', 'LINE_MANAGER', 'HR_ADMIN', 'SYSTEM_ADMIN', 'DIRECTOR'];
     if (!allowedRoles.includes(role)) {
       await t.rollback();
       return res.status(400).json({
@@ -121,15 +202,30 @@ const createEmployee = async (req, res) => {
 
     // ── Create EmployeeProfile ─────────────────────────────────────────────
     const profile = await EmployeeProfile.create({
-      user_id:          newUser.user_id,
-      department_id:    department_id || null,
-      manager_id:       manager_id    || null,
-      job_title:        job_title.trim(),
-      phone:            phone?.trim() || null,
+      user_id:           newUser.user_id,
+      department_id:     department_id  || null,
+      manager_id:        manager_id     || null,
+      job_title:         job_title.trim(),
+      phone:             phone?.trim()  || null,
       start_date,
-      probation_end_date,
+      probation_end_date: probation_end_date || null,
+      gender:            gender              || null,
+      nationality:       nationality?.trim() || null,
+      salary_monthly:    salary_monthly      || null,
+      employment_status: 'PROBATION',
       onboarding_status: 'IN_PROGRESS',
     }, { transaction: t });
+
+    // ── Create LeaveBalance for current year (FR-21 / WRA 2019) ───────────
+    // Only new employees who are going through onboarding get a leave balance.
+    // Managers and admins being granted system access do not need one at creation.
+    if (role === 'NEW_EMPLOYEE') {
+      const currentYear = new Date().getFullYear();
+      await LeaveBalance.create(
+        buildLeaveBalance(profile.profile_id, currentYear, salary_monthly),
+        { transaction: t }
+      );
+    }
 
     // ── Probation period + evaluation checkpoints — NEW_EMPLOYEE only ─────
     // Line Managers and HR Admins are existing staff members who need system
@@ -349,7 +445,7 @@ const getEmployee = async (req, res) => {
 // =============================================================================
 // PUT /api/employees/:id/profile
 // Updates an employee's profile fields. HR_ADMIN only.
-// FR-04
+// FR-04, FR-21
 // =============================================================================
 const updateEmployeeProfile = async (req, res) => {
   try {
@@ -362,6 +458,11 @@ const updateEmployeeProfile = async (req, res) => {
       start_date,
       probation_end_date,
       onboarding_status,
+      // New fields
+      gender,
+      nationality,
+      salary_monthly,
+      employment_status,
     } = req.body;
 
     const profile = await EmployeeProfile.findByPk(id);
@@ -381,6 +482,21 @@ const updateEmployeeProfile = async (req, res) => {
       }
     }
 
+    // Validate gender if supplied (must match EmployeeProfile ENUM)
+    const VALID_GENDERS = ['Male', 'Female'];
+    if (gender !== undefined && !VALID_GENDERS.includes(gender)) {
+      return res.status(400).json({ success: false, message: 'gender must be Male or Female.' });
+    }
+
+    // Validate employment_status if supplied
+    const VALID_EMP_STATUSES = ['PROBATION', 'PERMANENT', 'DISMISSED', 'EXTENDED'];
+    if (employment_status !== undefined && !VALID_EMP_STATUSES.includes(employment_status)) {
+      return res.status(400).json({
+        success: false,
+        message: `employment_status must be one of: ${VALID_EMP_STATUSES.join(', ')}.`,
+      });
+    }
+
     // Use explicit undefined checks so that intentional null values (e.g.
     // unsetting a manager) are preserved instead of falling back to the
     // existing value. The ?? operator would swallow null and prevent clearing.
@@ -392,8 +508,31 @@ const updateEmployeeProfile = async (req, res) => {
       start_date:         start_date        !== undefined ? start_date               : profile.start_date,
       probation_end_date: probation_end_date !== undefined ? probation_end_date      : profile.probation_end_date,
       onboarding_status:  onboarding_status !== undefined ? onboarding_status        : profile.onboarding_status,
+      // New fields (Block 1 / lecturer requirements)
+      gender:             gender            !== undefined ? gender                   : profile.gender,
+      nationality:        nationality       !== undefined ? nationality?.trim()      : profile.nationality,
+      salary_monthly:     salary_monthly    !== undefined ? salary_monthly           : profile.salary_monthly,
+      employment_status:  employment_status !== undefined ? employment_status        : profile.employment_status,
       updated_at:         new Date(),
     });
+
+    // If salary_monthly changed, re-evaluate vacation leave eligibility for the
+    // current year's LeaveBalance (WRA 2019 s.47 threshold: MUR 50,000/month).
+    if (salary_monthly !== undefined && profile.user_id) {
+      const currentYear = new Date().getFullYear();
+      const leaveBalance = await LeaveBalance.findOne({
+        where: { profile_id: id, year: currentYear },
+      });
+      if (leaveBalance) {
+        const VACATION_THRESHOLD = 50000;
+        const newSalary = parseFloat(salary_monthly);
+        const nowEligible = !isNaN(newSalary) && newSalary <= VACATION_THRESHOLD;
+        await leaveBalance.update({
+          vacation_leave_eligible: nowEligible,
+          vacation_leave_entitled: nowEligible ? 6.0 : 0.0,
+        });
+      }
+    }
 
     // Keep ProbationPeriod.end_date in sync with EmployeeProfile.probation_end_date.
     // The HR dashboard reads days-left from ProbationPeriod, so both tables must
@@ -513,4 +652,6 @@ module.exports = {
   toggleUserStatus,
   listManagers,
   listAllUsers,
+  // Exported so documentController and taskController can trigger auto-completion
+  checkOnboardingCompletion,
 };

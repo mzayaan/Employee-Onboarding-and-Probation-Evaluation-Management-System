@@ -25,8 +25,9 @@ const User = sequelize.define('User', {
     comment: 'bcrypt-hashed password — never store plain text',
   },
   role: {
-    type: DataTypes.ENUM('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN'),
+    type: DataTypes.ENUM('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'SYSTEM_ADMIN', 'DIRECTOR'),
     allowNull: false,
+    comment: 'DIRECTOR role added per lecturer requirement — final approval authority over probation recommendations',
   },
   first_name: {
     type: DataTypes.STRING(100),

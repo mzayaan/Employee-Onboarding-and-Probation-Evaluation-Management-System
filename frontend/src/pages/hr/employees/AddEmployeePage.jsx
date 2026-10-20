@@ -25,6 +25,20 @@ const ROLES = [
   { value: 'HR_ADMIN',     label: 'HR Administrator' },
 ]
 
+// Lecturer requirement: gender headcount on HR dashboard (Block 6)
+const GENDER_OPTIONS = [
+  { value: 'Male',   label: 'Male'   },
+  { value: 'Female', label: 'Female' },
+]
+
+// Employment status ENUM (Block 1)
+const EMPLOYMENT_STATUS_OPTIONS = [
+  { value: 'FULL_TIME', label: 'Full-Time' },
+  { value: 'PART_TIME', label: 'Part-Time' },
+  { value: 'CONTRACT',  label: 'Contract'  },
+  { value: 'INTERN',    label: 'Intern'    },
+]
+
 const FIELD = ({ label, required, error, children }) => (
   <div>
     <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -39,15 +53,23 @@ export default function AddEmployeePage() {
   const navigate = useNavigate()
 
   const [form, setForm] = useState({
+    // Account
     first_name:        '',
     last_name:         '',
     email:             '',
     password:          '',
     role:              'NEW_EMPLOYEE',
+    // Employment
     job_title:         '',
     department_id:     '',
     manager_id:        '',
     phone:             '',
+    employment_status: 'FULL_TIME',
+    salary_monthly:    '',
+    // Personal (lecturer requirement: gender headcount)
+    gender:            '',
+    nationality:       '',
+    // Dates
     start_date:        '',
     probation_end_date: '',
   })
@@ -145,7 +167,7 @@ export default function AddEmployeePage() {
               View All Employees
             </button>
             <button
-              onClick={() => { setSuccess(false); setCheckpointDays([30, 60, 90]); setNewDayInput(''); setDayInputError(''); setForm({ first_name: '', last_name: '', email: '', password: '', role: 'NEW_EMPLOYEE', job_title: '', department_id: '', manager_id: '', phone: '', start_date: '', probation_end_date: '' }) }}
+              onClick={() => { setSuccess(false); setCheckpointDays([30, 60, 90]); setNewDayInput(''); setDayInputError(''); setForm({ first_name: '', last_name: '', email: '', password: '', role: 'NEW_EMPLOYEE', job_title: '', department_id: '', manager_id: '', phone: '', employment_status: 'FULL_TIME', salary_monthly: '', gender: '', nationality: '', start_date: '', probation_end_date: '' }) }}
               className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Add Another
@@ -297,6 +319,70 @@ export default function AddEmployeePage() {
                 value={form.phone}
                 onChange={set('phone')}
                 placeholder="e.g. +230 5900 0000"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </FIELD>
+
+            {/* ── Lecturer requirement: employment status ──────────── */}
+            <FIELD label="Employment Status" error={errors.employment_status}>
+              <select
+                value={form.employment_status}
+                onChange={set('employment_status')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              >
+                {EMPLOYMENT_STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </FIELD>
+
+            {/* Monthly salary — optional */}
+            <FIELD label="Monthly Salary (MUR)" error={errors.salary_monthly}>
+              <input
+                type="number"
+                min="0"
+                step="500"
+                value={form.salary_monthly}
+                onChange={set('salary_monthly')}
+                placeholder="e.g. 25000"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Used to determine applicable WRA 2019 leave entitlements (Vacation Leave ≤ MUR 50,000/month).
+              </p>
+            </FIELD>
+          </div>
+        </section>
+
+        {/* ── Personal Information ─────────────────────────────────────────── */}
+        <section className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+          <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>
+            Personal Information
+          </h2>
+          <p className="mb-4 text-xs text-slate-400">
+            Gender is required for the HR headcount dashboard. Nationality is optional.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Lecturer requirement: gender headcount */}
+            <FIELD label="Gender" error={errors.gender}>
+              <select
+                value={form.gender}
+                onChange={set('gender')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">— Select gender —</option>
+                {GENDER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </FIELD>
+
+            <FIELD label="Nationality" error={errors.nationality}>
+              <input
+                type="text"
+                value={form.nationality}
+                onChange={set('nationality')}
+                placeholder="e.g. Mauritian"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </FIELD>

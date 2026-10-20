@@ -23,12 +23,27 @@ const fmtDate = (iso) => {
   return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+// Full WRA 2019 leave-type ENUM (matches AttendanceRecord.status in backend)
+// Grouped with a separator for usability in the <select>
 const STATUS_OPTIONS = [
-  { value: 'PRESENT',  label: 'Present',   colour: 'bg-emerald-100 text-emerald-700' },
-  { value: 'ABSENT',   label: 'Absent',    colour: 'bg-red-100    text-red-700'      },
-  { value: 'LATE',     label: 'Late',      colour: 'bg-amber-100  text-amber-700'    },
-  { value: 'HALF_DAY', label: 'Half Day',  colour: 'bg-blue-100   text-blue-700'     },
+  // Attendance
+  { value: 'PRESENT',         label: 'Present',                    colour: 'bg-emerald-100 text-emerald-700', group: 'Attendance' },
+  { value: 'ABSENT',          label: 'Absent',                     colour: 'bg-red-100     text-red-700',     group: 'Attendance' },
+  { value: 'LATE',            label: 'Late',                       colour: 'bg-amber-100   text-amber-700',   group: 'Attendance' },
+  { value: 'HALF_DAY',        label: 'Half Day',                   colour: 'bg-blue-100    text-blue-700',    group: 'Attendance' },
+  // WRA 2019 statutory leave
+  { value: 'SICK_LEAVE',      label: 'Sick Leave (WRA s.46)',      colour: 'bg-orange-100  text-orange-700',  group: 'WRA 2019 Leave' },
+  { value: 'ANNUAL_LEAVE',    label: 'Annual Leave (WRA s.45)',    colour: 'bg-teal-100    text-teal-700',    group: 'WRA 2019 Leave' },
+  { value: 'VACATION_LEAVE',  label: 'Vacation Leave (WRA s.47)', colour: 'bg-cyan-100    text-cyan-700',    group: 'WRA 2019 Leave' },
+  { value: 'MATERNITY_LEAVE', label: 'Maternity Leave (WRA s.48)','colour': 'bg-pink-100   text-pink-700',    group: 'WRA 2019 Leave' },
+  { value: 'PATERNITY_LEAVE', label: 'Paternity Leave (WRA s.49)','colour': 'bg-violet-100 text-violet-700',  group: 'WRA 2019 Leave' },
+  { value: 'SPECIAL_LEAVE',   label: 'Special Leave',              colour: 'bg-indigo-100  text-indigo-700',  group: 'WRA 2019 Leave' },
+  // Public holiday
+  { value: 'PUBLIC_HOLIDAY',  label: 'Public Holiday',             colour: 'bg-slate-100   text-slate-600',   group: 'Other' },
 ]
+
+// Groups for <optgroup> rendering in the status <select>
+const STATUS_GROUPS = ['Attendance', 'WRA 2019 Leave', 'Other']
 
 function StatusBadge({ status }) {
   const opt = STATUS_OPTIONS.find((o) => o.value === status) || STATUS_OPTIONS[0]
@@ -115,17 +130,32 @@ export default function AttendanceLogPage() {
     }
   }
 
-  // ── Summary counts ────────────────────────────────────────────────────────
+  // ── Summary counts — all 11 WRA 2019 statuses ────────────────────────────
   const summary = records.reduce(
     (acc, r) => {
-      if (r.status === 'PRESENT')  acc.present++
-      if (r.status === 'ABSENT')   acc.absent++
-      if (r.status === 'LATE')     acc.late++
-      if (r.status === 'HALF_DAY') acc.halfDay++
+      const s = r.status
+      if (s === 'PRESENT')         acc.present++
+      if (s === 'ABSENT')          acc.absent++
+      if (s === 'LATE')            acc.late++
+      if (s === 'HALF_DAY')        acc.halfDay++
+      if (s === 'SICK_LEAVE')      acc.sickLeave++
+      if (s === 'ANNUAL_LEAVE')    acc.annualLeave++
+      if (s === 'VACATION_LEAVE')  acc.vacationLeave++
+      if (s === 'MATERNITY_LEAVE') acc.maternityLeave++
+      if (s === 'PATERNITY_LEAVE') acc.paternityLeave++
+      if (s === 'SPECIAL_LEAVE')   acc.specialLeave++
+      if (s === 'PUBLIC_HOLIDAY')  acc.publicHoliday++
       return acc
     },
-    { present: 0, absent: 0, late: 0, halfDay: 0 }
+    {
+      present: 0, absent: 0, late: 0, halfDay: 0,
+      sickLeave: 0, annualLeave: 0, vacationLeave: 0,
+      maternityLeave: 0, paternityLeave: 0, specialLeave: 0,
+      publicHoliday: 0,
+    }
   )
+  const totalLeave = summary.sickLeave + summary.annualLeave + summary.vacationLeave
+                   + summary.maternityLeave + summary.paternityLeave + summary.specialLeave
 
   return (
     <AppShell>
@@ -217,8 +247,14 @@ export default function AttendanceLogPage() {
                     required
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-white"
                   >
-                    {STATUS_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
+                    {STATUS_GROUPS.map((group) => (
+                      <optgroup key={group} label={group}>
+                        {STATUS_OPTIONS
+                          .filter((o) => o.group === group)
+                          .map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                      </optgroup>
                     ))}
                   </select>
                 </div>
@@ -318,7 +354,9 @@ export default function AttendanceLogPage() {
         <div>
           <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
             <h2 className="mb-4 font-semibold text-slate-800">Period Summary</h2>
-            <div className="space-y-3">
+
+            {/* Core attendance */}
+            <div className="space-y-2">
               {[
                 { label: 'Days Present',  value: summary.present,  colour: 'text-emerald-600', bg: 'bg-emerald-50'  },
                 { label: 'Days Absent',   value: summary.absent,   colour: 'text-red-600',     bg: 'bg-red-50'      },
@@ -331,12 +369,39 @@ export default function AttendanceLogPage() {
                 </div>
               ))}
             </div>
-            <div className="mt-4 border-t border-slate-100 pt-4">
+
+            {/* WRA 2019 leave breakdown */}
+            <p className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              WRA 2019 Leave
+            </p>
+            <div className="space-y-1.5">
+              {[
+                { label: 'Sick Leave',      value: summary.sickLeave      },
+                { label: 'Annual Leave',    value: summary.annualLeave    },
+                { label: 'Vacation Leave',  value: summary.vacationLeave  },
+                { label: 'Maternity Leave', value: summary.maternityLeave },
+                { label: 'Paternity Leave', value: summary.paternityLeave },
+                { label: 'Special Leave',   value: summary.specialLeave   },
+                { label: 'Public Holiday',  value: summary.publicHoliday  },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-2">
+                  <span className="text-sm text-slate-600">{label}</span>
+                  <span className="text-base font-semibold text-slate-700">{value}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 border-t border-slate-100 pt-3 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-500">Total Leave Days</span>
+                <span className="text-base font-semibold text-slate-700">{totalLeave}</span>
+              </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-600">Total Records</span>
                 <span className="text-xl font-bold text-slate-800">{records.length}</span>
               </div>
             </div>
+
             <p className="mt-3 text-xs text-slate-400">
               These counts are automatically used to pre-fill the attendance section of the probation evaluation form.
             </p>

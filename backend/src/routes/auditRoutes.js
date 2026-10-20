@@ -1,7 +1,8 @@
 // =============================================================================
 // src/routes/auditRoutes.js
 // FR-18 | NFR-08
-// All routes require SYSTEM_ADMIN role.
+// SYSTEM_ADMIN: full audit access
+// DIRECTOR: read audit logs for compliance oversight of probation decisions
 // =============================================================================
 
 const express                = require('express');
@@ -11,7 +12,7 @@ const authorize    = require('../middleware/authorize');
 
 const router = express.Router();
 
-// GET /api/audit
-router.get('/', authenticate, authorize('SYSTEM_ADMIN'), getAuditLogs);
+// GET /api/audit — SYSTEM_ADMIN and DIRECTOR (Director needs audit trail visibility for probation decisions)
+router.get('/', authenticate, authorize('SYSTEM_ADMIN', 'DIRECTOR'), getAuditLogs);
 
 module.exports = router;

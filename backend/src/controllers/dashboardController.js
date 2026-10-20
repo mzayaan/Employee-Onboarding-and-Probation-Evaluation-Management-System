@@ -1,24 +1,55 @@
 // =============================================================================
 // src/controllers/dashboardController.js
 // HR dashboard summary statistics and onboarding progress endpoints.
-// FR-08, FR-17 | Objective 1 & 4
+//
+// Updated (Block 6 — lecturer requirements):
+//   - getDashboardStats: now includes gender headcount (male/female) inline
+//   - getGenderHeadcount: standalone endpoint for gender breakdown pie/bar chart
+//   - getAttendanceBreakdown: per-status attendance counts using the full WRA 2019
+//     ENUM (PRESENT, ABSENT, LATE, HALF_DAY, SICK_LEAVE, ANNUAL_LEAVE,
+//     VACATION_LEAVE, MATERNITY_LEAVE, PATERNITY_LEAVE, SPECIAL_LEAVE,
+//     PUBLIC_HOLIDAY). Accepts optional ?from=YYYY-MM-DD&to=YYYY-MM-DD query
+//     params; defaults to current calendar month.
+//
+// FR-08, FR-17 | NFR-03 | Objectives 1 & 4
 // =============================================================================
 
-const { Op } = require('sequelize')
+const { Op, fn, col, literal } = require('sequelize')
 const {
   EmployeeProfile,
   ProbationPeriod,
   EvaluationCheckpoint,
   OnboardingDocument,
   TaskAssignment,
+  AttendanceRecord,
   User,
   Department,
 } = require('../models')
 
+// ---------------------------------------------------------------------------
+// HELPER: build the first and last day of the current calendar month
+// ---------------------------------------------------------------------------
+const currentMonthRange = () => {
+  const now   = new Date()
+  const from  = new Date(now.getFullYear(), now.getMonth(), 1)
+  const to    = new Date(now.getFullYear(), now.getMonth() + 1, 0)  // last day
+  return { from, to }
+}
+
+// ---------------------------------------------------------------------------
+// HELPER: parse a YYYY-MM-DD string safely; returns null on invalid input
+// ---------------------------------------------------------------------------
+const parseDate = (str) => {
+  if (!str) return null
+  const d = new Date(str)
+  return isNaN(d.getTime()) ? null : d
+}
+
 // =============================================================================
 // GET /api/dashboard/stats
 // HR summary stat cards — total employees, pending docs, active probations,
-// overdue tasks.  FR-17 | HR_ADMIN only
+// overdue tasks, gender headcount.
+// FR-17 | HR_ADMIN only
 // =============================================================================
 const getDashboardStats = async (req, res) => {
   try {
@@ -33,27 +64,33 @@ const getDashboardStats = async (req, res) => {
       overdueTasks,
       upcomingEvaluations,
       overdueEvaluations,
+      maleCount,
+      femaleCount,
     ] = await Promise.all([
       EmployeeProfile.count(),
       OnboardingDocument.count({ where: { status: 'PENDING' } }),
       ProbationPeriod.count({ where: { status: 'ACTIVE' } }),
       TaskAssignment.count({
         where: {
-          status: { [Op.ne]: 'COMPLETED' },
+          status:   { [Op.ne]: 'COMPLETED' },
           due_date: { [Op.lt]: today },
         },
       }),
-      // Upcoming evaluations: PENDING checkpoints with due_date in the next 7 days (FR-17)
+      // Upcoming evaluations: PENDING checkpoints with due_date in next 7 days (FR-17)
       EvaluationCheckpoint.count({
         where: {
           status:   'PENDING',
           due_date: { [Op.between]: [today, in7Days] },
         },
       }),
-      // Overdue evaluations: checkpoints already marked OVERDUE (FR-17)
+      // Overdue evaluations: checkpoints marked OVERDUE (FR-17)
       EvaluationCheckpoint.count({
         where: { status: 'OVERDUE' },
       }),
+      // Lecturer requirement: gender headcount — Male
+      EmployeeProfile.count({ where: { gender: 'Male' } }),
+      // Lecturer requirement: gender headcount — Female
+      EmployeeProfile.count({ where: { gender: 'Female' } }),
     ])
 
     return res.json({
@@ -65,6 +102,13 @@ const getDashboardStats = async (req, res) => {
         overdueTasks,
         upcomingEvaluations,
         overdueEvaluations,
+        // Gender headcount — included here for quick stat-card display
+        // and also available as a dedicated chart endpoint: GET /gender-headcount
+        genderHeadcount: {
+          male:     maleCount,
+          female:   femaleCount,
+          unspecified: totalEmployees - maleCount - femaleCount,
+        },
       },
     })
   } catch (error) {
@@ -74,16 +118,159 @@ const getDashboardStats = async (req, res) => {
 }
 
 // =============================================================================
+// GET /api/dashboard/gender-headcount
+// Staff headcount broken down by gender — for Chart.js pie or bar chart.
+// Lecturer requirement: HR must be able to see Male / Female staff counts.
+// FR-17 | HR_ADMIN | Objective 4
+// =============================================================================
+const getGenderHeadcount = async (req, res) => {
+  try {
+    // Pull counts for all recognised gender values plus a catch-all for
+    // profiles where gender has not yet been set (NULL).
+    const [male, female, unspecified] = await Promise.all([
+      EmployeeProfile.count({ where: { gender: 'Male' } }),
+      EmployeeProfile.count({ where: { gender: 'Female' } }),
+      EmployeeProfile.count({ where: { gender: null } }),
+    ])
+
+    const total = male + female + unspecified
+
+    return res.json({
+      success: true,
+      data: {
+        total,
+        breakdown: [
+          { gender: 'Male',        count: male,        percent: total > 0 ? Number(((male / total) * 100).toFixed(1)) : 0 },
+          { gender: 'Female',      count: female,      percent: total > 0 ? Number(((female / total) * 100).toFixed(1)) : 0 },
+          { gender: 'Unspecified', count: unspecified, percent: total > 0 ? Number(((unspecified / total) * 100).toFixed(1)) : 0 },
+        ],
+      },
+    })
+  } catch (error) {
+    console.error('[dashboardController.getGenderHeadcount]', error.message)
+    return res.status(500).json({ success: false, message: 'Failed to load gender headcount.' })
+  }
+}
+
+// =============================================================================
+// GET /api/dashboard/attendance-breakdown
+// Attendance record counts grouped by status for the current calendar month
+// (or a custom date range supplied via ?from=YYYY-MM-DD&to=YYYY-MM-DD).
+//
+// Lecturer requirement: HR dashboard must show present / absent / late /
+// sick / vacation counts.  This endpoint covers all WRA 2019 leave types
+// so the frontend can choose which statuses to display.
+//
+// Supports optional ?profile_id=X to filter to a single employee.
+// FR-12, FR-17 | HR_ADMIN | Objective 4
+// =============================================================================
+const getAttendanceBreakdown = async (req, res) => {
+  try {
+    // ── Date-range resolution ────────────────────────────────────────────────
+    const { from: fromParam, to: toParam, profile_id } = req.query
+
+    let from = parseDate(fromParam)
+    let to   = parseDate(toParam)
+
+    if (!from || !to) {
+      const range = currentMonthRange()
+      from = range.from
+      to   = range.to
+    }
+
+    if (from > to) {
+      return res.status(400).json({
+        success: false,
+        message: '"from" date must not be later than "to" date.',
+      })
+    }
+
+    // ── Base WHERE clause ───────────────────────────────────────────────────
+    const where = {
+      date: { [Op.between]: [from, to] },
+    }
+    if (profile_id) {
+      where.profile_id = Number(profile_id)
+    }
+
+    // ── All WRA 2019 status values (matches AttendanceRecord.status ENUM) ───
+    const ALL_STATUSES = [
+      'PRESENT',
+      'ABSENT',
+      'LATE',
+      'HALF_DAY',
+      'SICK_LEAVE',
+      'ANNUAL_LEAVE',
+      'VACATION_LEAVE',
+      'MATERNITY_LEAVE',
+      'PATERNITY_LEAVE',
+      'SPECIAL_LEAVE',
+      'PUBLIC_HOLIDAY',
+    ]
+
+    // Count each status in parallel for predictable, fast response
+    const counts = await Promise.all(
+      ALL_STATUSES.map((status) =>
+        AttendanceRecord.count({ where: { ...where, status } })
+      )
+    )
+
+    // ── Build response ───────────────────────────────────────────────────────
+    const breakdown = ALL_STATUSES.reduce((acc, status, idx) => {
+      acc[status] = counts[idx]
+      return acc
+    }, {})
+
+    const totalRecords = counts.reduce((a, b) => a + b, 0)
+
+    // Convenience groupings the frontend may use for summary cards
+    const summary = {
+      present:     breakdown.PRESENT,
+      absent:      breakdown.ABSENT,
+      late:        breakdown.LATE,
+      on_leave:    breakdown.SICK_LEAVE
+                 + breakdown.ANNUAL_LEAVE
+                 + breakdown.VACATION_LEAVE
+                 + breakdown.MATERNITY_LEAVE
+                 + breakdown.PATERNITY_LEAVE
+                 + breakdown.SPECIAL_LEAVE,
+      public_holiday: breakdown.PUBLIC_HOLIDAY,
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        from:          from.toISOString().slice(0, 10),
+        to:            to.toISOString().slice(0, 10),
+        profile_id:    profile_id ? Number(profile_id) : null,
+        total_records: totalRecords,
+        breakdown,
+        summary,
+      },
+    })
+  } catch (error) {
+    console.error('[dashboardController.getAttendanceBreakdown]', error.message)
+    return res.status(500).json({ success: false, message: 'Failed to load attendance breakdown.' })
+  }
+}
+
+// =============================================================================
 // GET /api/dashboard/onboarding-progress
 // Per-employee onboarding progress: task completion % + document counts.
-// FR-08, FR-17 | HR_ADMIN only
+// FR-08, FR-17 | HR_ADMIN + LINE_MANAGER (departmental filter)
 // =============================================================================
 const getOnboardingProgress = async (req, res) => {
   try {
     const { role, user_id } = req.user
 
-    // LINE_MANAGER sees only employees assigned to them (NFR-03)
-    const profileWhere = role === 'LINE_MANAGER' ? { manager_id: user_id } : {}
+    // LINE_MANAGER sees only employees in their department (Block 4 — NFR-03)
+    let profileWhere = {}
+    if (role === 'LINE_MANAGER') {
+      const managerDept = await Department.findOne({ where: { manager_id: user_id } })
+      profileWhere = managerDept
+        ? { department_id: managerDept.department_id }
+        : { department_id: -1 }  // returns zero rows if manager has no dept
+    }
 
     const profiles = await EmployeeProfile.findAll({
       where: profileWhere,
@@ -117,9 +304,6 @@ const getOnboardingProgress = async (req, res) => {
           required: false,
         },
       ],
-      // Use profile_id (auto-increment PK) for ordering — fully unambiguous across
-      // all joined tables. Avoids MySQL ambiguous-column errors caused by
-      // task_assignments and probation_periods both defining their own created_at.
       order: [['profile_id', 'DESC']],
     })
 
@@ -234,12 +418,12 @@ const getMyProgress = async (req, res) => {
         probation_days_left: probationDaysLeft,
         probation_status:    prob?.status || null,
       },
-    });
+    })
   } catch (error) {
-    console.error('[dashboardController.getMyProgress]', error.message);
-    return res.status(500).json({ success: false, message: 'Failed to retrieve progress data.' });
+    console.error('[dashboardController.getMyProgress]', error.message)
+    return res.status(500).json({ success: false, message: 'Failed to retrieve progress data.' })
   }
-};
+}
 
 // =============================================================================
 // EXPORTS
@@ -247,6 +431,8 @@ const getMyProgress = async (req, res) => {
 
 module.exports = {
   getDashboardStats,
+  getGenderHeadcount,
+  getAttendanceBreakdown,
   getOnboardingProgress,
   getMyProgress,
-};
+}

@@ -29,11 +29,11 @@ router.get('/managers', authorize('HR_ADMIN'), listManagers);
 // POST /api/employees           — HR only
 router.post('/', authorize('HR_ADMIN'), createEmployee);
 
-// GET  /api/employees           — HR and Manager
-router.get('/', authorize('HR_ADMIN', 'LINE_MANAGER'), listEmployees);
+// GET  /api/employees           — HR, Manager, and Director (Director needs the employee list for approval context)
+router.get('/', authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'), listEmployees);
 
-// GET  /api/employees/:id       — HR, Manager, Employee (own profile only)
-router.get('/:id', authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE'), getEmployee);
+// GET  /api/employees/:id       — HR, Manager, Employee (own profile only), Director (for approval review)
+router.get('/:id', authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'DIRECTOR'), getEmployee);
 
 // PUT  /api/employees/:id/profile — HR only
 router.put('/:id/profile', authorize('HR_ADMIN'), updateEmployeeProfile);

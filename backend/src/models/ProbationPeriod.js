@@ -27,9 +27,15 @@ const ProbationPeriod = sequelize.define('ProbationPeriod', {
     allowNull: false,
   },
   status: {
-    type: DataTypes.ENUM('ACTIVE', 'COMPLETED', 'EXTENDED'),
+    type: DataTypes.ENUM('ACTIVE', 'COMPLETED', 'EXTENDED', 'CONFIRMED', 'DISMISSED'),
     allowNull: false,
     defaultValue: 'ACTIVE',
+    comment: 'CONFIRMED = employment confirmed by Director; DISMISSED = employment terminated per WRA 2019',
+  },
+  parent_period_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    comment: 'FK self-reference — links an extension period back to the original period (nullable for first period)',
   },
   final_recommendation: {
     type: DataTypes.ENUM('CONFIRM', 'EXTEND', 'DISMISS'),

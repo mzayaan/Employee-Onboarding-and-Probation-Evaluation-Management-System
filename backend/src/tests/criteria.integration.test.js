@@ -14,6 +14,12 @@
 // ── Mock: express-rate-limit → passthrough ───────────────────────────────────
 jest.mock('express-rate-limit', () => () => (req, res, next) => next());
 
+// ── Mock: bcrypt (native binary incompatible with Linux CI sandbox) ───────────
+jest.mock('bcrypt', () => ({
+  compare: jest.fn().mockResolvedValue(true),
+  hash:    jest.fn().mockResolvedValue('$2b$12$hashedpassword'),
+}));
+
 // ── Mock: nodemailer ──────────────────────────────────────────────────────────
 jest.mock('nodemailer', () => ({
   createTransport: () => ({

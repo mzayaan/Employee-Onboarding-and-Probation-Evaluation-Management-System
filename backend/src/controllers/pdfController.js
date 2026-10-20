@@ -191,6 +191,17 @@ const generateReport = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
+    // ── Business rule: Director must have approved the recommendation ────────
+    // Lecturer requirement: PDF generation is locked until the Director gives
+    // final approval through the 3-stage approval workflow (FR-15, FR-16).
+    const finalRecForGuard = period.finalRecommendation;
+    if (!finalRecForGuard || finalRecForGuard.approval_status !== 'APPROVED') {
+      return res.status(403).json({
+        success: false,
+        message: 'The PDF evaluation report is only available after the Director has approved the final recommendation.',
+      });
+    }
+
     // ── Business rule: at least one completed checkpoint ──────────────────
     const checkpoints  = [...(period.checkpoints || [])].sort((a, b) => a.day_number - b.day_number);
     const completedCps = checkpoints.filter((cp) => cp.status === 'COMPLETED');

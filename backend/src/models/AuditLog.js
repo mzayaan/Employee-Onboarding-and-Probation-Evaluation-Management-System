@@ -46,7 +46,14 @@ const AuditLog = sequelize.define('AuditLog', {
       // Evaluation
       'EVALUATION_SUBMITTED',
       'SELF_ASSESSMENT_SUBMITTED',
-      'RECOMMENDATION_GENERATED',
+      'RECOMMENDATION_GENERATED',       // kept for backwards-compatibility
+      // Probation approval workflow (Block 5 — 3-stage Director approval)
+      'RECOMMENDATION_SUBMITTED',       // manager submits → PENDING_HR_REVIEW
+      'RECOMMENDATION_ENDORSED',        // HR endorses → PENDING_DIRECTOR
+      'RECOMMENDATION_RETURNED_BY_HR',  // HR returns → RETURNED_TO_MANAGER
+      'RECOMMENDATION_RESUBMITTED',     // manager resubmits → PENDING_HR_REVIEW
+      'RECOMMENDATION_APPROVED',        // Director approves → APPROVED; period updated
+      'RECOMMENDATION_RETURNED_BY_DIRECTOR', // Director returns → RETURNED_TO_MANAGER
       // Reports
       'PDF_GENERATED',
       'REPORT_GENERATED',
@@ -59,9 +66,11 @@ const AuditLog = sequelize.define('AuditLog', {
       'PROBATION_STATUS_CHANGED',
       // Attendance
       'ATTENDANCE_RECORDED',
-      // Department
+      // Department (Block 3 — lecturer requirement: one manager per department)
       'CREATE_DEPARTMENT',
-      'UPDATE_DEPARTMENT'
+      'UPDATE_DEPARTMENT',
+      'DEPARTMENT_MANAGER_ASSIGNED',    // a manager was assigned to a department
+      'DEPARTMENT_MANAGER_REMOVED'      // a manager was removed from a department
     ),
     allowNull: false,
   },

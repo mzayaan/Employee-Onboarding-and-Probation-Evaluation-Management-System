@@ -1,16 +1,35 @@
 // =============================================================================
 // src/middleware/authorize.js
 // Role-based access control middleware
-// FR-01, FR-02 | NFR-03
+// FR-01, FR-02, FR-22 | NFR-03
+// Updated: added ROLES constants export and DIRECTOR role
 // =============================================================================
+
+/**
+ * ROLES
+ * Named constants for all user roles in the system.
+ * Import these in route files instead of using magic strings to prevent typos.
+ *
+ * Usage in routes:
+ *   const { ROLES } = require('../middleware/authorize');
+ *   router.get('/approve', authenticate, authorize(ROLES.DIRECTOR), handler);
+ */
+const ROLES = {
+  HR_ADMIN:     'HR_ADMIN',
+  LINE_MANAGER: 'LINE_MANAGER',
+  NEW_EMPLOYEE: 'NEW_EMPLOYEE',
+  SYSTEM_ADMIN: 'SYSTEM_ADMIN',
+  DIRECTOR:     'DIRECTOR',
+};
 
 /**
  * authorize(...roles)
  * Factory that returns a middleware allowing only the specified roles.
  *
  * Usage:
- *   router.get('/admin-only', authenticate, authorize('SYSTEM_ADMIN'), handler);
- *   router.get('/hr-or-manager', authenticate, authorize('HR_ADMIN', 'LINE_MANAGER'), handler);
+ *   router.get('/admin-only', authenticate, authorize(ROLES.SYSTEM_ADMIN), handler);
+ *   router.get('/hr-or-manager', authenticate, authorize(ROLES.HR_ADMIN, ROLES.LINE_MANAGER), handler);
+ *   router.get('/director', authenticate, authorize(ROLES.DIRECTOR), handler);
  *
  * Must be used AFTER the authenticate middleware so req.user is populated.
  */
@@ -35,3 +54,4 @@ const authorize = (...roles) => {
 };
 
 module.exports = authorize;
+module.exports.ROLES = ROLES;

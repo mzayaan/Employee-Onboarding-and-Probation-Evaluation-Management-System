@@ -504,7 +504,9 @@ const submitManagerEvaluation = async (req, res) => {
           );
           const recommendationType = deriveRecommendation(cumulative);
 
-          // Upsert final recommendation
+          // Submit recommendation to HR for review (3-stage approval workflow).
+          // ProbationPeriod.status stays ACTIVE until the Director approves
+          // (directorController.approveRecommendation handles the final transition).
           await FinalRecommendation.findOrCreate({
             where: { period_id: period.period_id },
             defaults: {
@@ -512,25 +514,39 @@ const submitManagerEvaluation = async (req, res) => {
               cumulative_score:    cumulative,
               generated_at:        new Date(),
               generated_by:        req.user.user_id,
+              submitted_by:        req.user.user_id,
+              approval_status:     'PENDING_HR_REVIEW',
             },
             transaction: t,
           });
 
-          // Update probation period cumulative score + status
-          const newStatus = recommendationType === 'EXTEND' ? 'EXTENDED' : 'COMPLETED';
+          // Update cumulative score and recommendation type on the period;
+          // do NOT change period.status here — that is the Director's action.
           await period.update({
             cumulative_score:     cumulative,
             final_recommendation: recommendationType,
-            status:               newStatus,
             updated_at:           new Date(),
           }, { transaction: t });
 
           await createAuditLog({
             userId:      req.user.user_id,
-            actionType:  'RECOMMENDATION_GENERATED',
-            description: `Final recommendation ${recommendationType} generated for profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%.`,
+            actionType:  'RECOMMENDATION_SUBMITTED',
+            description: `Final recommendation "${recommendationType}" submitted for HR review. Profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%. Approval status: PENDING_HR_REVIEW.`,
             ipAddress:   getIp(req),
           });
+
+          // Notify all active HR admins (fire-and-forget)
+          const { User: _HRUser } = require('../models');
+          const { createNotification: _notifHR } = require('../services/notificationService');
+          _HRUser.findAll({ where: { role: 'HR_ADMIN', is_active: true }, attributes: ['user_id'] })
+            .then((hrUsers) => hrUsers.forEach((hr) => _notifHR({
+              userId:  hr.user_id,
+              type:    'RECOMMENDATION_PENDING',
+              message: `A probation recommendation (${recommendationType}) requires your review. Profile ID: ${profile.profile_id}.`,
+              relatedEntityType: 'recommendation',
+              relatedEntityId:   null,
+            }).catch(() => {})))
+            .catch(() => {});
         }
       }
 
@@ -691,6 +707,8 @@ const submitSelfAssessment = async (req, res) => {
           );
           const recommendationType = deriveRecommendation(cumulative);
 
+          // Submit recommendation to HR for review (3-stage approval workflow).
+          // ProbationPeriod.status stays ACTIVE until the Director approves.
           await FinalRecommendation.findOrCreate({
             where: { period_id: period.period_id },
             defaults: {
@@ -698,24 +716,39 @@ const submitSelfAssessment = async (req, res) => {
               cumulative_score:    cumulative,
               generated_at:        new Date(),
               generated_by:        req.user.user_id,
+              submitted_by:        req.user.user_id,
+              approval_status:     'PENDING_HR_REVIEW',
             },
             transaction: t,
           });
 
-          const newStatus = recommendationType === 'EXTEND' ? 'EXTENDED' : 'COMPLETED';
+          // Update cumulative score and recommendation type only;
+          // period.status remains ACTIVE until Director approves.
           await period.update({
             cumulative_score:     cumulative,
             final_recommendation: recommendationType,
-            status:               newStatus,
             updated_at:           new Date(),
           }, { transaction: t });
 
           await createAuditLog({
             userId:      req.user.user_id,
-            actionType:  'RECOMMENDATION_GENERATED',
-            description: `Final recommendation ${recommendationType} generated for profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%.`,
+            actionType:  'RECOMMENDATION_SUBMITTED',
+            description: `Final recommendation "${recommendationType}" submitted for HR review via self-assessment. Profile_id ${profile.profile_id}. Cumulative score: ${cumulative}%. Approval status: PENDING_HR_REVIEW.`,
             ipAddress:   getIp(req),
           });
+
+          // Notify HR admins (fire-and-forget)
+          const { User: _HRUser2 } = require('../models');
+          const { createNotification: _notifHR2 } = require('../services/notificationService');
+          _HRUser2.findAll({ where: { role: 'HR_ADMIN', is_active: true }, attributes: ['user_id'] })
+            .then((hrUsers) => hrUsers.forEach((hr) => _notifHR2({
+              userId:  hr.user_id,
+              type:    'RECOMMENDATION_PENDING',
+              message: `A probation recommendation (${recommendationType}) requires your review. Profile ID: ${profile.profile_id}.`,
+              relatedEntityType: 'recommendation',
+              relatedEntityId:   null,
+            }).catch(() => {})))
+            .catch(() => {});
         }
       }
     });

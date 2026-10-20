@@ -51,20 +51,22 @@ router.post(
   submitManagerEvaluation
 );
 
-// ── Shared routes (HR Admin + Line Manager + Employee) ────────────────────
+// ── Shared routes (HR Admin + Line Manager + Employee + Director) ─────────
 // GET /api/evaluations/checkpoint/:checkpointId
+// DIRECTOR added so they can review checkpoint detail before approving (FR-20)
 router.get(
   '/checkpoint/:checkpointId',
   authenticate,
-  authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE'),
+  authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'DIRECTOR'),
   getCheckpoint
 );
 
-// GET /api/evaluations/probation/:profileId  (HR Admin + Manager)
+// GET /api/evaluations/probation/:profileId  (HR Admin + Manager + Director)
+// DIRECTOR added so they can see the full probation context before approving (FR-20)
 router.get(
   '/probation/:profileId',
   authenticate,
-  authorize('HR_ADMIN', 'LINE_MANAGER'),
+  authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'),
   getProbationByProfile
 );
 

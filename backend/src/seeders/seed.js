@@ -46,6 +46,16 @@ const SEED_USERS = [
     last_name:  'Admin',
     is_active:  true,
   },
+  {
+    // Director: final approval authority over probation recommendations
+    // Per lecturer requirement — sits above HR in the approval chain
+    email:      'director@onboard.dev',
+    password:   'Password123!',
+    role:       'DIRECTOR',
+    first_name: 'Anand',
+    last_name:  'Lutchmun',
+    is_active:  true,
+  },
 ]
 
 async function seed() {
@@ -75,6 +85,7 @@ async function seed() {
     console.log('  Line Manager →  manager@onboard.dev')
     console.log('  New Employee →  employee@onboard.dev')
     console.log('  System Admin →  admin@onboard.dev')
+    console.log('  Director     →  director@onboard.dev')
 
   } catch (err) {
     console.error('❌  Seed failed:', err.message)

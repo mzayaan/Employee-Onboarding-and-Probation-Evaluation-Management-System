@@ -20,16 +20,26 @@ const Notification = sequelize.define('Notification', {
   },
   type: {
     type: DataTypes.ENUM(
+      // Onboarding — document lifecycle
       'DOCUMENT_PENDING',
       'DOCUMENT_APPROVED',
       'DOCUMENT_REJECTED',
+      // Onboarding — tasks
       'TASK_ASSIGNED',
       'TASK_OVERDUE',
+      // Evaluation — checkpoint reminders
       'EVAL_DUE',
       'EVAL_OVERDUE',
+      // Account
       'ACCOUNT_CREATED',
+      // Reporting
       'PDF_GENERATED',
-      'PROBATION_COMPLETE'
+      // Probation period
+      'PROBATION_COMPLETE',
+      // Probation approval workflow (Block 5 — 3-stage Director approval)
+      'RECOMMENDATION_PENDING',    // notified to HR when manager submits
+      'RECOMMENDATION_RETURNED',   // notified to manager when HR or Director returns
+      'RECOMMENDATION_APPROVED'    // notified to HR + manager when Director approves
     ),
     allowNull: false,
   },
