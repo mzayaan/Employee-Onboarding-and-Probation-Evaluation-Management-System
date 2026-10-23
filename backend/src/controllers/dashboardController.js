@@ -42,7 +42,7 @@ const currentMonthRange = () => {
 const parseDate = (str) => {
   if (!str) return null
   const d = new Date(str)
-  return isNaN(d.getTime()) ? null : d
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 // =============================================================================

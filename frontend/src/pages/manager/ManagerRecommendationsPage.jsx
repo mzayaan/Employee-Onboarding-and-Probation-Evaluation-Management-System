@@ -95,7 +95,10 @@ function RecRow({ rec, onRefresh }) {
       {/* Summary row */}
       <div
         className="flex items-center justify-between gap-4 px-6 py-4 cursor-pointer hover:bg-slate-50/50 transition-colors"
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setOpen((v) => !v)}
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +111,7 @@ function RecRow({ rec, onRefresh }) {
           <p className="mt-0.5 text-xs text-slate-400">
             {emp?.job_title || '—'} · {emp?.department?.name || 'No dept'} ·
             {' '}Probation ends {fmtDate(period?.end_date)} ·
-            {' '}Score: <span className="font-semibold text-slate-600">{rec.cumulative_score != null ? parseFloat(rec.cumulative_score).toFixed(1) : '—'}%</span>
+            {' '}Score: <span className="font-semibold text-slate-600">{rec.cumulative_score != null ? Number.parseFloat(rec.cumulative_score).toFixed(1) : '—'}%</span>
           </p>
           <p className="mt-0.5 text-xs text-slate-400">
             Submitted {fmtDate(rec.generated_at)}

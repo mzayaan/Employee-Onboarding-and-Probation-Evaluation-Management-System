@@ -103,7 +103,10 @@ function PendingRow({ rec, onRefresh }) {
       {/* Summary row */}
       <div
         className="flex items-center justify-between gap-4 px-6 py-4 cursor-pointer hover:bg-slate-50/50 transition-colors"
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setOpen((v) => !v)}
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -116,7 +119,7 @@ function PendingRow({ rec, onRefresh }) {
           <p className="mt-0.5 text-xs text-slate-400">
             {emp?.job_title || '—'} · {emp?.department?.name || 'No dept'} ·
             {' '}Probation ends {fmtDate(period?.end_date)} ·
-            {' '}Score: <span className="font-semibold text-slate-600">{rec.cumulative_score != null ? parseFloat(rec.cumulative_score).toFixed(1) : '—'}%</span>
+            {' '}Score: <span className="font-semibold text-slate-600">{rec.cumulative_score != null ? Number.parseFloat(rec.cumulative_score).toFixed(1) : '—'}%</span>
           </p>
           <p className="mt-0.5 text-xs text-slate-400">
             Submitted by {rec.submittedByManager?.first_name} {rec.submittedByManager?.last_name}
@@ -163,7 +166,7 @@ function PendingRow({ rec, onRefresh }) {
                     <p className="text-xs text-slate-500 truncate">
                       {s.criterion?.name || `Criterion ${s.criterion_id}`}
                     </p>
-                    <p className="text-base font-bold text-slate-700">{s.weighted_score != null ? parseFloat(s.weighted_score).toFixed(1) : '—'}%</p>
+                    <p className="text-base font-bold text-slate-700">{s.weighted_score != null ? Number.parseFloat(s.weighted_score).toFixed(1) : '—'}%</p>
                   </div>
                 ))}
               </div>
@@ -270,7 +273,7 @@ function AllRecommendationsTable({ recs }) {
                 </td>
                 <td className="px-5 py-3"><RecBadge type={r.recommendation_type} /></td>
                 <td className="px-5 py-3 font-semibold text-slate-700">
-                  {r.cumulative_score != null ? parseFloat(r.cumulative_score).toFixed(1) : '—'}%
+                  {r.cumulative_score != null ? Number.parseFloat(r.cumulative_score).toFixed(1) : '—'}%
                 </td>
                 <td className="px-5 py-3"><StatusBadge status={r.approval_status} /></td>
                 <td className="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtDate(r.generated_at)}</td>

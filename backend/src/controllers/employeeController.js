@@ -20,7 +20,7 @@ const { sendWelcomeEmail, sendManagerAssignmentEmail }      = require('../utils/
 // =============================================================================
 const buildLeaveBalance = (profileId, year, salaryMonthly) => {
   const VACATION_SALARY_THRESHOLD = 50000; // MUR — WRA 2019 s.47
-  const vacationEligible = salaryMonthly != null && parseFloat(salaryMonthly) <= VACATION_SALARY_THRESHOLD;
+  const vacationEligible = salaryMonthly != null && Number.parseFloat(salaryMonthly) <= VACATION_SALARY_THRESHOLD;
 
   return {
     profile_id:              profileId,
@@ -525,8 +525,8 @@ const updateEmployeeProfile = async (req, res) => {
       });
       if (leaveBalance) {
         const VACATION_THRESHOLD = 50000;
-        const newSalary = parseFloat(salary_monthly);
-        const nowEligible = !isNaN(newSalary) && newSalary <= VACATION_THRESHOLD;
+        const newSalary = Number.parseFloat(salary_monthly);
+        const nowEligible = !Number.isNaN(newSalary) && newSalary <= VACATION_THRESHOLD;
         await leaveBalance.update({
           vacation_leave_eligible: nowEligible,
           vacation_leave_entitled: nowEligible ? 6.0 : 0.0,

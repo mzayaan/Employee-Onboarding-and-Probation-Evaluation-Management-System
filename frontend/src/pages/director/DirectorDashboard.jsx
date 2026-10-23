@@ -97,7 +97,7 @@ function RecentTable({ recs }) {
                   </span>
                 </td>
                 <td className="px-5 py-3 font-semibold text-slate-700">
-                  {r.cumulative_score != null ? parseFloat(r.cumulative_score).toFixed(1) : '—'}%
+                  {r.cumulative_score != null ? Number.parseFloat(r.cumulative_score).toFixed(1) : '—'}%
                 </td>
                 <td className="px-5 py-3">
                   <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${st.bg} ${st.text}`}>

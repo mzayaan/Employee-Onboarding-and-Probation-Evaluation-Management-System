@@ -290,10 +290,11 @@ export default function DepartmentManagementPage() {
           )}
           <form onSubmit={handleCreate} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              <label htmlFor="dept-new-name" className="mb-1.5 block text-sm font-medium text-slate-700">
                 Department Name <span className="text-red-500">*</span>
               </label>
               <input
+                id="dept-new-name"
                 type="text"
                 value={newName}
                 onChange={(e) => { setNewName(e.target.value); setCreateErr('') }}
@@ -302,10 +303,11 @@ export default function DepartmentManagementPage() {
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+              <label htmlFor="dept-new-desc" className="mb-1.5 block text-sm font-medium text-slate-700">
                 Description <span className="text-slate-400 text-xs font-normal">(optional)</span>
               </label>
               <input
+                id="dept-new-desc"
                 type="text"
                 value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}

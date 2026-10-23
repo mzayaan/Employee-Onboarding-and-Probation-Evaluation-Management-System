@@ -238,7 +238,7 @@ const endorseRecommendation = async (req, res) => {
     });
 
     // Notify Director
-    notifyDirectors(
+    void notifyDirectors(
       `A probation recommendation (${rec.recommendation_type}) has been endorsed by HR and requires your decision.`,
       recId
     );
@@ -372,7 +372,7 @@ const resubmitRecommendation = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
-    notifyHR(
+    void notifyHR(
       `A probation recommendation (${rec.recommendation_type}) has been resubmitted by a manager and requires your review.`,
       recId
     );
@@ -451,7 +451,7 @@ const approveRecommendation = async (req, res) => {
 
     // Notify HR and the originating manager
     const approvalMsg = `The probation recommendation (${rec.recommendation_type}) has been approved by the Director. The PDF report is now available.`;
-    notifyHR(approvalMsg, recId);
+    void notifyHR(approvalMsg, recId);
     if (rec.submitted_by) {
       createNotification({
         userId:            rec.submitted_by,
@@ -518,7 +518,7 @@ const returnByDirector = async (req, res) => {
 
     // Notify HR and originating manager
     const returnMsg = `The Director has returned the probation recommendation for further revision. Reason: ${director_reason.trim()}`;
-    notifyHR(returnMsg, recId);
+    void notifyHR(returnMsg, recId);
     if (rec.submitted_by) {
       createNotification({
         userId:            rec.submitted_by,
