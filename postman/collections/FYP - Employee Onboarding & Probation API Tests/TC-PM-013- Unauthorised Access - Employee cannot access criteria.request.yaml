@@ -1,0 +1,18 @@
+$kind: http-request
+name: "TC-PM-013: Unauthorised Access - Employee cannot access criteria (NFR-03)"
+description: |-
+  TC-PM-013: Tests RBAC enforcement - HR Admin attempts to access criteria endpoint (SYSTEM_ADMIN only).
+  Requirement: NFR-03 | FR-10
+  Expected: HTTP 403 Forbidden - role not authorised
+url: "{{base_url}}/api/criteria"
+method: GET
+headers:
+  Authorization: Bearer {{hr_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-013: Access correctly denied for unauthorised role', function () {
+          pm.response.to.have.status(403);
+      });
+    language: text/javascript
+order: 13000

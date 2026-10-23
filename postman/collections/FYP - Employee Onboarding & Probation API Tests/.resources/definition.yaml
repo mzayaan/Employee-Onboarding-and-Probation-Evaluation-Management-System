@@ -1,0 +1,11 @@
+$kind: collection
+description: |-
+  API test collection for Employee Onboarding and Probation Evaluation Management System.
+  Student: DULMEER Mohammad Zayaan Husain | BSE/24A/FT1
+  University of Technology, Mauritius
+variables:
+  base_url: http://localhost:5000
+  hr_token: ""
+  manager_token: ""
+  admin_token: ""
+  director_token: ""

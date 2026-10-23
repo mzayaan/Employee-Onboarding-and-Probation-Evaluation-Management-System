@@ -1,0 +1,30 @@
+$kind: http-request
+name: "TC-PM-002: Login as Line Manager (FR-01, FR-02)"
+description: |-
+  TC-PM-002: Verifies that a valid Line Manager can authenticate and receive a JWT token.
+  Requirement: FR-01, FR-02 | NFR-02
+  Expected: HTTP 200, role=LINE_MANAGER, token returned
+url: "{{base_url}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "email": "manager@onboard.dev",
+      "password": "Password123!"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      var jsonData = pm.response.json();
+      if (jsonData.token) {
+          pm.collectionVariables.set('manager_token', jsonData.token);
+          pm.test('TC-PM-002: Login successful - LINE_MANAGER role returned', function () {
+              pm.response.to.have.status(200);
+              pm.expect(jsonData.user.role).to.eql('LINE_MANAGER');
+          });
+      }
+    language: text/javascript
+order: 2000

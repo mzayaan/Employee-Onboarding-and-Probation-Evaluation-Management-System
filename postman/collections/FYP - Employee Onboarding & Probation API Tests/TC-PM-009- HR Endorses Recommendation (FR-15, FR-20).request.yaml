@@ -1,0 +1,27 @@
+$kind: http-request
+name: "TC-PM-009: HR Endorses Recommendation (FR-15, FR-20)"
+description: |-
+  TC-PM-009: HR Admin endorses recommendation ID 1, forwarding it to the Director.
+  Requirement: FR-15, FR-20 | NFR-03
+  Expected: HTTP 200, approval_status changes to PENDING_DIRECTOR
+url: "{{base_url}}/api/director/1/endorse"
+method: POST
+headers:
+  Authorization: Bearer {{hr_token}}
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "hr_endorsement_notes": "Reviewed employee performance. All evaluation criteria have been met satisfactorily. Endorsing for Director approval."
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-009: Recommendation endorsed by HR successfully', function () {
+          pm.response.to.have.status(200);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.message).to.include('endorsed');
+      });
+    language: text/javascript
+order: 9000

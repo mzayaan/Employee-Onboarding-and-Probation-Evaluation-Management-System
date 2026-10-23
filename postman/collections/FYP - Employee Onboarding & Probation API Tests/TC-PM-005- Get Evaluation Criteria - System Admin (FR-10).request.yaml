@@ -1,0 +1,20 @@
+$kind: http-request
+name: "TC-PM-005: Get Evaluation Criteria - System Admin (FR-10)"
+description: |-
+  TC-PM-005: Retrieves configurable evaluation criteria. System Admin access only.
+  Requirement: FR-10 | NFR-03
+  Expected: HTTP 200, array of criteria with weights
+url: "{{base_url}}/api/criteria"
+method: GET
+headers:
+  Authorization: Bearer {{admin_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-005: Criteria list returned successfully', function () {
+          pm.response.to.have.status(200);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData).to.be.an('array').and.to.have.lengthOf.above(0);
+      });
+    language: text/javascript
+order: 5000

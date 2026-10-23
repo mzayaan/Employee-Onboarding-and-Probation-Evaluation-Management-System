@@ -1,0 +1,13 @@
+# Use this workspace to collaborate
+workspace:
+  id: 4a05664e-2437-400c-88e4-de0148de3681
+
+cloudResources:
+  collections:
+    ../postman/collections/FYP - Employee Onboarding & Probation API Tests: 05ec8734-7193-4ffe-8741-9d348d1a16c8
+
+# All resources in the `postman/` folder are automatically registered in Local View.
+# Point to additional files outside the `postman/` folder to register them individually. Example:
+#localResources:
+#  collections:
+#    - ../tests/E2E Test Collection/

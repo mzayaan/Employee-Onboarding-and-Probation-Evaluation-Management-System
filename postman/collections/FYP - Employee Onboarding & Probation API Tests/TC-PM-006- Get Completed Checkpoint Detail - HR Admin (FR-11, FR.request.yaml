@@ -1,0 +1,20 @@
+$kind: http-request
+name: "TC-PM-006: Get Completed Checkpoint Detail - HR Admin (FR-11, FR-14)"
+description: |-
+  TC-PM-006: Retrieves full detail for evaluation checkpoint ID 1 (30-Day, COMPLETED).
+  Requirement: FR-11, FR-14 | NFR-03
+  Expected: HTTP 200, checkpoint details with manager evaluation and scores
+url: "{{base_url}}/api/evaluations/checkpoint/1"
+method: GET
+headers:
+  Authorization: Bearer {{hr_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-006: Checkpoint detail returned with scores', function () {
+          pm.response.to.have.status(200);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData).to.have.property('checkpoint');
+      });
+    language: text/javascript
+order: 6000

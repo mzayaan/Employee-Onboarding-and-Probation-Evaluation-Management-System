@@ -1,0 +1,18 @@
+$kind: http-request
+name: "TC-PM-007: Get Probation Period Detail - HR Admin (FR-14, FR-15)"
+description: |-
+  TC-PM-007: Retrieves full probation period details for employee profile ID 1.
+  Requirement: FR-14, FR-15 | NFR-03
+  Expected: HTTP 200, period info with checkpoints and cumulative score
+url: "{{base_url}}/api/evaluations/probation/1"
+method: GET
+headers:
+  Authorization: Bearer {{hr_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-007: Probation period detail returned', function () {
+          pm.response.to.have.status(200);
+      });
+    language: text/javascript
+order: 7000

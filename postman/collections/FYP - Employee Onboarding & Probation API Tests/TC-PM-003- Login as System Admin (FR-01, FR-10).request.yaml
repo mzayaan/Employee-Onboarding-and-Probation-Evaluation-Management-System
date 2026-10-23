@@ -1,0 +1,30 @@
+$kind: http-request
+name: "TC-PM-003: Login as System Admin (FR-01, FR-10)"
+description: |-
+  TC-PM-003: Verifies that the System Admin can authenticate.
+  Requirement: FR-01, FR-10 | NFR-02
+  Expected: HTTP 200, role=SYSTEM_ADMIN, token returned
+url: "{{base_url}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "email": "admin@onboard.dev",
+      "password": "Password123!"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      var jsonData = pm.response.json();
+      if (jsonData.token) {
+          pm.collectionVariables.set('admin_token', jsonData.token);
+          pm.test('TC-PM-003: Login successful - SYSTEM_ADMIN role returned', function () {
+              pm.response.to.have.status(200);
+              pm.expect(jsonData.user.role).to.eql('SYSTEM_ADMIN');
+          });
+      }
+    language: text/javascript
+order: 3000

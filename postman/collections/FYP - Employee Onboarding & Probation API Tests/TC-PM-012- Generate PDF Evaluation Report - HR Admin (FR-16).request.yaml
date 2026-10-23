@@ -1,0 +1,19 @@
+$kind: http-request
+name: "TC-PM-012: Generate PDF Evaluation Report - HR Admin (FR-16)"
+description: |-
+  TC-PM-012: HR Admin generates the PDF evaluation report for probation period ID 1.
+  Requirement: FR-16 | NFR-03
+  Expected: HTTP 200, Content-Type application/pdf, binary PDF data
+url: "{{base_url}}/api/reports/period/1"
+method: GET
+headers:
+  Authorization: Bearer {{hr_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-012: PDF report generated successfully', function () {
+          pm.response.to.have.status(200);
+          pm.expect(pm.response.headers.get('Content-Type')).to.include('application/pdf');
+      });
+    language: text/javascript
+order: 12000

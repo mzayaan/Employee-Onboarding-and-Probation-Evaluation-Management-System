@@ -1,0 +1,27 @@
+$kind: http-request
+name: "TC-PM-011: Director Approves Recommendation (FR-15, FR-20)"
+description: |-
+  TC-PM-011: Director gives final approval for recommendation ID 1.
+  Requirement: FR-15, FR-20 | NFR-03
+  Expected: HTTP 200, approval_status changes to APPROVED, ProbationPeriod status updated
+url: "{{base_url}}/api/director/1/approve"
+method: POST
+headers:
+  Authorization: Bearer {{director_token}}
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "director_reason": "Employee has demonstrated satisfactory performance across all evaluation criteria during the probation period. Employment confirmed."
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-011: Recommendation approved by Director', function () {
+          pm.response.to.have.status(200);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.message).to.include('approved');
+      });
+    language: text/javascript
+order: 11000
