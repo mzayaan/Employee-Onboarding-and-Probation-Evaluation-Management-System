@@ -95,6 +95,14 @@ import ChangePasswordPage from '@/pages/settings/ChangePasswordPage'
 // Profile — all authenticated roles
 import ProfilePage from '@/pages/profile/ProfilePage'
 
+// ── Mauritius compliance pages (compliance spec Section 3) ────────────────────
+// MRA Employee Declaration Form — NEW_EMPLOYEE onboarding track
+import TaxDeclarationPage   from '@/pages/employee/TaxDeclarationPage'
+// DocuSign-style Contract Signing — NEW_EMPLOYEE onboarding track
+import ContractSigningPage  from '@/pages/employee/ContractSigningPage'
+// HRDC G1 Training Log — HR Admin panel
+import HRDCTrainingPage     from '@/pages/hr/hrdc/HRDCTrainingPage'
+
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
   const { user, isAuthenticated, loading } = useAuth()
@@ -140,6 +148,8 @@ export default function App() {
             <Route path="/hr/tasks"                element={<TaskManagementPage />} />
             {/* Block 9 — recommendation review queue (3-stage Director approval) */}
             <Route path="/hr/recommendations"      element={<HRRecommendationsPage />} />
+            {/* Compliance — HRDC G1 training log and export */}
+            <Route path="/hr/hrdc-training"        element={<HRDCTrainingPage />} />
           </Route>
 
           {/* ── Director ───────────────────────────────────────────── */}
@@ -188,6 +198,10 @@ export default function App() {
             <Route path="/employee/tasks"              element={<MyTasksPage />} />
             {/* Block 8 — Phase 4: Self-assessment */}
             <Route path="/employee/self-assessments"   element={<SelfAssessmentPage />} />
+            {/* Compliance — MRA Employee Declaration Form (EDF) */}
+            <Route path="/employee/tax-declaration"    element={<TaxDeclarationPage />} />
+            {/* Compliance — Contract review and digital signing */}
+            <Route path="/employee/contract"           element={<ContractSigningPage />} />
           </Route>
 
           {/* ── System Administrator ───────────────────────────────── */}

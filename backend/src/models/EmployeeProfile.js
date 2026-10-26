@@ -62,6 +62,33 @@ const EmployeeProfile = sequelize.define('EmployeeProfile', {
     allowNull: true,
     comment: 'Monthly salary in MUR — used to determine Vacation Leave eligibility per WRA 2019 s.47 (threshold: MUR 50,000/month)',
   },
+
+  // ── Mauritius Identity & Tax Fields ──────────────────────────────────────
+  nic_number: {
+    type: DataTypes.STRING(14),
+    allowNull: true,
+    unique: true,
+    comment: 'Mauritian National Identity Card number — 14 characters (letter + 13 digits). Validated at route layer by validateNIC middleware.',
+  },
+  tax_account_number: {
+    type: DataTypes.STRING(10),
+    allowNull: true,
+    unique: true,
+    comment: 'MRA Tax Account Number (TAN) — individual tax reporting reference issued by the Mauritius Revenue Authority.',
+  },
+
+  // ── Banking Details for Payroll Routing ──────────────────────────────────
+  bank_name: {
+    type: DataTypes.ENUM('MCB', 'SBM', 'ABSA', 'MAUBANK', 'AfrAsia', 'BCP', 'HSBC'),
+    allowNull: true,
+    comment: 'Mauritian bank for local ACH/clearing house salary routing.',
+  },
+  bank_account_number: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    comment: 'Employee bank account number — stored for payroll purposes only.',
+  },
+
   employment_status: {
     type: DataTypes.ENUM('PROBATION', 'PERMANENT', 'DISMISSED', 'EXTENDED'),
     allowNull: false,

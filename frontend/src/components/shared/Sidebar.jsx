@@ -19,6 +19,9 @@ import {
   StickyNote,
   Building2,
   BadgeCheck,
+  BookOpen,
+  Calculator,
+  FileSignature,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -37,6 +40,7 @@ const NAV_ITEMS = {
     { to: '/manager/attendance',    icon: CalendarDays,    label: 'Attendance'         },
     { to: '/performance-notes',    icon: StickyNote,      label: 'Performance Notes'  },
     { to: '/hr/recommendations',   icon: BadgeCheck,      label: 'Recommendations'    },
+    { to: '/hr/hrdc-training',     icon: BookOpen,        label: 'HRDC Training'      },
     { to: '/notifications',        icon: Bell,            label: 'Notifications'      },
   ],
   // LINE_MANAGER: reports removed (Phase 5)
@@ -52,11 +56,13 @@ const NAV_ITEMS = {
   ],
   // NEW_EMPLOYEE: profile removed — no EmployeeProfilePage built yet
   NEW_EMPLOYEE: [
-    { to: '/employee/dashboard',       icon: LayoutDashboard, label: 'Dashboard'       },
-    { to: '/employee/documents',       icon: FileText,         label: 'My Documents'   },
-    { to: '/employee/tasks',           icon: ClipboardList,    label: 'My Tasks'       },
-    { to: '/employee/self-assessments',icon: BarChart3,        label: 'Self-Assessment'},
-    { to: '/notifications',            icon: Bell,             label: 'Notifications'  },
+    { to: '/employee/dashboard',       icon: LayoutDashboard, label: 'Dashboard'        },
+    { to: '/employee/documents',       icon: FileText,         label: 'My Documents'    },
+    { to: '/employee/tasks',           icon: ClipboardList,    label: 'My Tasks'        },
+    { to: '/employee/self-assessments',icon: BarChart3,        label: 'Self-Assessment' },
+    { to: '/employee/contract',        icon: FileSignature,    label: 'My Contract'     },
+    { to: '/employee/tax-declaration', icon: Calculator,       label: 'Tax Declaration' },
+    { to: '/notifications',            icon: Bell,             label: 'Notifications'   },
   ],
   SYSTEM_ADMIN: [
     { to: '/admin/dashboard',  icon: LayoutDashboard, label: 'Dashboard'      },

@@ -1,9 +1,12 @@
 // =============================================================================
 // src/models/index.js
-// Loads all 21 Sequelize models and defines associations
+// Loads all 24 Sequelize models and defines associations
 // This is the single entry point for all model imports in the application.
 // Updated: added LeaveBalance model; added Director/Department manager
 //          associations for lecturer requirements
+// Updated: added Contract and HRDCTrainingLog models for Mauritius compliance
+//          (WRA 2019 probation rules, HRDC training levy tracking)
+// Updated: added TaxDeclaration model for MRA Employee Declaration Form (EDF)
 // =============================================================================
 
 const sequelize = require('../config/database');
@@ -30,6 +33,9 @@ const Notification        = require('./Notification');
 const AuditLog            = require('./AuditLog');
 const AttendanceRecord    = require('./AttendanceRecord');
 const LeaveBalance        = require('./LeaveBalance');
+const Contract            = require('./Contract');
+const HRDCTrainingLog     = require('./HRDCTrainingLog');
+const TaxDeclaration      = require('./TaxDeclaration');
 
 // =============================================================================
 // ASSOCIATIONS
@@ -506,6 +512,43 @@ AttendanceRecord.belongsTo(User, {
   as: 'recorder',
 });
 
+// ── EmployeeProfile ↔ Contract (1:1) ─────────────────────────────────────
+EmployeeProfile.hasOne(Contract, {
+  foreignKey: 'profile_id',
+  as: 'contract',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+Contract.belongsTo(EmployeeProfile, {
+  foreignKey: 'profile_id',
+  as: 'employeeProfile',
+});
+
+// ── EmployeeProfile ↔ TaxDeclaration (1:1) ───────────────────────────
+// One MRA EDF declaration per employee at any time (UNIQUE on profile_id)
+EmployeeProfile.hasOne(TaxDeclaration, {
+  foreignKey: 'profile_id',
+  as: 'taxDeclaration',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+TaxDeclaration.belongsTo(EmployeeProfile, {
+  foreignKey: 'profile_id',
+  as: 'employeeProfile',
+});
+
+// ── EmployeeProfile ↔ HRDCTrainingLog (1:many) ───────────────────────────
+EmployeeProfile.hasMany(HRDCTrainingLog, {
+  foreignKey: 'profile_id',
+  as: 'trainingLogs',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+HRDCTrainingLog.belongsTo(EmployeeProfile, {
+  foreignKey: 'profile_id',
+  as: 'employeeProfile',
+});
+
 // =============================================================================
 // EXPORTS
 // =============================================================================
@@ -533,4 +576,7 @@ module.exports = {
   AuditLog,
   AttendanceRecord,
   LeaveBalance,
+  Contract,
+  HRDCTrainingLog,
+  TaxDeclaration,
 };

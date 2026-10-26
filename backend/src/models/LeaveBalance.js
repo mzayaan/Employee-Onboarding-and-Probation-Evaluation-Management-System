@@ -3,11 +3,13 @@
 // Table: leave_balances
 // FR-21 | Mauritius legal context — WRA 2019 leave entitlements
 //
-// Tracks the three statutory leave types per employee per calendar year:
-//   Annual Leave   — WRA 2019 s.45: 22 working days/year (universal)
-//   Sick Leave     — WRA 2019 s.46: 15 days/year, accumulates to 90 days max
-//   Vacation Leave — WRA 2019 s.47: 30 days per 5-year period,
-//                    only for employees with monthly salary ≤ MUR 50,000
+// Tracks statutory leave entitlements per employee per calendar year:
+//   Annual Leave    — WRA 2019 s.45: 22 working days/year (universal)
+//   Sick Leave      — WRA 2019 s.46: 15 days/year, accumulates to 90 days max
+//   Vacation Leave  — WRA 2019 s.47: 30 days per 5-year period,
+//                     only for employees with monthly salary ≤ MUR 50,000
+//   Maternity Leave — WRA 2019 s.48: 14 weeks fully paid = 70 working days
+//   Paternity Leave — WRA 2019 s.49: 5 continuous working days paid
 //
 // One record per employee per year. Created automatically when a new employee
 // profile is created (service layer).
@@ -85,6 +87,22 @@ const LeaveBalance = sequelize.define('LeaveBalance', {
     allowNull: false,
     defaultValue: 0.0,
     comment: 'Days of vacation leave taken so far this year',
+  },
+
+  // ── Maternity Leave (WRA 2019 s.48) ──────────────────────────────────────
+  maternity_leave_entitled: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 70,
+    comment: 'WRA 2019 s.48: 14 weeks fully paid maternity leave = 70 working days.',
+  },
+
+  // ── Paternity Leave (WRA 2019 s.49) ──────────────────────────────────────
+  paternity_leave_entitled: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 5,
+    comment: 'WRA 2019 s.49: 5 continuous working days paid paternity leave.',
   },
 
   created_at: {

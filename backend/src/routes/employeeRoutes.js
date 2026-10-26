@@ -1,12 +1,17 @@
 // =============================================================================
 // src/routes/employeeRoutes.js
 // FR-01, FR-04 | NFR-02, NFR-03
+// Updated: validateNIC and validateProbationDuration injected on POST /
+//          to enforce Mauritian NIC format and WRA 2019 probation duration
+//          boundary (max 6 months) at the API layer.
 // =============================================================================
 
 const express      = require('express');
 const router       = express.Router();
 const authenticate = require('../middleware/authenticate');
 const authorize    = require('../middleware/authorize');
+const validateNIC  = require('../middleware/validateNIC');
+const { validateProbationDuration } = require('../middleware/validateProbationBoundary');
 const {
   createEmployee,
   listEmployees,
@@ -27,7 +32,9 @@ router.get('/all-users', authorize('SYSTEM_ADMIN'), listAllUsers);
 router.get('/managers', authorize('HR_ADMIN'), listManagers);
 
 // POST /api/employees           — HR only
-router.post('/', authorize('HR_ADMIN'), createEmployee);
+// validateNIC: checks Mauritian NIC format (FR-04 / NFR-02)
+// validateProbationDuration: enforces WRA 2019 s.13 max 6-month probation (NFR-08)
+router.post('/', authorize('HR_ADMIN'), validateNIC, validateProbationDuration, createEmployee);
 
 // GET  /api/employees           — HR, Manager, and Director (Director needs the employee list for approval context)
 router.get('/', authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'), listEmployees);

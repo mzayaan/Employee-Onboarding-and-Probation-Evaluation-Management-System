@@ -26,7 +26,17 @@ const addAttendanceRecord = async (req, res) => {
     if (!record_date)  return res.status(400).json({ success: false, message: 'record_date is required.' });
     if (!status)       return res.status(400).json({ success: false, message: 'status is required.' });
 
-    const allowed = ['PRESENT', 'ABSENT', 'LATE', 'HALF_DAY'];
+    const allowed = [
+      'PRESENT', 'ABSENT', 'LATE', 'HALF_DAY',
+      // WRA 2019 statutory leave types
+      'SICK_LEAVE',       // s.46 — 15 days/year, accumulates to 90 days max
+      'ANNUAL_LEAVE',     // s.45 — 22 working days/year
+      'VACATION_LEAVE',   // s.47 — 30 days per 5-year period (salary ≤ MUR 50,000)
+      'MATERNITY_LEAVE',  // s.48 — 14 weeks paid
+      'PATERNITY_LEAVE',  // s.49 — 5 days paid
+      'SPECIAL_LEAVE',    // discretionary — bereavement, civic duty
+      'PUBLIC_HOLIDAY',   // Public Holidays Act — Mauritius statutory holidays
+    ];
     if (!allowed.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -53,6 +63,40 @@ const addAttendanceRecord = async (req, res) => {
       }
     }
 
+    // ── WRA 2019 s.46(3): Medical certificate enforcement ─────────────────
+    // If the incoming record is SICK_LEAVE, check whether this would form
+    // a run of 3 or more consecutive sick-leave days. If so, the payload
+    // must include medical_certificate_provided: true.
+    let medical_certificate_provided = req.body.medical_certificate_provided ?? false;
+
+    if (status === 'SICK_LEAVE') {
+      const dayBefore1 = new Date(record_date);
+      dayBefore1.setDate(dayBefore1.getDate() - 1);
+      const dayBefore2 = new Date(record_date);
+      dayBefore2.setDate(dayBefore2.getDate() - 2);
+
+      const fmt = (d) => d.toISOString().split('T')[0];
+
+      const priorSickDays = await AttendanceRecord.count({
+        where: {
+          period_id,
+          status: 'SICK_LEAVE',
+          record_date: { [Op.in]: [fmt(dayBefore1), fmt(dayBefore2)] },
+        },
+      });
+
+      // If both of the two preceding days are also SICK_LEAVE, this is the
+      // 3rd consecutive sick day — certificate is mandatory (WRA 2019 s.46(3)).
+      if (priorSickDays >= 2 && !medical_certificate_provided) {
+        return res.status(400).json({
+          success: false,
+          message:
+            'WRA 2019 s.46(3): A medical certificate is required for sick leave spanning 3 or more consecutive days. ' +
+            'Please set medical_certificate_provided to true to confirm it has been received.',
+        });
+      }
+    }
+
     // BUG-10 fix: Prevent duplicate attendance entries for the same date.
     // A second record for the same period + date would corrupt summary counts.
     const existing = await AttendanceRecord.findOne({
@@ -69,6 +113,7 @@ const addAttendanceRecord = async (req, res) => {
       period_id,
       record_date,
       status,
+      medical_certificate_provided,
       notes: notes?.trim() || null,
       recorded_by: req.user.user_id,
     });
@@ -177,13 +222,21 @@ const getAttendanceSummary = async (req, res) => {
     const records = await AttendanceRecord.findAll({ where });
 
     const summary = {
-      total_records: records.length,
-      days_present:  records.filter((r) => r.status === 'PRESENT').length,
-      days_absent:   records.filter((r) => r.status === 'ABSENT').length,
-      late_arrivals: records.filter((r) => r.status === 'LATE').length,
-      half_days:     records.filter((r) => r.status === 'HALF_DAY').length,
-      from_date:     from || null,
-      to_date:       to   || null,
+      total_records:    records.length,
+      days_present:     records.filter((r) => r.status === 'PRESENT').length,
+      days_absent:      records.filter((r) => r.status === 'ABSENT').length,
+      late_arrivals:    records.filter((r) => r.status === 'LATE').length,
+      half_days:        records.filter((r) => r.status === 'HALF_DAY').length,
+      // WRA 2019 statutory leave breakdown
+      sick_leave:       records.filter((r) => r.status === 'SICK_LEAVE').length,
+      annual_leave:     records.filter((r) => r.status === 'ANNUAL_LEAVE').length,
+      vacation_leave:   records.filter((r) => r.status === 'VACATION_LEAVE').length,
+      maternity_leave:  records.filter((r) => r.status === 'MATERNITY_LEAVE').length,
+      paternity_leave:  records.filter((r) => r.status === 'PATERNITY_LEAVE').length,
+      special_leave:    records.filter((r) => r.status === 'SPECIAL_LEAVE').length,
+      public_holidays:  records.filter((r) => r.status === 'PUBLIC_HOLIDAY').length,
+      from_date:        from || null,
+      to_date:          to   || null,
     };
 
     return res.json({ success: true, data: summary });

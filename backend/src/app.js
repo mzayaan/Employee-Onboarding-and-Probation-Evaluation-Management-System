@@ -122,6 +122,10 @@ const pdfRoutes            = require('./routes/pdfRoutes');
 const notificationRoutes   = require('./routes/notificationRoutes');
 const performanceNoteRoutes = require('./routes/performanceNoteRoutes');
 const directorRoutes        = require('./routes/directorRoutes');
+// ── Mauritius compliance routes (compliance spec) ─────────────────────────
+const contractRoutes        = require('./routes/contractRoutes');
+const taxDeclarationRoutes  = require('./routes/taxDeclarationRoutes');
+const hrdcTrainingRoutes    = require('./routes/hrdcTrainingRoutes');
 
 app.use('/api/auth',              authRoutes);
 app.use('/api/departments',       departmentRoutes);
@@ -137,6 +141,10 @@ app.use('/api/reports',           pdfRoutes);
 app.use('/api/notifications',     notificationRoutes);
 app.use('/api/performance-notes', performanceNoteRoutes);
 app.use('/api/director',          directorRoutes);
+// ── Mauritius compliance ───────────────────────────────────────────────────
+app.use('/api/contracts',         contractRoutes);
+app.use('/api/tax-declarations',  taxDeclarationRoutes);
+app.use('/api/hrdc-training',     hrdcTrainingRoutes);
 
 // =============================================================================
 // 404 HANDLER
