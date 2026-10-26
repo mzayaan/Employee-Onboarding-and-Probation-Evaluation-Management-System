@@ -309,10 +309,11 @@ export default function TaxDeclarationPage() {
               <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2">
                 {/* Number of dependants */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  <label htmlFor="tax-num-dependants" className="block text-xs font-medium text-slate-700 mb-1.5">
                     Number of Dependent Children
                   </label>
                   <input
+                    id="tax-num-dependants"
                     type="number"
                     min={0}
                     max={10}
@@ -325,10 +326,11 @@ export default function TaxDeclarationPage() {
 
                 {/* Spouse employment status */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  <label htmlFor="tax-spouse-employed" className="block text-xs font-medium text-slate-700 mb-1.5">
                     Spouse / Partner Employment Status
                   </label>
                   <select
+                    id="tax-spouse-employed"
                     value={spouseEmployed ? 'yes' : 'no'}
                     onChange={(e) => setSpouseEmployed(e.target.value === 'yes')}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm
@@ -341,10 +343,11 @@ export default function TaxDeclarationPage() {
 
                 {/* Declaration date */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  <label htmlFor="tax-declaration-date" className="block text-xs font-medium text-slate-700 mb-1.5">
                     Declaration Date
                   </label>
                   <input
+                    id="tax-declaration-date"
                     type="date"
                     value={declarationDate}
                     onChange={(e) => setDeclarationDate(e.target.value)}

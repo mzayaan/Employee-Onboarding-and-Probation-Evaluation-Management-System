@@ -299,10 +299,11 @@ export default function ContractSigningPage() {
 
                   {/* Signature input */}
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                    <label htmlFor="contract-signature-input" className="block text-xs font-medium text-slate-700 mb-1.5">
                       Full Name (digital signature)
                     </label>
                     <input
+                      id="contract-signature-input"
                       type="text"
                       value={signatureInput}
                       onChange={(e) => setSignatureInput(e.target.value)}

@@ -42,7 +42,7 @@ const validateProbationDuration = (req, res, next) => {
   const start = new Date(start_date);
   const end   = new Date(probation_end_date);
 
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) return next();
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return next();
 
   const diffMs   = end - start;
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));

@@ -70,7 +70,7 @@ export default function HRDCTrainingPage() {
   const reload = () => {
     setLoading(true)
     setLoadError(false)
-    Promise.allSettled([
+    void Promise.allSettled([
       getTrainingLogs(),
       getEmployees(),
     ]).then(([logsR, empR]) => {
@@ -96,8 +96,8 @@ export default function HRDCTrainingPage() {
         course_name:               form.course_name.trim(),
         training_provider:         form.training_provider.trim() || 'Internal',
         hrdc_approved_course_code: form.hrdc_approved_course_code.trim() || null,
-        training_cost:             parseFloat(form.training_cost) || 0,
-        duration_hours:            parseInt(form.duration_hours, 10) || 0,
+        training_cost:             Number.parseFloat(form.training_cost) || 0,
+        duration_hours:            Number.parseInt(form.duration_hours, 10) || 0,
         completed_date:            form.completed_date,
       })
       setSaveOk(true)
@@ -214,10 +214,11 @@ export default function HRDCTrainingPage() {
           <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2 lg:grid-cols-3">
             {/* Employee */}
             <div className="lg:col-span-1">
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-employee" className="block text-xs font-medium text-slate-700 mb-1.5">
                 Employee <span className="text-red-500">*</span>
               </label>
               <select
+                id="hrdc-employee"
                 required
                 value={form.profile_id}
                 onChange={(e) => setField('profile_id', e.target.value)}
@@ -235,10 +236,11 @@ export default function HRDCTrainingPage() {
 
             {/* Course name */}
             <div className="lg:col-span-2">
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-course-name" className="block text-xs font-medium text-slate-700 mb-1.5">
                 Course Name <span className="text-red-500">*</span>
               </label>
               <input
+                id="hrdc-course-name"
                 required
                 type="text"
                 value={form.course_name}
@@ -251,10 +253,11 @@ export default function HRDCTrainingPage() {
 
             {/* Training provider */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-provider" className="block text-xs font-medium text-slate-700 mb-1.5">
                 Training Provider <span className="text-red-500">*</span>
               </label>
               <input
+                id="hrdc-provider"
                 required
                 type="text"
                 value={form.training_provider}
@@ -266,11 +269,12 @@ export default function HRDCTrainingPage() {
 
             {/* HRDC course code */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-course-code" className="block text-xs font-medium text-slate-700 mb-1.5">
                 HRDC / MQA Course Code
                 <span className="ml-1 text-slate-400">(optional)</span>
               </label>
               <input
+                id="hrdc-course-code"
                 type="text"
                 value={form.hrdc_approved_course_code}
                 onChange={(e) => setField('hrdc_approved_course_code', e.target.value)}
@@ -282,10 +286,11 @@ export default function HRDCTrainingPage() {
 
             {/* Cost MUR */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-cost" className="block text-xs font-medium text-slate-700 mb-1.5">
                 Training Cost (MUR) <span className="text-red-500">*</span>
               </label>
               <input
+                id="hrdc-cost"
                 required
                 type="number"
                 min={0}
@@ -299,10 +304,11 @@ export default function HRDCTrainingPage() {
 
             {/* Duration */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-duration" className="block text-xs font-medium text-slate-700 mb-1.5">
                 Duration (hours) <span className="text-red-500">*</span>
               </label>
               <input
+                id="hrdc-duration"
                 required
                 type="number"
                 min={1}
@@ -315,10 +321,11 @@ export default function HRDCTrainingPage() {
 
             {/* Completed date */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              <label htmlFor="hrdc-completed-date" className="block text-xs font-medium text-slate-700 mb-1.5">
                 Completed Date <span className="text-red-500">*</span>
               </label>
               <input
+                id="hrdc-completed-date"
                 required
                 type="date"
                 value={form.completed_date}

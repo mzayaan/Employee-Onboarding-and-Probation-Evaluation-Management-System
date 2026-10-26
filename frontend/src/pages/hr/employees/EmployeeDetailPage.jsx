@@ -446,8 +446,9 @@ function ContractSection({ profileId }) {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Contract Type *</label>
+              <label htmlFor="contract-type" className="mb-1 block text-xs font-medium text-slate-600">Contract Type *</label>
               <select
+                id="contract-type"
                 value={form.contract_type}
                 onChange={setField('contract_type')}
                 required
@@ -459,8 +460,9 @@ function ContractSection({ profileId }) {
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Basic Salary (MUR) *</label>
+              <label htmlFor="contract-salary" className="mb-1 block text-xs font-medium text-slate-600">Basic Salary (MUR) *</label>
               <input
+                id="contract-salary"
                 type="number"
                 min="0"
                 step="1"
@@ -472,8 +474,9 @@ function ContractSection({ profileId }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Contract Start Date</label>
+              <label htmlFor="contract-start-date" className="mb-1 block text-xs font-medium text-slate-600">Contract Start Date</label>
               <input
+                id="contract-start-date"
                 type="date"
                 value={form.start_date}
                 onChange={setField('start_date')}
@@ -481,8 +484,9 @@ function ContractSection({ profileId }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Probation End Date</label>
+              <label htmlFor="contract-end-date" className="mb-1 block text-xs font-medium text-slate-600">Probation End Date</label>
               <input
+                id="contract-end-date"
                 type="date"
                 value={form.end_date}
                 onChange={setField('end_date')}
@@ -491,8 +495,9 @@ function ContractSection({ profileId }) {
               <p className="mt-0.5 text-xs text-slate-400">WRA 2019 s.13: max 184 days from start date.</p>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Probation Duration (months)</label>
+              <label htmlFor="contract-probation-months" className="mb-1 block text-xs font-medium text-slate-600">Probation Duration (months)</label>
               <input
+                id="contract-probation-months"
                 type="number"
                 min="1"
                 max="12"
@@ -502,8 +507,9 @@ function ContractSection({ profileId }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Notice Period (days)</label>
+              <label htmlFor="contract-notice-days" className="mb-1 block text-xs font-medium text-slate-600">Notice Period (days)</label>
               <input
+                id="contract-notice-days"
                 type="number"
                 min="1"
                 value={form.notice_period_days}
@@ -512,8 +518,9 @@ function ContractSection({ profileId }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">Contract Reference</label>
+              <label htmlFor="contract-reference" className="mb-1 block text-xs font-medium text-slate-600">Contract Reference</label>
               <input
+                id="contract-reference"
                 type="text"
                 value={form.contract_reference}
                 onChange={setField('contract_reference')}

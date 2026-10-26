@@ -85,7 +85,7 @@ const submitTaxDeclaration = async (req, res) => {
     const declaration = await TaxDeclaration.create({
       profile_id:           profile.profile_id,
       declaration_category,
-      num_dependants:       num_dependants != null ? parseInt(num_dependants, 10) : 0,
+      num_dependants:       num_dependants != null ? Number.parseInt(num_dependants, 10) : 0,
       spouse_employed:      spouse_employed !== false && spouse_employed !== 'false',
       declaration_date,
       created_at:           new Date(),

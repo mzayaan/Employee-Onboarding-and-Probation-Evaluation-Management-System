@@ -86,8 +86,8 @@ const addTrainingLog = async (req, res) => {
       course_name,
       training_provider:        training_provider || 'Internal',
       hrdc_approved_course_code: hrdc_approved_course_code || null,
-      training_cost:             training_cost != null ? parseFloat(training_cost) : 0,
-      duration_hours:            parseInt(duration_hours, 10),
+      training_cost:             training_cost != null ? Number.parseFloat(training_cost) : 0,
+      duration_hours:            Number.parseInt(duration_hours, 10),
       completed_date,
       created_at:                new Date(),
     });
@@ -193,8 +193,8 @@ const exportHRDCG1 = async (req, res) => {
       .fillColor('#000000');
 
     // ── Summary statistics ───────────────────────────────────────────────────
-    const totalCost  = logs.reduce((s, l) => s + parseFloat(l.training_cost  || 0), 0);
-    const totalHours = logs.reduce((s, l) => s + parseInt(l.duration_hours   || 0, 10), 0);
+    const totalCost  = logs.reduce((s, l) => s + Number.parseFloat(l.training_cost  || 0), 0);
+    const totalHours = logs.reduce((s, l) => s + Number.parseInt(l.duration_hours   || 0, 10), 0);
 
     doc
       .fontSize(11).font('Helvetica-Bold')
@@ -280,7 +280,7 @@ const exportHRDCG1 = async (req, res) => {
         ? `${emp.first_name} ${emp.last_name}`.slice(0, 22)
         : `Profile ${log.profile_id}`;
 
-      const costStr = parseFloat(log.training_cost || 0)
+      const costStr = Number.parseFloat(log.training_cost || 0)
         .toLocaleString('en-MU', { minimumFractionDigits: 2 });
 
       drawTableRow(currentY, {
