@@ -1,0 +1,28 @@
+$kind: http-request
+name: "TC-PM-020: HR Exports HRDC G1 PDF Report (FR-22, FR-16)"
+description: |-
+  TC-PM-020: HR Admin requests the HRDC G1 PDF export for levy refund claim (year 2026).
+  Requirement: FR-22, FR-16 | NFR-08
+  Expected: HTTP 200, PDF document or JSON success returned
+url: "{{base_url}}/api/hrdc-training/export/g1?year=2026"
+method: GET
+headers:
+  Authorization: Bearer {{hr_token}}
+queryParams:
+  year: "2026"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-020: G1 PDF export returned', function () {
+          pm.expect(pm.response.code).to.be.oneOf([200, 201]);
+          // Accept either PDF binary or JSON success response
+          var contentType = pm.response.headers.get('Content-Type') || '';
+          var isPdf  = contentType.includes('application/pdf');
+          var isJson = contentType.includes('application/json');
+          pm.expect(isPdf || isJson).to.be.true;
+          pm.test('TC-PM-020: Response is not an error', function() {
+              pm.expect(pm.response.code).to.be.below(400);
+          });
+      });
+    language: text/javascript
+order: 21000

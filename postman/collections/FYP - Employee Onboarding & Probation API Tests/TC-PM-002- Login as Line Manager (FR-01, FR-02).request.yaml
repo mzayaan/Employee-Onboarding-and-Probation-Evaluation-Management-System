@@ -12,7 +12,7 @@ body:
   type: text
   content: |-
     {
-      "email": "manager@onboard.dev",
+      "email": "manager.it@onboard.dev",
       "password": "Password123!"
     }
 scripts:

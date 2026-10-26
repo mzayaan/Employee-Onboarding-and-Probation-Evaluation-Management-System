@@ -1,0 +1,21 @@
+$kind: http-request
+name: "TC-PM-016: Employee Views Own Contract (FR-20)"
+description: |-
+  TC-PM-016: New Employee retrieves their own employment contract.
+  Requirement: FR-20 | NFR-03
+  Expected: HTTP 200, contract data returned
+url: "{{base_url}}/api/contracts/mine"
+method: GET
+headers:
+  Authorization: Bearer {{emp_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-016: Employee retrieves their contract', function () {
+          pm.response.to.have.status(200);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.success).to.be.true;
+          pm.expect(jsonData.data).to.have.property('contract_id');
+      });
+    language: text/javascript
+order: 17000

@@ -1,0 +1,30 @@
+$kind: http-request
+name: "TC-PM-004b: Login as New Employee (FR-01, FR-02)"
+description: |-
+  TC-PM-004b: Verifies that a New Employee can authenticate and receive a JWT token. Sets emp_token for subsequent employee-role tests (TC-PM-016 to TC-PM-018).
+  Requirement: FR-01, FR-02 | NFR-02
+  Expected: HTTP 200, role=NEW_EMPLOYEE, token returned
+url: "{{base_url}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "email": "employee@onboard.dev",
+      "password": "Password123!"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      var jsonData = pm.response.json();
+      if (jsonData.token) {
+          pm.collectionVariables.set('emp_token', jsonData.token);
+          pm.test('TC-PM-004b: Login successful - NEW_EMPLOYEE role returned', function () {
+              pm.response.to.have.status(200);
+              pm.expect(jsonData.user.role).to.eql('NEW_EMPLOYEE');
+          });
+      }
+    language: text/javascript
+order: 5000

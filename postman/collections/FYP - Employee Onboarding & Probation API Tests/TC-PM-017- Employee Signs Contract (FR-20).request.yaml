@@ -1,0 +1,20 @@
+$kind: http-request
+name: "TC-PM-017: Employee Signs Contract (FR-20)"
+description: |-
+  TC-PM-017: Employee digitally signs (acknowledges) their employment contract.
+  Requirement: FR-20 | NFR-03
+  Expected: HTTP 200, status updated to 'signed'
+url: "{{base_url}}/api/contracts/{{contract_id}}/sign"
+method: PATCH
+headers:
+  Authorization: Bearer {{emp_token}}
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-017: Contract signed successfully', function () {
+          pm.response.to.have.status(200);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.success).to.be.true;
+      });
+    language: text/javascript
+order: 18000

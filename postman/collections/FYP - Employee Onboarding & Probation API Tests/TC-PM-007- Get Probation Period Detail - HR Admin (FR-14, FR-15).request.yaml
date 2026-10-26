@@ -15,4 +15,4 @@ scripts:
           pm.response.to.have.status(200);
       });
     language: text/javascript
-order: 7000
+order: 8000

@@ -87,6 +87,8 @@ const createContract = async (req, res) => {
       basic_salary_mur,
       notice_period_days,
       cloudinary_url,
+      start_date,
+      end_date,
     } = req.body;
 
     if (!profile_id || !contract_type || !basic_salary_mur) {
@@ -94,6 +96,19 @@ const createContract = async (req, res) => {
         success: false,
         message: 'profile_id, contract_type and basic_salary_mur are required.',
       });
+    }
+
+    // WRA 2019 s.13: probation period must not exceed 184 days
+    if (start_date && end_date && probation_clause_included !== false) {
+      const startMs = new Date(start_date).getTime();
+      const endMs   = new Date(end_date).getTime();
+      const diffDays = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24));
+      if (diffDays > 184) {
+        return res.status(400).json({
+          success: false,
+          message: `Probation period of ${diffDays} days exceeds the 184-day maximum permitted under WRA 2019 s.13.`,
+        });
+      }
     }
 
     const existing = await Contract.findOne({ where: { profile_id } });

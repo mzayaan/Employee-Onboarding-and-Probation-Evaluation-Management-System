@@ -49,11 +49,22 @@ jest.mock('pdfkit', () => {
   const EventEmitter = require('events');
   return jest.fn(() => {
     const doc = new EventEmitter();
-    doc.text     = jest.fn().mockReturnThis();
-    doc.fontSize = jest.fn().mockReturnThis();
-    doc.moveDown = jest.fn().mockReturnThis();
-    doc.end      = jest.fn(() => doc.emit('end'));
-    doc.pipe     = jest.fn();
+    // Chain-returning stubs for every PDFKit method used by the controllers
+    const chain = jest.fn().mockReturnThis();
+    doc.text       = chain;
+    doc.fontSize   = chain;
+    doc.font       = chain;
+    doc.moveDown   = chain;
+    doc.fillColor  = chain;
+    doc.fill       = chain;
+    doc.rect       = chain;
+    doc.addPage    = chain;
+    doc.image      = chain;
+    doc.end        = jest.fn(() => { doc.emit('end'); });
+    doc.pipe       = jest.fn((stream) => {
+      // Simulate the stream ending after a short tick
+      process.nextTick(() => stream.end && stream.end());
+    });
     return doc;
   });
 });
@@ -149,9 +160,15 @@ jest.mock('../models', () => {
     },
 
     User: {
-      findOne: jest.fn(({ where: { email } }) => {
-        if (email === 'hr@company.com')  return Promise.resolve(mockHRUser);
-        if (email === 'emp@company.com') return Promise.resolve(mockEmpUser);
+      // Handles both authenticate middleware (where.user_id) and login (where.email)
+      findOne: jest.fn((opts = {}) => {
+        const where = (opts && opts.where) ? opts.where : {};
+        // authenticate middleware: { where: { user_id, is_active: true } }
+        if (where.user_id === 2) return Promise.resolve(mockHRUser);
+        if (where.user_id === 5) return Promise.resolve(mockEmpUser);
+        // authController login: { where: { email } }
+        if (where.email === 'hr@company.com')  return Promise.resolve(mockHRUser);
+        if (where.email === 'emp@company.com') return Promise.resolve(mockEmpUser);
         return Promise.resolve(null);
       }),
       findByPk: jest.fn((id) => {
@@ -167,7 +184,9 @@ jest.mock('../models', () => {
     },
 
     Contract: {
-      findOne:   jest.fn().mockResolvedValue(mockContract),
+      // Default null so createContract does not see a pre-existing record.
+      // Individual GET tests override with mockResolvedValueOnce(mockContract).
+      findOne:   jest.fn().mockResolvedValue(null),
       findByPk:  jest.fn().mockResolvedValue(mockContract),
       create:    jest.fn().mockResolvedValue(mockContract),
     },
@@ -177,9 +196,17 @@ jest.mock('../models', () => {
       findByPk:  jest.fn().mockResolvedValue(mockTaxDeclaration),
       create:    jest.fn().mockResolvedValue(mockTaxDeclaration),
       upsert:    jest.fn().mockResolvedValue([mockTaxDeclaration, true]),
+      destroy:   jest.fn().mockResolvedValue(1),      // static destroy for upsert pattern
     },
 
+    // Controller imports as HRDCTrainingLog (all-caps HRDC) — both keys exported
     HrdcTrainingLog: {
+      findAll:   jest.fn().mockResolvedValue([mockTrainingLog]),
+      findByPk:  jest.fn().mockResolvedValue(mockTrainingLog),
+      create:    jest.fn().mockResolvedValue(mockTrainingLog),
+      destroy:   jest.fn().mockResolvedValue(1),
+    },
+    HRDCTrainingLog: {
       findAll:   jest.fn().mockResolvedValue([mockTrainingLog]),
       findByPk:  jest.fn().mockResolvedValue(mockTrainingLog),
       create:    jest.fn().mockResolvedValue(mockTrainingLog),
@@ -223,11 +250,12 @@ describe('POST /api/contracts — create employment contract (FR-20)', () => {
       .post('/api/contracts')
       .set('Authorization', `Bearer ${hrToken}`)
       .send({
-        profile_id:              10,
-        start_date:              '2026-01-01',
-        end_date:                '2026-07-01',
+        profile_id:                10,
+        contract_type:             'PROBATIONARY',
+        basic_salary_mur:          25000,
+        start_date:                '2026-01-01',
+        end_date:                  '2026-07-01',
         probation_clause_included: true,
-        terms:                   'Standard probation terms apply.',
       });
 
     expect(res.status).toBe(201);
@@ -239,11 +267,12 @@ describe('POST /api/contracts — create employment contract (FR-20)', () => {
       .post('/api/contracts')
       .set('Authorization', `Bearer ${hrToken}`)
       .send({
-        profile_id:              10,
-        start_date:              '2026-01-01',
-        end_date:                '2027-06-01',   // > 184 days
+        profile_id:                10,
+        contract_type:             'PROBATIONARY',
+        basic_salary_mur:          25000,
+        start_date:                '2026-01-01',
+        end_date:                  '2027-06-01',   // > 184 days — WRA 2019 violation
         probation_clause_included: true,
-        terms:                   'Extended terms.',
       });
 
     expect(res.status).toBe(400);
@@ -273,19 +302,18 @@ describe('POST /api/contracts — create employment contract (FR-20)', () => {
   });
 
   test('TC-COMP-I-005: probation_clause_included = false → system forces PERMANENT status', async () => {
-    // The enforceProbationClause middleware converts the request before the
-    // controller receives it.  The controller mock returns 201 regardless,
-    // so we verify the middleware transforms the body by checking no 4xx is
-    // returned (the middleware calls next() after modification).
+    // The enforceProbationClause middleware sets employment_status = PERMANENT.
+    // The controller creates the contract with those adjusted fields.
     const res = await request(app)
       .post('/api/contracts')
       .set('Authorization', `Bearer ${hrToken}`)
       .send({
-        profile_id:              10,
-        start_date:              '2026-01-01',
-        end_date:                '2026-07-01',
+        profile_id:                10,
+        contract_type:             'STANDARD',
+        basic_salary_mur:          25000,
+        start_date:                '2026-01-01',
+        end_date:                  '2026-07-01',
         probation_clause_included: false,
-        terms:                   'Permanent from day one.',
       });
 
     expect([201, 200]).toContain(res.status);
@@ -301,6 +329,16 @@ describe('POST /api/contracts — create employment contract (FR-20)', () => {
 describe('GET /api/contracts/mine — employee views contract (FR-20)', () => {
 
   test('TC-COMP-I-006: authenticated employee → 200 with contract data', async () => {
+    // Override Contract.findOne for this test: employee has an existing contract
+    const { Contract } = require('../models');
+    Contract.findOne.mockResolvedValueOnce({
+      contract_id:  1,
+      profile_id:   10,
+      contract_type: 'PROBATIONARY',
+      status:       'pending_signature',
+      toJSON: jest.fn().mockReturnValue({ contract_id: 1, profile_id: 10, status: 'pending_signature' }),
+    });
+
     const res = await request(app)
       .get('/api/contracts/mine')
       .set('Authorization', `Bearer ${empToken}`);
@@ -330,7 +368,7 @@ describe('POST /api/tax-declarations — submit MRA EDF (FR-21)', () => {
     const res = await request(app)
       .post('/api/tax-declarations')
       .set('Authorization', `Bearer ${empToken}`)
-      .send({ tax_category: 'B', effective_year: 2026 });
+      .send({ declaration_category: 'B', declaration_date: '2026-01-01' });
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -340,9 +378,9 @@ describe('POST /api/tax-declarations — submit MRA EDF (FR-21)', () => {
     const res = await request(app)
       .post('/api/tax-declarations')
       .set('Authorization', `Bearer ${empToken}`)
-      .send({ tax_category: 'H', effective_year: 2026 });
+      .send({ declaration_category: 'H', declaration_date: '2026-01-01' });
 
-    // Controller must reject categories outside A-G
+    // Controller rejects categories outside A–G per MRA EDF rules
     expect([400, 422]).toContain(res.status);
     expect(res.body.success).toBe(false);
   });
@@ -351,7 +389,7 @@ describe('POST /api/tax-declarations — submit MRA EDF (FR-21)', () => {
     const res = await request(app)
       .post('/api/tax-declarations')
       .set('Authorization', `Bearer ${hrToken}`)
-      .send({ tax_category: 'A', effective_year: 2026 });
+      .send({ declaration_category: 'A', declaration_date: '2026-01-01' });
 
     expect(res.status).toBe(403);
   });
@@ -404,12 +442,12 @@ describe('POST /api/hrdc-training — HR logs training record (FR-22)', () => {
       .post('/api/hrdc-training')
       .set('Authorization', `Bearer ${hrToken}`)
       .send({
-        profile_id:      10,
-        training_title:  'React.js Advanced',
-        provider:        'Mauritius Training Institute',
-        cost:            15000,
-        hours_completed: 24,
-        training_date:   '2026-03-15',
+        profile_id:       10,
+        course_name:      'React.js Advanced',
+        training_provider: 'Mauritius Training Institute',
+        training_cost:    15000,
+        duration_hours:   24,
+        completed_date:   '2026-03-15',
       });
 
     expect(res.status).toBe(201);

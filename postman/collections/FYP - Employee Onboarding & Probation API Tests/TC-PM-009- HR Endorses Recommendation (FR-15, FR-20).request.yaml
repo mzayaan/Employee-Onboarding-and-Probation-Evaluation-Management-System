@@ -24,4 +24,4 @@ scripts:
           pm.expect(jsonData.message).to.include('endorsed');
       });
     language: text/javascript
-order: 9000
+order: 10000

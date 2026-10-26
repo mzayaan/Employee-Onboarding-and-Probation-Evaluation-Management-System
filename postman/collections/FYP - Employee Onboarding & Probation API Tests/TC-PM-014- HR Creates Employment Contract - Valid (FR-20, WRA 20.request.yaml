@@ -1,0 +1,34 @@
+$kind: http-request
+name: "TC-PM-014: HR Creates Employment Contract - Valid (FR-20, WRA 2019 s.13)"
+description: |-
+  TC-PM-014: HR Admin creates an employment contract with a valid probation period (< 184 days).
+  Requirement: FR-20 | NFR-08 | WRA 2019 s.13
+  Expected: HTTP 201, contract created, contract_id returned
+url: "{{base_url}}/api/contracts"
+method: POST
+headers:
+  Content-Type: application/json
+  Authorization: Bearer {{hr_token}}
+body:
+  type: text
+  content: |-
+    {
+      "profile_id": {{employee_profile_id}},
+      "start_date": "2026-01-01",
+      "end_date": "2026-06-30",
+      "probation_clause_included": true,
+      "terms": "Standard probation terms as per WRA 2019."
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      var jsonData = pm.response.json();
+      pm.test('TC-PM-014: Contract created successfully', function () {
+          pm.response.to.have.status(201);
+          pm.expect(jsonData.success).to.be.true;
+      });
+      if (jsonData.data && jsonData.data.contract_id) {
+          pm.collectionVariables.set('contract_id', jsonData.data.contract_id);
+      }
+    language: text/javascript
+order: 15000

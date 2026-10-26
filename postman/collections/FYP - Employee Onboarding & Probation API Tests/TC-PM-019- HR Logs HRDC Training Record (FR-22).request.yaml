@@ -1,0 +1,34 @@
+$kind: http-request
+name: "TC-PM-019: HR Logs HRDC Training Record (FR-22)"
+description: |-
+  TC-PM-019: HR Admin logs a claimable HRDC training record for an employee.
+  Requirement: FR-22 | NFR-08
+  Expected: HTTP 201, training record saved with levy_claimable=true
+url: "{{base_url}}/api/hrdc-training"
+method: POST
+headers:
+  Content-Type: application/json
+  Authorization: Bearer {{hr_token}}
+body:
+  type: text
+  content: |-
+    {
+      "profile_id": {{employee_profile_id}},
+      "training_title": "Node.js & Express for Enterprise",
+      "provider": "Mauritius Training Institute",
+      "cost": 18000,
+      "hours_completed": 32,
+      "training_date": "2026-04-10",
+      "levy_claimable": true
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-019: HRDC training log created', function () {
+          pm.response.to.have.status(201);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.success).to.be.true;
+          pm.expect(jsonData.data).to.have.property('training_id');
+      });
+    language: text/javascript
+order: 20000

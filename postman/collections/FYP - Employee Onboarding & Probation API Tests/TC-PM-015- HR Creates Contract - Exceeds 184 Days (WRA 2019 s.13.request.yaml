@@ -1,0 +1,32 @@
+$kind: http-request
+name: "TC-PM-015: HR Creates Contract - Exceeds 184 Days (WRA 2019 s.13 Violation)"
+description: |-
+  TC-PM-015: Verifies that a contract with probation period exceeding 184 days is rejected.
+  Requirement: FR-20 | NFR-08 | WRA 2019 s.13
+  Expected: HTTP 400, message contains 'WRA 2019'
+url: "{{base_url}}/api/contracts"
+method: POST
+headers:
+  Content-Type: application/json
+  Authorization: Bearer {{hr_token}}
+body:
+  type: text
+  content: |-
+    {
+      "profile_id": {{employee_profile_id}},
+      "start_date": "2026-01-01",
+      "end_date": "2027-06-01",
+      "probation_clause_included": true,
+      "terms": "Extended probation."
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('TC-PM-015: Contract rejected - probation exceeds WRA 2019 limit', function () {
+          pm.response.to.have.status(400);
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.success).to.be.false;
+          pm.expect(jsonData.message).to.include('WRA 2019');
+      });
+    language: text/javascript
+order: 16000

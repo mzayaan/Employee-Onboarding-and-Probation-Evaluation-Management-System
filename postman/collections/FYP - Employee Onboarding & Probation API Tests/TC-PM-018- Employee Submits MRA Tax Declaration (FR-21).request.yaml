@@ -1,0 +1,29 @@
+$kind: http-request
+name: "TC-PM-018: Employee Submits MRA Tax Declaration (FR-21)"
+description: |-
+  TC-PM-018: Employee submits MRA Employee Declaration Form with valid tax category B.
+  Requirement: FR-21 | NFR-08
+  Expected: HTTP 201, declaration saved
+url: "{{base_url}}/api/tax-declarations"
+method: POST
+headers:
+  Content-Type: application/json
+  Authorization: Bearer {{emp_token}}
+body:
+  type: text
+  content: |-
+    {
+      "tax_category": "B",
+      "effective_year": 2026
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      var jsonData = pm.response.json();
+      pm.test('TC-PM-018: MRA EDF submitted successfully', function () {
+          pm.response.to.have.status(201);
+          pm.expect(jsonData.success).to.be.true;
+          pm.expect(jsonData.data.tax_category).to.be.oneOf(['A','B','C','D','E','F','G']);
+      });
+    language: text/javascript
+order: 19000

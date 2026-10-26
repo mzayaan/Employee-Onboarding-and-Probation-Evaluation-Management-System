@@ -24,4 +24,4 @@ scripts:
           pm.expect(jsonData.message).to.include('approved');
       });
     language: text/javascript
-order: 11000
+order: 12000

@@ -17,4 +17,4 @@ scripts:
           pm.expect(jsonData).to.have.property('checkpoint');
       });
     language: text/javascript
-order: 6000
+order: 7000

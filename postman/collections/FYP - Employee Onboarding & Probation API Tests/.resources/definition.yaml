@@ -6,6 +6,8 @@ description: |-
 variables:
   base_url: http://localhost:5000
   hr_token: ""
+  emp_token: ""
   manager_token: ""
   admin_token: ""
   director_token: ""
+  employee_profile_id: "10"

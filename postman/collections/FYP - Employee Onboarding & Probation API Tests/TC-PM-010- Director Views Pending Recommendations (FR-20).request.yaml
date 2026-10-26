@@ -17,4 +17,4 @@ scripts:
           pm.expect(jsonData).to.be.an('array');
       });
     language: text/javascript
-order: 10000
+order: 11000
