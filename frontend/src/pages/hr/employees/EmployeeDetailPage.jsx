@@ -13,7 +13,8 @@ import { getEmployee, updateEmployeeProfile, getDepartments, getManagers } from 
 import { addAttendanceRecord, getAttendanceByPeriod } from '@/api/attendanceApi'
 import { getProbationByProfile } from '@/api/evaluationApi'
 import { downloadReport } from '@/api/reportApi'
-import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X, ClipboardList, PlusCircle, BarChart3 } from 'lucide-react'
+import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X, ClipboardList, PlusCircle, BarChart3, FileText } from 'lucide-react'
+import { getContractByProfile, createContract } from '@/api/contractApi'
 
 // ── Attendance status display config ──────────────────────────────────────────
 const ATTENDANCE_STATUS = {
@@ -298,6 +299,262 @@ function ProbationCheckpointsSection({ profileId }) {
         <span><span className="font-semibold text-yellow-700">50–74</span> — Extend Probation</span>
         <span><span className="font-semibold text-red-700">&lt; 50</span> — Recommend Dismissal</span>
       </div>
+    </div>
+  )
+}
+
+// ── Contract section sub-component (FR-04 extended | WRA 2019 s.13) ──────────
+function ContractSection({ profileId }) {
+  const [contract,    setContract]    = useState(null)
+  const [loading,     setLoading]     = useState(true)
+  const [showForm,    setShowForm]    = useState(false)
+  const [submitting,  setSubmitting]  = useState(false)
+  const [formErr,     setFormErr]     = useState('')
+  const [formSuccess, setFormSuccess] = useState(false)
+  const [form, setForm] = useState({
+    contract_type:             'PROBATIONARY',
+    basic_salary_mur:          '',
+    start_date:                '',
+    end_date:                  '',
+    probation_clause_included: true,
+    probation_duration_months: 3,
+    notice_period_days:        14,
+    contract_reference:        '',
+  })
+
+  const setField = (field) => (e) => {
+    const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value
+    setForm((f) => ({ ...f, [field]: val }))
+  }
+
+  useEffect(() => {
+    if (!profileId) { setLoading(false); return }
+    getContractByProfile(profileId)
+      .then(setContract)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [profileId])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setFormErr('')
+    setSubmitting(true)
+    try {
+      await createContract({
+        profile_id:                profileId,
+        contract_type:             form.contract_type,
+        basic_salary_mur:          Number(form.basic_salary_mur),
+        start_date:                form.start_date || undefined,
+        end_date:                  form.end_date   || undefined,
+        probation_clause_included: form.probation_clause_included,
+        probation_duration_months: Number(form.probation_duration_months),
+        notice_period_days:        Number(form.notice_period_days),
+        contract_reference:        form.contract_reference || undefined,
+      })
+      const updated = await getContractByProfile(profileId)
+      setContract(updated)
+      setShowForm(false)
+      setFormSuccess(true)
+      setTimeout(() => setFormSuccess(false), 3500)
+    } catch (err) {
+      setFormErr(err?.response?.data?.message || 'Failed to create contract.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const CONTRACT_LABELS = { PROBATIONARY: 'Probationary', FIXED_TERM: 'Fixed Term', PERMANENT: 'Permanent' }
+
+  return (
+    <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-slate-500" />
+          <h2 className="text-base font-semibold" style={{ color: '#0f1c2e' }}>Employment Contract</h2>
+        </div>
+        {!contract && !showForm && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white"
+            style={{ backgroundColor: '#1e3a5f' }}
+          >
+            <PlusCircle className="h-3.5 w-3.5" />
+            Issue Contract
+          </button>
+        )}
+      </div>
+
+      {formSuccess && (
+        <div className="mb-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-700 ring-1 ring-green-200">
+          Contract issued successfully.
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading contract…
+        </div>
+      ) : contract ? (
+        <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3 text-sm">
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Contract Type</p>
+            <p className="font-medium text-slate-800">{CONTRACT_LABELS[contract.contract_type] ?? contract.contract_type}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Basic Salary (MUR)</p>
+            <p className="font-medium text-slate-800">{Number(contract.basic_salary_mur).toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Reference</p>
+            <p className="font-medium text-slate-800">{contract.contract_reference || '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Probation Clause</p>
+            <p className="font-medium text-slate-800">{contract.probation_clause_included ? 'Yes' : 'No'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Probation Duration</p>
+            <p className="font-medium text-slate-800">{contract.probation_duration_months} months</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Notice Period</p>
+            <p className="font-medium text-slate-800">{contract.notice_period_days} days</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Employee Signature</p>
+            <p className="font-medium text-slate-800">
+              {contract.signed_at
+                ? new Date(contract.signed_at).toLocaleDateString('en-GB')
+                : <span className="italic text-slate-400">Awaiting employee signature</span>}
+            </p>
+          </div>
+        </div>
+      ) : !showForm ? (
+        <p className="text-sm italic text-slate-400">No contract issued yet.</p>
+      ) : null}
+
+      {showForm && (
+        <form onSubmit={handleSubmit} className="mt-4 border-t border-slate-100 pt-4">
+          <h3 className="mb-4 text-sm font-semibold text-slate-700">New Contract Details</h3>
+
+          {formErr && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              {formErr}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Contract Type *</label>
+              <select
+                value={form.contract_type}
+                onChange={setField('contract_type')}
+                required
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="PROBATIONARY">Probationary</option>
+                <option value="FIXED_TERM">Fixed Term</option>
+                <option value="PERMANENT">Permanent</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Basic Salary (MUR) *</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.basic_salary_mur}
+                onChange={setField('basic_salary_mur')}
+                required
+                placeholder="e.g. 25000"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Contract Start Date</label>
+              <input
+                type="date"
+                value={form.start_date}
+                onChange={setField('start_date')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Probation End Date</label>
+              <input
+                type="date"
+                value={form.end_date}
+                onChange={setField('end_date')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+              <p className="mt-0.5 text-xs text-slate-400">WRA 2019 s.13: max 184 days from start date.</p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Probation Duration (months)</label>
+              <input
+                type="number"
+                min="1"
+                max="12"
+                value={form.probation_duration_months}
+                onChange={setField('probation_duration_months')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Notice Period (days)</label>
+              <input
+                type="number"
+                min="1"
+                value={form.notice_period_days}
+                onChange={setField('notice_period_days')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Contract Reference</label>
+              <input
+                type="text"
+                value={form.contract_reference}
+                onChange={setField('contract_reference')}
+                placeholder="e.g. EMP-2026-001"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div className="flex items-center gap-3 pt-5">
+              <input
+                id="contract-probation-clause"
+                type="checkbox"
+                checked={form.probation_clause_included}
+                onChange={setField('probation_clause_included')}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              <label htmlFor="contract-probation-clause" className="text-xs font-medium text-slate-600">
+                Include Probation Clause (WRA 2019)
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-5 flex gap-3">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+              style={{ backgroundColor: '#1e3a5f' }}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              {submitting ? 'Issuing…' : 'Issue Contract'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowForm(false); setFormErr('') }}
+              className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }
@@ -597,6 +854,11 @@ export default function EmployeeDetailPage() {
 
           {/* Probation checkpoint scores — HR Admin (FR-13, FR-14, FR-16) */}
           <ProbationCheckpointsSection profileId={employee.profile_id} />
+
+          {/* Employment contract — HR Admin only (FR-04 extended | WRA 2019 s.13) */}
+          {!isManager && (
+            <ContractSection profileId={employee.profile_id} />
+          )}
         </>
       ) : (
         /* Edit form — HR Admin only */

@@ -33,9 +33,9 @@ const Contract = sequelize.define('Contract', {
     comment: 'Internal contract reference number, e.g. CORP/2026/042',
   },
   contract_type: {
-    type: DataTypes.ENUM('INDETERMINATE', 'PART_TIME', 'FIXED_TERM'),
+    type: DataTypes.ENUM('PROBATIONARY', 'FIXED_TERM', 'PERMANENT'),
     allowNull: false,
-    comment: 'INDETERMINATE = permanent open-ended; FIXED_TERM = specified end date; PART_TIME = part-time arrangement',
+    comment: 'PROBATIONARY = employee on probation period; FIXED_TERM = specified end date; PERMANENT = confirmed open-ended employment',
   },
   probation_duration_months: {
     type: DataTypes.INTEGER,
