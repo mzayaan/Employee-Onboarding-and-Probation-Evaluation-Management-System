@@ -289,23 +289,47 @@ const createEmployee = async (req, res) => {
         temporaryPassword: password,  // plain-text from req.body, only in memory
       }).catch(() => {});
 
+      // G2-FIX FR-09: In-app welcome notification for the new employee.
+      const { createNotification: _notifEmployee } = require('../services/notificationService');
+      _notifEmployee({
+        userId:  newUser.user_id,
+        type:    'ACCOUNT_CREATED',
+        message: `Welcome to HR Onboard, ${newUser.first_name}! Your account is ready. Please upload your required onboarding documents and complete any assigned tasks.`,
+        relatedEntityType: null,
+        relatedEntityId:   null,
+      }).catch(() => {});
+
       // FR-11 / Task #31: Notify the assigned line manager about their new team
       // member and the evaluation checkpoint schedule.
-      if (manager_id && capturedCheckpoints.length > 0) {
-        User.findByPk(manager_id, { attributes: ['email', 'first_name'] })
+      if (manager_id) {
+        User.findByPk(manager_id, { attributes: ['user_id', 'email', 'first_name'] })
           .then((mgr) => {
             if (!mgr) return;
-            return sendManagerAssignmentEmail({
-              to:               mgr.email,
-              managerFirstName: mgr.first_name,
-              employeeFullName: `${newUser.first_name} ${newUser.last_name}`,
-              jobTitle:         job_title,
-              startDate:        start_date,
-              checkpoints:      capturedCheckpoints.map((cp) => ({
-                label:    cp.checkpoint_label,
-                due_date: cp.due_date,
-              })),
-            });
+
+            // Email notification
+            if (capturedCheckpoints.length > 0) {
+              sendManagerAssignmentEmail({
+                to:               mgr.email,
+                managerFirstName: mgr.first_name,
+                employeeFullName: `${newUser.first_name} ${newUser.last_name}`,
+                jobTitle:         job_title,
+                startDate:        start_date,
+                checkpoints:      capturedCheckpoints.map((cp) => ({
+                  label:    cp.checkpoint_label,
+                  due_date: cp.due_date,
+                })),
+              }).catch(() => {});
+            }
+
+            // G3-FIX FR-11: In-app notification for the manager.
+            const { createNotification: _notifMgr } = require('../services/notificationService');
+            _notifMgr({
+              userId:            mgr.user_id,
+              type:              'EMPLOYEE_ASSIGNED',
+              message:           `A new employee, ${newUser.first_name} ${newUser.last_name} (${job_title}), has been assigned to your team. ${capturedCheckpoints.length} evaluation checkpoint(s) have been scheduled.`,
+              relatedEntityType: 'profile',
+              relatedEntityId:   profile.profile_id,
+            }).catch(() => {});
           })
           .catch(() => {});
       }

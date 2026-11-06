@@ -114,6 +114,21 @@ const uploadDocument = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
+    // G1-FIX FR-09: Notify all active HR_ADMIN users that a new document is pending review.
+    User.findAll({ where: { role: 'HR_ADMIN', is_active: true }, attributes: ['user_id'] })
+      .then((hrUsers) =>
+        hrUsers.forEach((hr) =>
+          createNotification({
+            userId:            hr.user_id,
+            type:              'DOCUMENT_PENDING',
+            message:           `${req.user.first_name} ${req.user.last_name} has uploaded a "${docType.name}" document awaiting your review.`,
+            relatedEntityType: 'document',
+            relatedEntityId:   doc.document_id,
+          }).catch(() => {})
+        )
+      )
+      .catch(() => {});
+
     return res.status(201).json({
       success: true,
       message: 'Document uploaded successfully. It is now pending HR review.',

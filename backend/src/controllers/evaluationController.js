@@ -759,6 +759,23 @@ const submitSelfAssessment = async (req, res) => {
       description: `Self-assessment submitted for checkpoint_id ${checkpointId} (${checkpoint.checkpoint_label}). Self-score: ${totalSelfScore}%.`,
       ipAddress:   getIp(req),
     });
+
+    // G5-FIX FR-13: Notify the line manager that the employee has submitted their self-assessment.
+    const { EmployeeProfile: _EP } = require('../models');
+    const { createNotification: _notifMgr } = require('../services/notificationService');
+    _EP.findByPk(profile.profile_id, { attributes: ['manager_id'] })
+      .then((ep) => {
+        if (!ep?.manager_id) return;
+        _notifMgr({
+          userId:            ep.manager_id,
+          type:              'SELF_ASSESSMENT_SUBMITTED',
+          message:           `${req.user.first_name} ${req.user.last_name} has submitted their self-assessment for the ${checkpoint.checkpoint_label} checkpoint.`,
+          relatedEntityType: 'checkpoint',
+          relatedEntityId:   checkpoint.checkpoint_id,
+        }).catch(() => {});
+      })
+      .catch(() => {});
+
     return res.status(201).json({
       success: true,
       message: 'Self-assessment submitted successfully.',

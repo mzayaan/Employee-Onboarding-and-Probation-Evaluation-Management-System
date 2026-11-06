@@ -462,6 +462,27 @@ const approveRecommendation = async (req, res) => {
       }).catch(() => {});
     }
 
+    // G4-FIX FR-15: Notify the employee about their probation outcome.
+    if (rec.probationPeriod?.profile_id) {
+      const outcomeMessages = {
+        CONFIRM: 'Congratulations! Your probation period has been successfully completed. Your employment has been confirmed.',
+        EXTEND:  'Your probation evaluation has been reviewed. Your probation period has been extended. Please log in for more details.',
+        DISMISS: 'Your probation evaluation has been reviewed. A formal notification from HR will follow. Please contact HR for further information.',
+      };
+      EmployeeProfile.findByPk(rec.probationPeriod.profile_id, { attributes: ['user_id'] })
+        .then((ep) => {
+          if (!ep) return;
+          createNotification({
+            userId:            ep.user_id,
+            type:              'PROBATION_OUTCOME',
+            message:           outcomeMessages[rec.recommendation_type] || 'Your probation evaluation outcome has been finalised. Please log in for details.',
+            relatedEntityType: 'recommendation',
+            relatedEntityId:   recId,
+          }).catch(() => {});
+        })
+        .catch(() => {});
+    }
+
     return res.json({
       success: true,
       message: `Recommendation approved. Probation period is now "${newPeriodStatus}". PDF report is now available for download.`,
