@@ -4,7 +4,7 @@
 // depending on the authenticated user's role (FR-02, NFR-03).
 // =============================================================================
 
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   Users,
@@ -12,7 +12,6 @@ import {
   ClipboardList,
   BarChart3,
   Settings,
-  LogOut,
   ShieldCheck,
   CalendarDays,
   Bell,
@@ -22,6 +21,9 @@ import {
   BookOpen,
   Calculator,
   FileSignature,
+  GraduationCap,
+  SlidersHorizontal,
+  UserCircle,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -54,22 +56,24 @@ const NAV_ITEMS = {
     { to: '/performance-notes',       icon: StickyNote,      label: 'Performance Notes'  },
     { to: '/notifications',           icon: Bell,            label: 'Notifications'      },
   ],
-  // NEW_EMPLOYEE: profile removed — no EmployeeProfilePage built yet
   NEW_EMPLOYEE: [
     { to: '/employee/dashboard',       icon: LayoutDashboard, label: 'Dashboard'        },
+    { to: '/employee/profile',         icon: UserCircle,      label: 'My Profile'       },
     { to: '/employee/documents',       icon: FileText,         label: 'My Documents'    },
     { to: '/employee/tasks',           icon: ClipboardList,    label: 'My Tasks'        },
     { to: '/employee/self-assessments',icon: BarChart3,        label: 'Self-Assessment' },
     { to: '/employee/contract',        icon: FileSignature,    label: 'My Contract'     },
     { to: '/employee/tax-declaration', icon: Calculator,       label: 'Tax Declaration' },
+    { to: '/employee/training',        icon: GraduationCap,    label: 'My Training'     },
     { to: '/notifications',            icon: Bell,             label: 'Notifications'   },
   ],
   SYSTEM_ADMIN: [
     { to: '/admin/dashboard',  icon: LayoutDashboard, label: 'Dashboard'      },
     { to: '/admin/users',      icon: Users,            label: 'User Management'},
     { to: '/admin/criteria',   icon: Settings,         label: 'Criteria Config'},
-    { to: '/admin/audit-log',  icon: ShieldCheck,      label: 'Audit Log'     },
-    { to: '/notifications',    icon: Bell,             label: 'Notifications'  },
+    { to: '/admin/audit-log',    icon: ShieldCheck,       label: 'Audit Log'         },
+    { to: '/admin/system-config',icon: SlidersHorizontal, label: 'Min. Salary Config' },
+    { to: '/notifications',      icon: Bell,              label: 'Notifications'      },
   ],
   // Block 9 — Director role (lecturer requirement: Director final approval)
   DIRECTOR: [
@@ -79,24 +83,11 @@ const NAV_ITEMS = {
   ],
 }
 
-const ROLE_LABELS = {
-  HR_ADMIN:     'HR Administrator',
-  LINE_MANAGER: 'Line Manager',
-  NEW_EMPLOYEE: 'New Employee',
-  SYSTEM_ADMIN: 'System Administrator',
-  DIRECTOR:     'Director',
-}
 
 export default function Sidebar() {
-  const { user, logout } = useAuth()
-  const navigate = useNavigate()
+  const { user } = useAuth()
 
   const items = NAV_ITEMS[user?.role] || []
-
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login', { replace: true })
-  }
 
   return (
     <aside
@@ -140,33 +131,6 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* ── User info + logout ─────────────────────────────────────────── */}
-      <div className="px-3 pb-4 pt-2 border-t border-white/10 space-y-1">
-        <div className="flex items-center gap-3 px-3 py-2">
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-full text-white text-xs font-semibold flex-shrink-0"
-            style={{ backgroundColor: '#235080' }}
-          >
-            {user?.first_name?.[0]}{user?.last_name?.[0]}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-white truncate">
-              {user?.first_name} {user?.last_name}
-            </p>
-            <p className="text-xs text-white/50 truncate">
-              {ROLE_LABELS[user?.role]}
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-white/60 transition-colors hover:text-white hover:bg-white/5"
-        >
-          <LogOut className="h-4 w-4" />
-          Sign out
-        </button>
-      </div>
     </aside>
   )
 }

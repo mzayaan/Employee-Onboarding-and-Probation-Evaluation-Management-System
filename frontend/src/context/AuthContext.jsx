@@ -12,13 +12,19 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   // Initialise from localStorage so a page refresh does not log the user out
-  const [user,    setUser]    = useState(() => {
+  const [user,            setUser]            = useState(() => {
     try {
       const stored = localStorage.getItem('user')
       return stored ? JSON.parse(stored) : null
-    } catch {
-      return null
-    }
+    } catch { return null }
+  })
+  // Spec s.4.1: employeeProfile stored separately; provides job_title +
+  // profile_image_url for the top-nav consolidated profile block.
+  const [employeeProfile, setEmployeeProfile] = useState(() => {
+    try {
+      const stored = localStorage.getItem('employeeProfile')
+      return stored ? JSON.parse(stored) : null
+    } catch { return null }
   })
   const [token,   setToken]   = useState(() => localStorage.getItem('token') || null)
   const [loading, setLoading] = useState(true)  // true while verifying stored token
@@ -35,6 +41,10 @@ export function AuthProvider({ children }) {
         if (data.success) {
           setUser(data.user)
           localStorage.setItem('user', JSON.stringify(data.user))
+          // Store employeeProfile (may be null for roles without a profile)
+          const ep = data.employeeProfile || null
+          setEmployeeProfile(ep)
+          localStorage.setItem('employeeProfile', JSON.stringify(ep))
         } else {
           clearAuth()
         }
@@ -52,8 +62,10 @@ export function AuthProvider({ children }) {
   const clearAuth = useCallback(() => {
     setUser(null)
     setToken(null)
+    setEmployeeProfile(null)
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+    localStorage.removeItem('employeeProfile')
   }, [])
 
   // ── login: calls POST /api/auth/login, stores result ──────────────────
@@ -81,7 +93,22 @@ export function AuthProvider({ children }) {
     }
   }, [clearAuth])
 
-  const value = { user, token, loading, login, logout, isAuthenticated: !!user }
+  // ── refreshProfile: re-fetches /auth/me and updates stored profile ────
+  // Called after a profile image upload so the top-nav reflects the change.
+  const refreshProfile = useCallback(async () => {
+    try {
+      const { data } = await api.get('/auth/me')
+      if (data.success) {
+        setUser(data.user)
+        localStorage.setItem('user', JSON.stringify(data.user))
+        const ep = data.employeeProfile || null
+        setEmployeeProfile(ep)
+        localStorage.setItem('employeeProfile', JSON.stringify(ep))
+      }
+    } catch { /* non-fatal */ }
+  }, [])
+
+  const value = { user, token, loading, login, logout, isAuthenticated: !!user, employeeProfile, refreshProfile }
 
   return (
     <AuthContext.Provider value={value}>

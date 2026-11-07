@@ -13,10 +13,15 @@ import api from './axiosInstance'
 
 /**
  * Fetch the contract record for the authenticated employee (NEW_EMPLOYEE role).
- * Returns null/404 when no contract has been linked yet.
+ * Returns null when no contract has been linked yet (graceful empty state).
  */
 export const getMyContract = () =>
-  api.get('/contracts/mine').then((r) => r.data.data)
+  api.get('/contracts/mine')
+    .then((r) => r.data.data)
+    .catch((err) => {
+      if (err?.response?.status === 404) return null
+      throw err
+    })
 
 /**
  * HR Admin: fetch the contract record for a specific employee profile.
@@ -42,10 +47,15 @@ export const signContract = (contractId, payload) =>
 
 /**
  * Fetch the existing MRA tax declaration for the authenticated employee.
- * Returns null when no declaration has been submitted yet.
+ * Returns null when no declaration has been submitted yet (graceful empty state).
  */
 export const getMyTaxDeclaration = () =>
-  api.get('/tax-declarations/mine').then((r) => r.data.data)
+  api.get('/tax-declarations/mine')
+    .then((r) => r.data.data)
+    .catch((err) => {
+      if (err?.response?.status === 404) return null
+      throw err
+    })
 
 /**
  * Submit or update the MRA Employee Declaration Form (EDF) for the

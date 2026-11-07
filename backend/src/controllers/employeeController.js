@@ -7,10 +7,45 @@
 // =============================================================================
 
 const bcrypt    = require('bcrypt');
+const { Readable } = require('stream');
+const cloudinaryPkg = require('cloudinary').v2;
 const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint, LeaveBalance, OnboardingDocument, TaskAssignment } = require('../models');
+const { Op } = require('sequelize');
 const { createAuditLog }                                    = require('../utils/auditLogger');
 const { validatePasswordStrength }                          = require('../utils/passwordValidator');
 const { sendWelcomeEmail, sendManagerAssignmentEmail }      = require('../utils/mailer');
+const { generateSecurePassword }                            = require('../utils/generatePassword');
+
+// =============================================================================
+// HELPER: addCalendarMonths
+// Adds a specified number of calendar months to a date string "YYYY-MM-DD".
+// Handles month-end overflow (e.g. Jan 31 + 1 month → Feb 28/29).
+// Spec s.1.4 — calendar-month arithmetic for checkpoint scheduling.
+// =============================================================================
+function addCalendarMonths(baseDateStr, months) {
+  const [year, monthNum, day] = baseDateStr.split('-').map(Number);
+  const totalMonths = (monthNum - 1) + months; // 0-based month
+  const targetYear  = year + Math.floor(totalMonths / 12);
+  const targetMonth = totalMonths % 12; // 0-based
+
+  const daysInTarget = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const targetDay    = Math.min(day, daysInTarget);
+
+  const yyyy = String(targetYear);
+  const mm   = String(targetMonth + 1).padStart(2, '0');
+  const dd   = String(targetDay).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Checkpoint month-offset matrix for each permitted probation duration.
+// Source: Spec s.1.4 — proposed company evaluation policy.
+const CHECKPOINT_MATRIX = {
+  1:  [1],
+  2:  [1, 2],
+  3:  [1, 2, 3],
+  6:  [2, 4, 6],
+  12: [3, 6, 9, 12],
+};
 
 // =============================================================================
 // HELPER: buildLeaveBalance
@@ -95,9 +130,10 @@ const createEmployee = async (req, res) => {
     const {
       // User account fields
       email,
-      password,
+      password,                    // Optional — auto-generated if absent (spec s.3.2)
       role,
       first_name,
+      middle_name,                 // Spec s.2.5 — optional middle name
       last_name,
       // Profile fields
       job_title,
@@ -105,14 +141,55 @@ const createEmployee = async (req, res) => {
       manager_id,
       phone,
       start_date,
-      probation_end_date,
-      // New fields (Block 3 — FR-21 / lecturer requirements)
-      gender,           // REQUIRED for NEW_EMPLOYEE: 'Male' | 'Female'
-      nationality,      // Optional: string
-      salary_monthly,   // Optional: number — determines Vacation Leave eligibility (WRA 2019 s.47)
-      // Optional: custom checkpoint schedule for NEW_EMPLOYEE (FR-11)
-      // Defaults to [30, 60, 90] when not provided.
+      probation_end_date,          // Explicit override — OR calculated from probation_duration_months
+      // Block 3 — FR-21 / lecturer requirements
+      gender,                      // REQUIRED for NEW_EMPLOYEE: 'Male' | 'Female'
+      nationality,                 // Optional: string
+      salary_monthly,              // Optional: MUR — Vacation Leave threshold (WRA 2019 s.47)
+      // Spec s.1.4 — calendar-month checkpoint duration (1 | 2 | 3 | 6 | 12)
+      // If provided, overrides checkpoint_days and auto-calculates probation_end_date.
+      probation_duration_months,
+      // Legacy: custom day-offset schedule — kept for backward compatibility.
+      // Ignored when probation_duration_months is provided.
       checkpoint_days,
+      // Spec s.2.3 — new profile fields (all optional)
+      date_of_birth,
+      employment_type,
+      work_schedule_type,
+      weekly_working_hours,
+      work_location,
+      evaluation_status,
+      employment_history_summary,
+      salary_scale_tier,
+      next_line_of_promotion,
+      profile_image_url,
+      identity_type,               // 'NIC' (default) or alternative ID document type
+      // Spec s.2.3.1 — extended profile fields
+      address_line_1,
+      address_line_2,
+      locality,
+      district,
+      country,
+      postal_code,
+      id_document_type,
+      nic_number,
+      passport_number,
+      work_permit_details,
+      work_authorisation_expiry,
+      contract_end_date,
+      personal_email,
+      // Emergency contact
+      emergency_contact_name,
+      emergency_contact_relationship,
+      emergency_contact_phone,
+      // Education & previous employment
+      highest_qualification,
+      field_of_study,
+      educational_institution,
+      previous_job_title,
+      previous_company_name,
+      previous_salary_monthly,
+      reporting_notes,
     } = req.body;
 
     // ── Validation ─────────────────────────────────────────────────────────
@@ -125,10 +202,10 @@ const createEmployee = async (req, res) => {
     if (!job_title)  missing.push('job_title');
     if (!start_date) missing.push('start_date');
 
-    // probation_end_date and gender are only required for new employees
+    // gender is required for new employees; probation scheduling is validated later
     if (role === 'NEW_EMPLOYEE') {
-      if (!probation_end_date) missing.push('probation_end_date');
-      if (!gender)             missing.push('gender');
+      if (!gender) missing.push('gender');
+      // probation_end_date OR probation_duration_months must be supplied — validated after role check
     }
 
     if (missing.length) {
@@ -156,20 +233,106 @@ const createEmployee = async (req, res) => {
       });
     }
 
-    const pwCheck = validatePasswordStrength(password);
-    if (!pwCheck.valid) {
-      await t.rollback();
-      return res.status(400).json({ success: false, message: pwCheck.message });
+    // ── Spec s.3.1: HR_ADMIN uniqueness guard ─────────────────────────────
+    // At most one active HR_ADMIN is permitted at any time.
+    // MySQL has no partial unique indexes, so we enforce this via a
+    // transaction-level count check with 409 Conflict on violation.
+    if (role === 'HR_ADMIN') {
+      const existingHRAdminCount = await User.count({
+        where: { role: 'HR_ADMIN', is_active: true },
+        transaction: t,
+      });
+      if (existingHRAdminCount >= 1) {
+        await t.rollback();
+        return res.status(409).json({
+          success:  false,
+          message:  'An active HR_ADMIN account already exists. ' +
+                    'Only one active HR_ADMIN is permitted at a time. ' +
+                    'Deactivate the existing HR_ADMIN before creating a new one.',
+        });
+      }
+    }
+
+    // ── Spec s.3.2: Auto-generate password if not supplied ────────────────
+    // If the caller omits 'password', a cryptographically secure 12-character
+    // password is generated and sent to the new user via welcome email.
+    // If 'password' is supplied explicitly, it is validated for strength.
+    let plainTextPassword;
+    let passwordWasAutoGenerated = false;
+
+    if (!password) {
+      plainTextPassword       = generateSecurePassword();
+      passwordWasAutoGenerated = true;
+    } else {
+      const pwCheck = validatePasswordStrength(password);
+      if (!pwCheck.valid) {
+        await t.rollback();
+        return res.status(400).json({ success: false, message: pwCheck.message });
+      }
+      plainTextPassword = password;
+    }
+
+    // ── Spec s.3.4: Future date guard for new probation commencement ───────
+    // start_date must be on or after today (Mauritius timezone UTC+4).
+    // Historical/imported employees can be created by SYSTEM_ADMIN with a
+    // bypass flag: req.body.allow_historical_start === 'true'.
+    if (role === 'NEW_EMPLOYEE' && start_date) {
+      const nowUtc4    = new Date(Date.now() + 4 * 60 * 60 * 1000);
+      const todayMU    = new Date(
+        Date.UTC(nowUtc4.getUTCFullYear(), nowUtc4.getUTCMonth(), nowUtc4.getUTCDate()),
+      );
+      const startDateObj = new Date(start_date + 'T00:00:00Z');
+      const allowHistorical = req.body.allow_historical_start === 'true'
+        && req.user.role === 'SYSTEM_ADMIN';
+
+      if (startDateObj < todayMU && !allowHistorical) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message:
+            'Probation start date must be today or a future date. ' +
+            'To import a historical employee record, a SYSTEM_ADMIN may set ' +
+            'allow_historical_start=true in the request.',
+        });
+      }
     }
 
     // Date validation — only required for NEW_EMPLOYEE
     if (role === 'NEW_EMPLOYEE') {
       const startD = new Date(start_date);
-      const endD   = new Date(probation_end_date);
-      if (Number.isNaN(startD) || Number.isNaN(endD)) {
+      if (Number.isNaN(startD.getTime())) {
         await t.rollback();
-        return res.status(400).json({ success: false, message: 'Invalid date format.' });
+        return res.status(400).json({ success: false, message: 'Invalid start_date format.' });
       }
+
+      // ── Spec s.1.4: Calendar-month checkpoint matrix ───────────────────
+      // If probation_duration_months is supplied, auto-calculate end date
+      // and checkpoint schedule from the matrix. Otherwise fall back to
+      // an explicit probation_end_date + legacy checkpoint_days.
+      let resolvedEndDate = probation_end_date || null;
+
+      if (probation_duration_months != null) {
+        const durMonths = parseInt(probation_duration_months, 10);
+        if (!CHECKPOINT_MATRIX[durMonths]) {
+          await t.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `probation_duration_months must be one of: ${Object.keys(CHECKPOINT_MATRIX).join(', ')}.`,
+          });
+        }
+        // Auto-calculate end date as start_date + durMonths calendar months
+        resolvedEndDate = addCalendarMonths(start_date, durMonths);
+      }
+
+      if (!resolvedEndDate) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Either probation_end_date or probation_duration_months is required for NEW_EMPLOYEE.',
+        });
+      }
+
+      const endD = new Date(resolvedEndDate);
       if (endD <= startD) {
         await t.rollback();
         return res.status(400).json({
@@ -177,6 +340,10 @@ const createEmployee = async (req, res) => {
           message: 'Probation end date must be after the start date.',
         });
       }
+
+      // Persist the resolved end date so the create call and
+      // the ProbationPeriod both use the same value.
+      req._resolvedProbationEndDate = resolvedEndDate;
     }
 
     // ── Check email uniqueness ─────────────────────────────────────────────
@@ -190,7 +357,8 @@ const createEmployee = async (req, res) => {
     }
 
     // ── Create User ────────────────────────────────────────────────────────
-    const password_hash = await bcrypt.hash(password, 12);
+    // plainTextPassword was resolved above (auto-generated or validated from body).
+    const password_hash = await bcrypt.hash(plainTextPassword, 12);
     const newUser = await User.create({
       email:      email.toLowerCase().trim(),
       password_hash,
@@ -200,20 +368,89 @@ const createEmployee = async (req, res) => {
       is_active:  true,
     }, { transaction: t });
 
+    // ── Upload profile image to Cloudinary (if provided via multipart) ────
+    let resolvedProfileImageUrl = profile_image_url || null;
+    if (req.file) {
+      try {
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinaryPkg.uploader.upload_stream(
+            {
+              folder:        'profile-images',
+              resource_type: 'image',
+              access_mode:   'public',
+            },
+            (err, res) => (err ? reject(err) : resolve(res))
+          );
+          const readable = new Readable();
+          readable.push(req.file.buffer);
+          readable.push(null);
+          readable.pipe(stream);
+        });
+        resolvedProfileImageUrl = uploadResult.secure_url;
+      } catch (imgErr) {
+        // Non-fatal: profile image upload failure should not abort employee creation
+        console.error('Profile image upload failed:', imgErr.message);
+      }
+    }
+
     // ── Create EmployeeProfile ─────────────────────────────────────────────
+    const resolvedProbEnd = req._resolvedProbationEndDate || probation_end_date || null;
+
     const profile = await EmployeeProfile.create({
-      user_id:           newUser.user_id,
-      department_id:     department_id  || null,
-      manager_id:        manager_id     || null,
-      job_title:         job_title.trim(),
-      phone:             phone?.trim()  || null,
+      user_id:            newUser.user_id,
+      department_id:      department_id  || null,
+      manager_id:         manager_id     || null,
+      job_title:          job_title.trim(),
+      phone:              phone?.trim()  || null,
       start_date,
-      probation_end_date: probation_end_date || null,
-      gender:            gender              || null,
-      nationality:       nationality?.trim() || null,
-      salary_monthly:    salary_monthly      || null,
-      employment_status: 'PROBATION',
-      onboarding_status: 'IN_PROGRESS',
+      probation_end_date: resolvedProbEnd,
+      gender:             gender              || null,
+      nationality:        nationality?.trim() || null,
+      salary_monthly:     salary_monthly      || null,
+      employment_status:  'PROBATION',
+      onboarding_status:  'IN_PROGRESS',
+      // Spec s.2.3 — new nullable columns
+      date_of_birth:               date_of_birth               || null,
+      employment_type:             employment_type              || null,
+      work_schedule_type:          work_schedule_type           || null,
+      weekly_working_hours:        weekly_working_hours         || null,
+      work_location:               work_location?.trim()        || null,
+      evaluation_status:           evaluation_status            || (role === 'NEW_EMPLOYEE' ? 'PROBATION' : null),
+      employment_history_summary:  employment_history_summary   || null,
+      salary_scale_tier:           salary_scale_tier            || null,
+      next_line_of_promotion:      next_line_of_promotion       || null,
+      profile_image_url:           resolvedProfileImageUrl,
+      // Spec s.2.3.1 — extended profile fields
+      middle_name:                 middle_name?.trim()           || null,
+      personal_email:              personal_email?.trim()        || null,
+      // Address
+      address_line_1:              address_line_1?.trim()        || null,
+      address_line_2:              address_line_2?.trim()        || null,
+      locality:                    locality?.trim()              || null,
+      district:                    district?.trim()              || null,
+      country:                     country?.trim()               || null,
+      postal_code:                 postal_code?.trim()           || null,
+      // Identity document
+      id_document_type:            id_document_type              || null,
+      nic_number:                  nic_number?.trim()            || null,
+      passport_number:             passport_number?.trim()       || null,
+      // Work permit
+      work_permit_details:         work_permit_details?.trim()   || null,
+      work_authorisation_expiry:   work_authorisation_expiry     || null,
+      // Contract
+      contract_end_date:           contract_end_date             || null,
+      // Emergency contact
+      emergency_contact_name:         emergency_contact_name?.trim()         || null,
+      emergency_contact_relationship: emergency_contact_relationship?.trim() || null,
+      emergency_contact_phone:        emergency_contact_phone?.trim()        || null,
+      // Education & previous employment
+      highest_qualification:       highest_qualification?.trim()   || null,
+      field_of_study:              field_of_study?.trim()          || null,
+      educational_institution:     educational_institution?.trim() || null,
+      previous_job_title:          previous_job_title?.trim()      || null,
+      previous_company_name:       previous_company_name?.trim()   || null,
+      previous_salary_monthly:     previous_salary_monthly         || null,
+      reporting_notes:             reporting_notes?.trim()         || null,
     }, { transaction: t });
 
     // ── Create LeaveBalance for current year (FR-21 / WRA 2019) ───────────
@@ -240,37 +477,62 @@ const createEmployee = async (req, res) => {
       const probation = await ProbationPeriod.create({
         profile_id: profile.profile_id,
         start_date,
-        end_date:   probation_end_date,
+        end_date:   resolvedProbEnd,
         status:     'ACTIVE',
       }, { transaction: t });
 
-      // Build evaluation checkpoint schedule (FR-11)
-      // HR may supply a custom array of day numbers; default is [30, 60, 90].
-      let scheduleDays = [30, 60, 90];
-      if (Array.isArray(checkpoint_days) && checkpoint_days.length > 0) {
-        const parsed = checkpoint_days.map(Number).filter((d) => Number.isInteger(d) && d > 0);
-        if (parsed.length === 0) {
-          await t.rollback();
-          return res.status(400).json({
-            success: false,
-            message: 'checkpoint_days must be a non-empty array of positive integers.',
-          });
+      // ── Build evaluation checkpoint schedule (FR-11) ────────────────────
+      // Spec s.1.4: Use calendar-month arithmetic when probation_duration_months
+      // is provided. Otherwise fall back to legacy day-offset schedule.
+      let checkpointRows = [];
+
+      if (probation_duration_months != null && CHECKPOINT_MATRIX[parseInt(probation_duration_months, 10)]) {
+        // Calendar-month matrix path
+        const durMonths    = parseInt(probation_duration_months, 10);
+        const monthOffsets = CHECKPOINT_MATRIX[durMonths];
+
+        checkpointRows = monthOffsets.map((monthOffset, idx) => {
+          const isLast   = idx === monthOffsets.length - 1;
+          const dueDate  = addCalendarMonths(start_date, monthOffset);
+          const label    = isLast
+            ? `Month ${monthOffset} Final Checkpoint`
+            : `Month ${monthOffset} Review`;
+          return {
+            period_id:        probation.period_id,
+            checkpoint_label: label,
+            day_number:       monthOffset * 30, // approximate day number for display/sorting
+            due_date:         dueDate,
+            status:           'PENDING',
+          };
+        });
+      } else {
+        // Legacy day-offset path — backward compatible with existing integrations
+        let scheduleDays = [30, 60, 90];
+        if (Array.isArray(checkpoint_days) && checkpoint_days.length > 0) {
+          const parsed = checkpoint_days.map(Number).filter((d) => Number.isInteger(d) && d > 0);
+          if (parsed.length === 0) {
+            await t.rollback();
+            return res.status(400).json({
+              success: false,
+              message: 'checkpoint_days must be a non-empty array of positive integers.',
+            });
+          }
+          scheduleDays = [...new Set(parsed)].sort((a, b) => a - b);
         }
-        scheduleDays = [...new Set(parsed)].sort((a, b) => a - b); // dedup + sort ascending
+
+        checkpointRows = scheduleDays.map((day_number) => {
+          const due = new Date(start_date + 'T00:00:00Z');
+          due.setUTCDate(due.getUTCDate() + day_number);
+          return {
+            period_id:        probation.period_id,
+            checkpoint_label: `Day-${day_number} Review`,
+            day_number,
+            due_date:         due.toISOString().slice(0, 10),
+            status:           'PENDING',
+          };
+        });
       }
 
-      const startDateObj = new Date(start_date);
-      const checkpointRows = scheduleDays.map((day_number) => {
-        const due = new Date(startDateObj);
-        due.setDate(due.getDate() + day_number);
-        return {
-          period_id:        probation.period_id,
-          checkpoint_label: `Day-${day_number} Review`,
-          day_number,
-          due_date:         due.toISOString().slice(0, 10),
-          status:           'PENDING',
-        };
-      });
       await EvaluationCheckpoint.bulkCreate(checkpointRows, { transaction: t });
 
       // Capture for post-commit manager email
@@ -283,10 +545,12 @@ const createEmployee = async (req, res) => {
     if (role === 'NEW_EMPLOYEE') {
       // FR-09 / Task #30: Welcome email includes the temporary password so the
       // employee knows their initial credentials and is prompted to change them.
+      // plainTextPassword is in memory only — never logged or stored.
       sendWelcomeEmail({
         to:                newUser.email,
         firstName:         newUser.first_name,
-        temporaryPassword: password,  // plain-text from req.body, only in memory
+        temporaryPassword: plainTextPassword,
+        wasAutoGenerated:  passwordWasAutoGenerated,
       }).catch(() => {});
 
       // G2-FIX FR-09: In-app welcome notification for the new employee.
@@ -382,6 +646,10 @@ const listEmployees = async (req, res) => {
           model: User,
           as: 'user',
           attributes: ['user_id', 'email', 'role', 'first_name', 'last_name', 'is_active', 'created_at'],
+          // Only return NEW_EMPLOYEE accounts — managers have EmployeeProfiles too
+          // (for dept auto-select) but must not appear in the employee list.
+          where: { role: 'NEW_EMPLOYEE' },
+          required: true,
         },
         {
           model: Department,
@@ -582,6 +850,129 @@ const updateEmployeeProfile = async (req, res) => {
   }
 };
 
+// =============================================================================
+// PATCH /api/employees/me/avatar
+// Self-service profile image upload. Available to any role that has an
+// EmployeeProfile (NEW_EMPLOYEE, LINE_MANAGER, HR_ADMIN, DIRECTOR).
+// Image is streamed to Cloudinary; profile_image_url is updated in DB.
+// AppShell reads this URL for the top-nav consolidated profile block.
+// Spec s.4.1 | FR-04 | NFR-02
+// =============================================================================
+const updateMyAvatar = async (req, res) => {
+  try {
+    const { user_id } = req.user;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No image file provided.' });
+    }
+
+    const profile = await EmployeeProfile.findOne({ where: { user_id } });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+    }
+
+    // Stream buffer to Cloudinary
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinaryPkg.uploader.upload_stream(
+        { folder: 'profile-images', resource_type: 'image', access_mode: 'public' },
+        (err, result) => (err ? reject(err) : resolve(result))
+      );
+      const readable = new Readable();
+      readable.push(req.file.buffer);
+      readable.push(null);
+      readable.pipe(stream);
+    });
+
+    await profile.update({ profile_image_url: uploadResult.secure_url });
+
+    await createAuditLog({
+      userId:      user_id,
+      actionType:  'PROFILE_IMAGE_UPDATED',
+      description: `User (user_id ${user_id}) updated their profile image.`,
+      ipAddress:   getIp(req),
+    });
+
+    return res.status(200).json({
+      success:           true,
+      message:           'Profile image updated successfully.',
+      profile_image_url: uploadResult.secure_url,
+    });
+  } catch (error) {
+    console.error('[employeeController.updateMyAvatar]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to update profile image.' });
+  }
+};
+
+// =============================================================================
+// PATCH /api/employees/me/profile
+// Employee self-service: update only the fields the employee is permitted to
+// provide — personal contact details, emergency contact, education, and
+// previous job title. HR-locked fields (job title, department, salary, etc.)
+// are intentionally excluded.
+// Spec s.4.4 | FR-04 | NFR-03
+// =============================================================================
+const updateMyProfile = async (req, res) => {
+  try {
+    const { user_id } = req.user;
+
+    const profile = await EmployeeProfile.findOne({ where: { user_id } });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+    }
+
+    const {
+      personal_email,
+      emergency_contact_name,
+      emergency_contact_relationship,
+      emergency_contact_phone,
+      highest_qualification,
+      field_of_study,
+      educational_institution,
+      previous_job_title,
+    } = req.body;
+
+    // Validate personal_email format if supplied
+    if (personal_email !== undefined && personal_email !== null && personal_email !== '') {
+      const emailRe = /^[\w.%+\-]+@[\w.\-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRe.test(personal_email)) {
+        return res.status(400).json({ success: false, message: 'Invalid personal email address.' });
+      }
+      // Must differ from work email
+      const user = await User.findByPk(user_id, { attributes: ['email'] });
+      if (user && personal_email.toLowerCase() === user.email.toLowerCase()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Personal email must differ from your work email.',
+        });
+      }
+    }
+
+    await profile.update({
+      personal_email:                 personal_email                 !== undefined ? (personal_email || null)                 : profile.personal_email,
+      emergency_contact_name:         emergency_contact_name         !== undefined ? (emergency_contact_name || null)         : profile.emergency_contact_name,
+      emergency_contact_relationship: emergency_contact_relationship !== undefined ? (emergency_contact_relationship || null) : profile.emergency_contact_relationship,
+      emergency_contact_phone:        emergency_contact_phone        !== undefined ? (emergency_contact_phone || null)        : profile.emergency_contact_phone,
+      highest_qualification:          highest_qualification          !== undefined ? (highest_qualification || null)          : profile.highest_qualification,
+      field_of_study:                 field_of_study                 !== undefined ? (field_of_study || null)                 : profile.field_of_study,
+      educational_institution:        educational_institution        !== undefined ? (educational_institution || null)        : profile.educational_institution,
+      previous_job_title:             previous_job_title             !== undefined ? (previous_job_title || null)             : profile.previous_job_title,
+      updated_at:                     new Date(),
+    });
+
+    await createAuditLog({
+      userId:      user_id,
+      actionType:  'EMPLOYEE_SELF_UPDATE',
+      description: `Employee (user_id ${user_id}) updated their own profile details.`,
+      ipAddress:   getIp(req),
+    });
+
+    return res.status(200).json({ success: true, message: 'Profile updated successfully.', data: profile });
+  } catch (error) {
+    console.error('[employeeController.updateMyProfile]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to update profile.' });
+  }
+};
+
 // =
 // =============================================================================
 // PATCH /api/employees/:id/toggle-status
@@ -626,14 +1017,26 @@ const toggleUserStatus = async (req, res) => {
 
 // =============================================================================
 // GET /api/employees/managers
-// Returns all active LINE_MANAGER accounts — used when creating employee profiles.
+// Returns all active LINE_MANAGER and HR_ADMIN accounts — used when creating
+// employee profiles. HR_ADMIN is included so HR staff can be assigned to the
+// HR Admin as their reporting manager.
 // FR-04 | NFR-03
 // =============================================================================
 const listManagers = async (req, res) => {
   try {
     const managers = await User.findAll({
-      where: { role: 'LINE_MANAGER', is_active: true },
-      attributes: ['user_id', 'first_name', 'last_name', 'email'],
+      where: { role: { [Op.in]: ['LINE_MANAGER', 'HR_ADMIN'] }, is_active: true },
+      attributes: ['user_id', 'first_name', 'last_name', 'email', 'role'],
+      // Spec s.4.2: include department_id and job_title so the frontend can
+      // cascade the manager dropdown by selected department and show job titles.
+      include: [
+        {
+          model: EmployeeProfile,
+          as: 'employeeProfile',
+          attributes: ['department_id', 'job_title'],
+          required: false,
+        },
+      ],
       order: [['first_name', 'ASC'], ['last_name', 'ASC']],
     });
 
@@ -673,6 +1076,8 @@ module.exports = {
   listEmployees,
   getEmployee,
   updateEmployeeProfile,
+  updateMyProfile,
+  updateMyAvatar,
   toggleUserStatus,
   listManagers,
   listAllUsers,

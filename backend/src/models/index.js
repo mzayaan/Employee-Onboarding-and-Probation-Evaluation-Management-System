@@ -1,12 +1,14 @@
 // =============================================================================
 // src/models/index.js
-// Loads all 24 Sequelize models and defines associations
+// Loads all 25 Sequelize models and defines associations
 // This is the single entry point for all model imports in the application.
 // Updated: added LeaveBalance model; added Director/Department manager
 //          associations for lecturer requirements
 // Updated: added Contract and HRDCTrainingLog models for Mauritius compliance
 //          (WRA 2019 probation rules, HRDC training levy tracking)
 // Updated: added TaxDeclaration model for MRA Employee Declaration Form (EDF)
+// Updated: added SystemConfig model for dynamic statutory minimum salary
+//          configuration (Spec s.2.2 — effective-dated salary baseline storage)
 // =============================================================================
 
 const sequelize = require('../config/database');
@@ -36,6 +38,7 @@ const LeaveBalance        = require('./LeaveBalance');
 const Contract            = require('./Contract');
 const HRDCTrainingLog     = require('./HRDCTrainingLog');
 const TaxDeclaration      = require('./TaxDeclaration');
+const SystemConfig        = require('./SystemConfig');
 
 // =============================================================================
 // ASSOCIATIONS
@@ -549,6 +552,20 @@ HRDCTrainingLog.belongsTo(EmployeeProfile, {
   as: 'employeeProfile',
 });
 
+// ── User (SYSTEM_ADMIN) ↔ SystemConfig (updated_by) ─────────────────────
+// Records which SYSTEM_ADMIN created each salary configuration row.
+// updated_by is nullable — the initial seed row has no actor.
+User.hasMany(SystemConfig, {
+  foreignKey: 'updated_by',
+  as: 'systemConfigs',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+SystemConfig.belongsTo(User, {
+  foreignKey: 'updated_by',
+  as: 'updatedByUser',
+});
+
 // =============================================================================
 // EXPORTS
 // =============================================================================
@@ -579,4 +596,5 @@ module.exports = {
   Contract,
   HRDCTrainingLog,
   TaxDeclaration,
+  SystemConfig,
 };

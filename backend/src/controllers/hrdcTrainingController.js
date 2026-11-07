@@ -329,10 +329,67 @@ const exportHRDCG1 = async (req, res) => {
   }
 };
 
+// =============================================================================
+// GET /api/hrdc-training/mine  (ANY authenticated user with an employee profile)
+// Returns the authenticated employee's own completed training log entries.
+//
+// Spec s.4.3: Mounted BEFORE the router-level HR_ADMIN guard so employees
+// can access their own records. profile_id is derived from req.user (not a
+// URL parameter) to prevent horizontal privilege escalation.
+//
+// Fields returned: course_name, training_provider, duration_hours,
+//                  completed_date, hrdc_approved_course_code.
+// Fields excluded: training_cost (sensitive HRDC levy data — HR eyes only).
+//
+// FR-NEW-03 | NFR-03 | Spec s.4.3
+// =============================================================================
+const getMyTrainingLogs = async (req, res) => {
+  try {
+    // Resolve the authenticated user's own employee profile
+    const profile = await EmployeeProfile.findOne({
+      where: { user_id: req.user.user_id },
+      attributes: ['profile_id'],
+    });
+
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message:
+          'No employee profile found for your account. ' +
+          'Only users with an associated employee profile can access training logs.',
+      });
+    }
+
+    const logs = await HRDCTrainingLog.findAll({
+      where:      { profile_id: profile.profile_id },
+      attributes: [
+        'training_id',
+        'course_name',
+        'training_provider',
+        'hrdc_approved_course_code',
+        'duration_hours',
+        'completed_date',
+        'created_at',
+        // training_cost deliberately excluded — Spec s.4.3
+      ],
+      order: [['completed_date', 'DESC']],
+    });
+
+    return res.json({ success: true, data: logs });
+  } catch (err) {
+    console.error('[hrdcTrainingController.getMyTrainingLogs]', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve your training logs.',
+    });
+  }
+};
+
 module.exports = {
   getTrainingLogs,
   getTrainingLogsByProfile,
   addTrainingLog,
   deleteTrainingLog,
   exportHRDCG1,
+  getMyTrainingLogs,
 };

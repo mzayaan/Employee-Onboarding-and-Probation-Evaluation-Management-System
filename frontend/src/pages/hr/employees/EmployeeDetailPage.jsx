@@ -606,8 +606,23 @@ export default function EmployeeDetailPage() {
   const [reportError,  setReportError]  = useState('')
 
   const [form, setForm] = useState({
+    // Employment & Role
     job_title: '', department_id: '', manager_id: '', phone: '',
     start_date: '', probation_end_date: '', onboarding_status: '',
+    employment_type: '', work_schedule_type: '', weekly_working_hours: '',
+    work_location: '', salary_scale_tier: '', next_line_of_promotion: '',
+    // Personal & Identity
+    nic_number: '', tax_account_number: '', date_of_birth: '', nationality: '',
+    id_document_type: '', passport_number: '', work_permit_details: '', work_authorisation_expiry: '',
+    // Address
+    address_line_1: '', address_line_2: '', locality: '', district: '', country: '', postal_code: '',
+    // Banking
+    bank_name: '', bank_account_number: '',
+    // Emergency Contact
+    emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '',
+    // Education & Previous Employment
+    highest_qualification: '', field_of_study: '', educational_institution: '',
+    previous_job_title: '', previous_company_name: '', employment_history_summary: '',
   })
 
   useEffect(() => {
@@ -623,13 +638,50 @@ export default function EmployeeDetailPage() {
         setDepartments(depts)
         setManagers(mgrs)
         setForm({
-          job_title:          emp.job_title         ?? '',
-          department_id:      emp.department_id      ?? '',
-          manager_id:         emp.manager_id         ?? '',
-          phone:              emp.phone              ?? '',
-          start_date:         emp.start_date         ? emp.start_date.slice(0, 10) : '',
-          probation_end_date: emp.probation_end_date ? emp.probation_end_date.slice(0, 10) : '',
-          onboarding_status:  emp.onboarding_status  ?? 'IN_PROGRESS',
+          // Employment & Role
+          job_title:              emp.job_title              ?? '',
+          department_id:          emp.department_id          ?? '',
+          manager_id:             emp.manager_id             ?? '',
+          phone:                  emp.phone                  ?? '',
+          start_date:             emp.start_date             ? emp.start_date.slice(0, 10) : '',
+          probation_end_date:     emp.probation_end_date     ? emp.probation_end_date.slice(0, 10) : '',
+          onboarding_status:      emp.onboarding_status      ?? 'IN_PROGRESS',
+          employment_type:        emp.employment_type        ?? '',
+          work_schedule_type:     emp.work_schedule_type     ?? '',
+          weekly_working_hours:   emp.weekly_working_hours   != null ? String(emp.weekly_working_hours) : '',
+          work_location:          emp.work_location          ?? '',
+          salary_scale_tier:      emp.salary_scale_tier      ?? '',
+          next_line_of_promotion: emp.next_line_of_promotion ?? '',
+          // Personal & Identity
+          nic_number:                emp.nic_number                ?? '',
+          tax_account_number:        emp.tax_account_number        ?? '',
+          date_of_birth:             emp.date_of_birth             ? emp.date_of_birth.slice(0, 10) : '',
+          nationality:               emp.nationality               ?? '',
+          id_document_type:          emp.id_document_type          ?? '',
+          passport_number:           emp.passport_number           ?? '',
+          work_permit_details:       emp.work_permit_details       ?? '',
+          work_authorisation_expiry: emp.work_authorisation_expiry ? emp.work_authorisation_expiry.slice(0, 10) : '',
+          // Address
+          address_line_1: emp.address_line_1 ?? '',
+          address_line_2: emp.address_line_2 ?? '',
+          locality:       emp.locality       ?? '',
+          district:       emp.district       ?? '',
+          country:        emp.country        ?? '',
+          postal_code:    emp.postal_code    ?? '',
+          // Banking
+          bank_name:           emp.bank_name           ?? '',
+          bank_account_number: emp.bank_account_number ?? '',
+          // Emergency Contact
+          emergency_contact_name:         emp.emergency_contact_name         ?? '',
+          emergency_contact_relationship: emp.emergency_contact_relationship ?? '',
+          emergency_contact_phone:        emp.emergency_contact_phone        ?? '',
+          // Education & Previous Employment
+          highest_qualification:     emp.highest_qualification     ?? '',
+          field_of_study:            emp.field_of_study            ?? '',
+          educational_institution:   emp.educational_institution   ?? '',
+          previous_job_title:        emp.previous_job_title        ?? '',
+          previous_company_name:     emp.previous_company_name     ?? '',
+          employment_history_summary: emp.employment_history_summary ?? '',
         })
       })
       .catch(() => setError('Failed to load employee details.'))
@@ -644,8 +696,12 @@ export default function EmployeeDetailPage() {
     try {
       const payload = {
         ...form,
-        department_id: form.department_id ? Number(form.department_id) : null,
-        manager_id:    form.manager_id    ? Number(form.manager_id)    : null,
+        department_id:        form.department_id        ? Number(form.department_id)        : null,
+        manager_id:           form.manager_id           ? Number(form.manager_id)           : null,
+        weekly_working_hours: form.weekly_working_hours ? Number(form.weekly_working_hours) : null,
+        // Blank strings become null for optional fields
+        date_of_birth:             form.date_of_birth             || null,
+        work_authorisation_expiry: form.work_authorisation_expiry || null,
       }
       await updateEmployeeProfile(id, payload)
       setSaveSuccess(true)
@@ -826,25 +882,99 @@ export default function EmployeeDetailPage() {
       {/* Read-only view (both roles) or edit form (HR Admin only) */}
       {(!editing || isManager) ? (
         <>
-          {/* Personal information card */}
+          {/* Employment & Role */}
           <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
-            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Personal Information</h2>
+            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Employment &amp; Role</h2>
             <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
-              <InfoField label="Email"          value={u.email} />
-              <InfoField label="Phone"          value={employee.phone} />
-              <InfoField label="Job Title"      value={employee.job_title} />
-              <InfoField label="Department"     value={employee.department?.name} />
+              <InfoField label="Work Email"      value={u.email} />
+              <InfoField label="Phone"           value={employee.phone} />
+              <InfoField label="Job Title"       value={employee.job_title} />
+              <InfoField label="Department"      value={employee.department?.name} />
               <InfoField
                 label="Manager"
                 value={employee.manager ? `${employee.manager.first_name} ${employee.manager.last_name}` : null}
               />
-              <InfoField label="Role"           value={u.role?.replace(/_/g, ' ')} />
-              <InfoField label="Start Date"     value={formatDate(employee.start_date)} />
-              <InfoField label="Probation Ends" value={formatDate(employee.probation_end_date)} />
-              <InfoField label="Account Status" value={u.is_active ? 'Active' : 'Inactive'} />
-              <InfoField label="Last Login"     value={formatDate(u.last_login_at)} />
-              <InfoField label="Member Since"   value={formatDate(u.created_at)} />
+              <InfoField label="Role"            value={u.role?.replace(/_/g, ' ')} />
+              <InfoField label="Start Date"      value={formatDate(employee.start_date)} />
+              <InfoField label="Probation Ends"  value={formatDate(employee.probation_end_date)} />
+              <InfoField label="Employment Type" value={employee.employment_type?.replace(/_/g, ' ')} />
+              <InfoField label="Work Schedule"   value={employee.work_schedule_type?.replace(/_/g, ' ')} />
+              <InfoField label="Weekly Hours"    value={employee.weekly_working_hours != null ? `${employee.weekly_working_hours} hrs` : null} />
+              <InfoField label="Work Location"   value={employee.work_location} />
+              <InfoField label="Salary Scale"    value={employee.salary_scale_tier} />
+              <InfoField label="Next Promotion"  value={employee.next_line_of_promotion} />
+              <InfoField label="Evaluation Status" value={employee.evaluation_status?.replace(/_/g, ' ')} />
+              <InfoField label="Account Status"  value={u.is_active ? 'Active' : 'Inactive'} />
+              <InfoField label="Last Login"      value={formatDate(u.last_login_at)} />
+              <InfoField label="Member Since"    value={formatDate(u.created_at)} />
             </div>
+          </div>
+
+          {/* Identity & Compliance */}
+          <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Identity &amp; Compliance</h2>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <InfoField label="NIC Number"           value={employee.nic_number} />
+              <InfoField label="Tax Account (TAN)"    value={employee.tax_account_number} />
+              <InfoField label="Date of Birth"        value={employee.date_of_birth ? formatDate(employee.date_of_birth) : null} />
+              <InfoField label="Nationality"          value={employee.nationality} />
+              <InfoField label="ID Document Type"     value={employee.id_document_type?.replace(/_/g, ' ')} />
+              <InfoField label="Passport Number"      value={employee.passport_number} />
+              <InfoField label="Work Permit Details"  value={employee.work_permit_details} />
+              <InfoField label="Work Auth. Expiry"    value={employee.work_authorisation_expiry ? formatDate(employee.work_authorisation_expiry) : null} />
+              <InfoField label="Personal Email"       value={employee.personal_email} />
+            </div>
+          </div>
+
+          {/* Address */}
+          <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Address</h2>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <InfoField label="Address Line 1" value={employee.address_line_1} />
+              <InfoField label="Address Line 2" value={employee.address_line_2} />
+              <InfoField label="Locality"       value={employee.locality} />
+              <InfoField label="District"       value={employee.district} />
+              <InfoField label="Country"        value={employee.country} />
+              <InfoField label="Postal Code"    value={employee.postal_code} />
+            </div>
+          </div>
+
+          {/* Banking Details */}
+          <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Banking Details</h2>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <InfoField label="Bank Name"           value={employee.bank_name} />
+              <InfoField label="Bank Account Number" value={employee.bank_account_number} />
+            </div>
+          </div>
+
+          {/* Emergency Contact */}
+          <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Emergency Contact</h2>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <InfoField label="Contact Name"     value={employee.emergency_contact_name} />
+              <InfoField label="Relationship"     value={employee.emergency_contact_relationship} />
+              <InfoField label="Contact Phone"    value={employee.emergency_contact_phone} />
+            </div>
+          </div>
+
+          {/* Education & Previous Employment */}
+          <div className="mb-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+            <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>Education &amp; Previous Employment</h2>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3">
+              <InfoField label="Highest Qualification"   value={employee.highest_qualification} />
+              <InfoField label="Field of Study"          value={employee.field_of_study} />
+              <InfoField label="Institution"             value={employee.educational_institution} />
+              <InfoField label="Previous Job Title"      value={employee.previous_job_title} />
+              <InfoField label="Previous Company"        value={employee.previous_company_name} />
+              <InfoField label="Previous Salary (MUR)"   value={employee.previous_salary_monthly != null ? Number(employee.previous_salary_monthly).toLocaleString() : null} />
+            </div>
+            {employee.employment_history_summary && (
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Employment History Summary</p>
+                <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{employee.employment_history_summary}</p>
+              </div>
+            )}
           </div>
 
           {/* Attendance records — HR Admin and Line Manager (FR-12) */}
@@ -879,89 +1009,280 @@ export default function EmployeeDetailPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          {/* ── Section: Employment & Role ───────────────────────────────── */}
+          <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide">Employment &amp; Role</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6">
             <div>
               <label htmlFor="edit-job-title" className="mb-1 block text-xs font-medium text-slate-600">Job Title *</label>
-              <input
-                id="edit-job-title"
-                type="text"
-                value={form.job_title}
-                onChange={set('job_title')}
-                required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
+              <input id="edit-job-title" type="text" value={form.job_title} onChange={set('job_title')} required
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
             </div>
             <div>
               <label htmlFor="edit-phone" className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
-              <input
-                id="edit-phone"
-                type="tel"
-                value={form.phone}
-                onChange={set('phone')}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
+              <input id="edit-phone" type="tel" value={form.phone} onChange={set('phone')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
             </div>
             <div>
               <label htmlFor="edit-department" className="mb-1 block text-xs font-medium text-slate-600">Department</label>
-              <select
-                id="edit-department"
-                value={form.department_id}
-                onChange={set('department_id')}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              >
+              <select id="edit-department" value={form.department_id} onChange={set('department_id')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
                 <option value="">— None —</option>
-                {departments.map((d) => (
-                  <option key={d.department_id} value={d.department_id}>{d.name}</option>
-                ))}
+                {departments.map((d) => (<option key={d.department_id} value={d.department_id}>{d.name}</option>))}
               </select>
             </div>
             <div>
               <label htmlFor="edit-manager" className="mb-1 block text-xs font-medium text-slate-600">Manager</label>
-              <select
-                id="edit-manager"
-                value={form.manager_id}
-                onChange={set('manager_id')}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              >
+              <select id="edit-manager" value={form.manager_id} onChange={set('manager_id')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
                 <option value="">— None —</option>
-                {managers.map((m) => (
-                  <option key={m.user_id} value={m.user_id}>{m.first_name} {m.last_name}</option>
-                ))}
+                {managers.map((m) => (<option key={m.user_id} value={m.user_id}>{m.first_name} {m.last_name}</option>))}
               </select>
             </div>
             <div>
               <label htmlFor="edit-start-date" className="mb-1 block text-xs font-medium text-slate-600">Start Date *</label>
-              <input
-                id="edit-start-date"
-                type="date"
-                value={form.start_date}
-                onChange={set('start_date')}
-                required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
+              <input id="edit-start-date" type="date" value={form.start_date} onChange={set('start_date')} required
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
             </div>
             <div>
               <label htmlFor="edit-probation-end" className="mb-1 block text-xs font-medium text-slate-600">Probation End Date *</label>
-              <input
-                id="edit-probation-end"
-                type="date"
-                value={form.probation_end_date}
-                onChange={set('probation_end_date')}
-                required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
+              <input id="edit-probation-end" type="date" value={form.probation_end_date} onChange={set('probation_end_date')} required
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
             </div>
             <div>
               <label htmlFor="edit-onboarding-status" className="mb-1 block text-xs font-medium text-slate-600">Onboarding Status</label>
-              <select
-                id="edit-onboarding-status"
-                value={form.onboarding_status}
-                onChange={set('onboarding_status')}
-                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              >
+              <select id="edit-onboarding-status" value={form.onboarding_status} onChange={set('onboarding_status')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
                 <option value="IN_PROGRESS">In Progress</option>
                 <option value="COMPLETED">Completed</option>
               </select>
+            </div>
+            <div>
+              <label htmlFor="edit-employment-type" className="mb-1 block text-xs font-medium text-slate-600">Employment Type</label>
+              <select id="edit-employment-type" value={form.employment_type} onChange={set('employment_type')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
+                <option value="">— None —</option>
+                <option value="FULL_TIME">Full Time</option>
+                <option value="PART_TIME">Part Time</option>
+                <option value="CONTRACT">Contract</option>
+                <option value="INTERN">Intern</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="edit-work-schedule" className="mb-1 block text-xs font-medium text-slate-600">Work Schedule</label>
+              <select id="edit-work-schedule" value={form.work_schedule_type} onChange={set('work_schedule_type')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
+                <option value="">— None —</option>
+                <option value="STANDARD">Standard</option>
+                <option value="SHIFT">Shift</option>
+                <option value="FLEXIBLE">Flexible</option>
+                <option value="REMOTE">Remote</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="edit-weekly-hours" className="mb-1 block text-xs font-medium text-slate-600">Weekly Working Hours</label>
+              <input id="edit-weekly-hours" type="number" min="1" max="80" value={form.weekly_working_hours} onChange={set('weekly_working_hours')}
+                placeholder="e.g. 40"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-work-location" className="mb-1 block text-xs font-medium text-slate-600">Work Location</label>
+              <input id="edit-work-location" type="text" value={form.work_location} onChange={set('work_location')}
+                placeholder="e.g. Head Office, Port Louis"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-salary-tier" className="mb-1 block text-xs font-medium text-slate-600">Salary Scale Tier</label>
+              <input id="edit-salary-tier" type="text" value={form.salary_scale_tier} onChange={set('salary_scale_tier')}
+                placeholder="e.g. Grade 3"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-next-promotion" className="mb-1 block text-xs font-medium text-slate-600">Next Line of Promotion</label>
+              <input id="edit-next-promotion" type="text" value={form.next_line_of_promotion} onChange={set('next_line_of_promotion')}
+                placeholder="e.g. Senior Developer"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+          </div>
+
+          {/* ── Section: Personal & Identity ─────────────────────────────── */}
+          <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide border-t border-slate-100 pt-5">Personal &amp; Identity</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6">
+            <div>
+              <label htmlFor="edit-nic" className="mb-1 block text-xs font-medium text-slate-600">NIC Number</label>
+              <input id="edit-nic" type="text" value={form.nic_number} onChange={set('nic_number')}
+                placeholder="e.g. T150498001234"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-tan" className="mb-1 block text-xs font-medium text-slate-600">Tax Account Number (TAN)</label>
+              <input id="edit-tan" type="text" value={form.tax_account_number} onChange={set('tax_account_number')}
+                placeholder="e.g. MU20000001"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-dob" className="mb-1 block text-xs font-medium text-slate-600">Date of Birth</label>
+              <input id="edit-dob" type="date" value={form.date_of_birth} onChange={set('date_of_birth')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-nationality" className="mb-1 block text-xs font-medium text-slate-600">Nationality</label>
+              <input id="edit-nationality" type="text" value={form.nationality} onChange={set('nationality')}
+                placeholder="e.g. Mauritian"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-id-type" className="mb-1 block text-xs font-medium text-slate-600">ID Document Type</label>
+              <select id="edit-id-type" value={form.id_document_type} onChange={set('id_document_type')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
+                <option value="">— None —</option>
+                <option value="NIC">NIC</option>
+                <option value="PASSPORT">Passport</option>
+                <option value="RESIDENCE_PERMIT">Residence Permit</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="edit-passport" className="mb-1 block text-xs font-medium text-slate-600">Passport Number</label>
+              <input id="edit-passport" type="text" value={form.passport_number} onChange={set('passport_number')}
+                placeholder="If applicable"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-work-permit" className="mb-1 block text-xs font-medium text-slate-600">Work Permit Details</label>
+              <input id="edit-work-permit" type="text" value={form.work_permit_details} onChange={set('work_permit_details')}
+                placeholder="Permit reference if applicable"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-work-auth-expiry" className="mb-1 block text-xs font-medium text-slate-600">Work Auth. Expiry</label>
+              <input id="edit-work-auth-expiry" type="date" value={form.work_authorisation_expiry} onChange={set('work_authorisation_expiry')}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+          </div>
+
+          {/* ── Section: Address ─────────────────────────────────────────── */}
+          <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide border-t border-slate-100 pt-5">Address</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6">
+            <div>
+              <label htmlFor="edit-addr1" className="mb-1 block text-xs font-medium text-slate-600">Address Line 1</label>
+              <input id="edit-addr1" type="text" value={form.address_line_1} onChange={set('address_line_1')}
+                placeholder="House / Apartment number, Street name"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-addr2" className="mb-1 block text-xs font-medium text-slate-600">Address Line 2</label>
+              <input id="edit-addr2" type="text" value={form.address_line_2} onChange={set('address_line_2')}
+                placeholder="Village / Building (optional)"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-locality" className="mb-1 block text-xs font-medium text-slate-600">Locality</label>
+              <input id="edit-locality" type="text" value={form.locality} onChange={set('locality')}
+                placeholder="e.g. Quatre Bornes"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-district" className="mb-1 block text-xs font-medium text-slate-600">District</label>
+              <input id="edit-district" type="text" value={form.district} onChange={set('district')}
+                placeholder="e.g. Plaines Wilhems"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-country" className="mb-1 block text-xs font-medium text-slate-600">Country</label>
+              <input id="edit-country" type="text" value={form.country} onChange={set('country')}
+                placeholder="e.g. Mauritius"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-postal-code" className="mb-1 block text-xs font-medium text-slate-600">Postal Code</label>
+              <input id="edit-postal-code" type="text" value={form.postal_code} onChange={set('postal_code')}
+                placeholder="e.g. 72201"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+          </div>
+
+          {/* ── Section: Banking ─────────────────────────────────────────── */}
+          <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide border-t border-slate-100 pt-5">Banking Details</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6">
+            <div>
+              <label htmlFor="edit-bank-name" className="mb-1 block text-xs font-medium text-slate-600">Bank Name</label>
+              <select id="edit-bank-name" value={form.bank_name} onChange={set('bank_name')}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100">
+                <option value="">— None —</option>
+                {['MCB','SBM','ABSA','MAUBANK','AfrAsia','BCP','HSBC'].map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="edit-bank-acc" className="mb-1 block text-xs font-medium text-slate-600">Bank Account Number</label>
+              <input id="edit-bank-acc" type="text" value={form.bank_account_number} onChange={set('bank_account_number')}
+                placeholder="Account number"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+          </div>
+
+          {/* ── Section: Emergency Contact ───────────────────────────────── */}
+          <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide border-t border-slate-100 pt-5">Emergency Contact</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6">
+            <div>
+              <label htmlFor="edit-ec-name" className="mb-1 block text-xs font-medium text-slate-600">Contact Name</label>
+              <input id="edit-ec-name" type="text" value={form.emergency_contact_name} onChange={set('emergency_contact_name')}
+                placeholder="e.g. Jane Doe"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-ec-rel" className="mb-1 block text-xs font-medium text-slate-600">Relationship</label>
+              <input id="edit-ec-rel" type="text" value={form.emergency_contact_relationship} onChange={set('emergency_contact_relationship')}
+                placeholder="e.g. Spouse, Parent"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-ec-phone" className="mb-1 block text-xs font-medium text-slate-600">Contact Phone</label>
+              <input id="edit-ec-phone" type="tel" value={form.emergency_contact_phone} onChange={set('emergency_contact_phone')}
+                placeholder="+230 5900 0000"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+          </div>
+
+          {/* ── Section: Education & Previous Employment ─────────────────── */}
+          <h3 className="mb-3 text-sm font-semibold text-slate-500 uppercase tracking-wide border-t border-slate-100 pt-5">Education &amp; Previous Employment</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-6">
+            <div>
+              <label htmlFor="edit-qualification" className="mb-1 block text-xs font-medium text-slate-600">Highest Qualification</label>
+              <input id="edit-qualification" type="text" value={form.highest_qualification} onChange={set('highest_qualification')}
+                placeholder="e.g. BSc Software Engineering"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-field-of-study" className="mb-1 block text-xs font-medium text-slate-600">Field of Study</label>
+              <input id="edit-field-of-study" type="text" value={form.field_of_study} onChange={set('field_of_study')}
+                placeholder="e.g. Computer Science"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-institution" className="mb-1 block text-xs font-medium text-slate-600">Educational Institution</label>
+              <input id="edit-institution" type="text" value={form.educational_institution} onChange={set('educational_institution')}
+                placeholder="e.g. University of Technology, Mauritius"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-prev-job" className="mb-1 block text-xs font-medium text-slate-600">Previous Job Title</label>
+              <input id="edit-prev-job" type="text" value={form.previous_job_title} onChange={set('previous_job_title')}
+                placeholder="e.g. Junior Developer"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div>
+              <label htmlFor="edit-prev-company" className="mb-1 block text-xs font-medium text-slate-600">Previous Company</label>
+              <input id="edit-prev-company" type="text" value={form.previous_company_name} onChange={set('previous_company_name')}
+                placeholder="e.g. Acme Corp"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="edit-emp-history" className="mb-1 block text-xs font-medium text-slate-600">Employment History Summary</label>
+              <textarea id="edit-emp-history" rows={3} value={form.employment_history_summary} onChange={set('employment_history_summary')}
+                placeholder="Brief summary of previous employment history"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-none" />
             </div>
           </div>
 

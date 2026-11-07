@@ -1,10 +1,16 @@
 // =============================================================================
 // src/seeders/seed.js
-// Development seed script — test users only.
-// Departments are already seeded directly in the database.
+// Lightweight user-only top-up seed (skips existing records).
+//
+// For a FULL fresh-database seed (5 depts, 5 managers with profiles,
+// 10 employees, tasks, evaluations, etc.) run:
+//   node src/scripts/reseed.js
+//
+// This script adds only the five core system users and is useful when
+// departments already exist and you only need to restore user accounts.
 // Run with:  node src/seeders/seed.js
 //
-// NEVER run this against a production database.
+// NEVER run against a production database.
 // =============================================================================
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
@@ -13,32 +19,37 @@ const bcrypt    = require('bcrypt')
 const sequelize = require('../config/database')
 const { User }  = require('../models')
 
+// Spec s.5 — Arabic Identity Mapping (seed re-dating)
+// All test profiles updated to traditional Arabic corporate identification
+// identities across all administrative testing tiers.
+// SYSTEM_ADMIN (Dev Admin) is unchanged as it is a technical account.
 const SEED_USERS = [
   {
     email:      'hr@onboard.dev',
     password:   'Password123!',
     role:       'HR_ADMIN',
-    first_name: 'Sarah',
-    last_name:  'Mitchell',
+    first_name: 'Tariq',
+    last_name:  'Al-Mansoor',
     is_active:  true,
   },
   {
     email:      'manager@onboard.dev',
     password:   'Password123!',
     role:       'LINE_MANAGER',
-    first_name: 'James',
-    last_name:  'Okonkwo',
+    first_name: 'Zayd',
+    last_name:  'Ibrahim',
     is_active:  true,
   },
   {
     email:      'employee@onboard.dev',
     password:   'Password123!',
     role:       'NEW_EMPLOYEE',
-    first_name: 'Priya',
-    last_name:  'Ramnarain',
+    first_name: 'Fatima',
+    last_name:  'Al-Zahra',
     is_active:  true,
   },
   {
+    // SYSTEM_ADMIN — technical account, identity unchanged
     email:      'admin@onboard.dev',
     password:   'Password123!',
     role:       'SYSTEM_ADMIN',
@@ -52,8 +63,8 @@ const SEED_USERS = [
     email:      'director@onboard.dev',
     password:   'Password123!',
     role:       'DIRECTOR',
-    first_name: 'Anand',
-    last_name:  'Lutchmun',
+    first_name: 'Hamza',
+    last_name:  'Rasheed',
     is_active:  true,
   },
 ]
@@ -81,11 +92,11 @@ async function seed() {
 
     console.log(`\n── Seed complete: ${created} created, ${skipped} skipped ──`)
     console.log('\nTest credentials (all use Password123!):')
-    console.log('  HR Admin     →  hr@onboard.dev')
-    console.log('  Line Manager →  manager@onboard.dev')
-    console.log('  New Employee →  employee@onboard.dev')
-    console.log('  System Admin →  admin@onboard.dev')
-    console.log('  Director     →  director@onboard.dev')
+    console.log('  HR Admin     →  hr@onboard.dev        (Tariq Al-Mansoor)')
+    console.log('  Line Manager →  manager@onboard.dev   (Zayd Ibrahim)')
+    console.log('  New Employee →  employee@onboard.dev  (Fatima Al-Zahra)')
+    console.log('  System Admin →  admin@onboard.dev     (Dev Admin)')
+    console.log('  Director     →  director@onboard.dev  (Hamza Rasheed)')
 
   } catch (err) {
     console.error('❌  Seed failed:', err.message)

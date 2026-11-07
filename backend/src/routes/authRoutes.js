@@ -9,7 +9,8 @@ const express      = require('express');
 const router       = express.Router();
 const rateLimit    = require('express-rate-limit');
 const authenticate = require('../middleware/authenticate');
-const { login, logout, getMe, forgotPassword, resetPassword, changePassword } = require('../controllers/authController');
+const uploadImage  = require('../middleware/uploadImage');
+const { login, logout, getMe, forgotPassword, resetPassword, changePassword, uploadProfileImage } = require('../controllers/authController');
 
 // ── Rate limiter for sensitive auth endpoints (NFR-02) ────────────────────────
 // Allows 10 attempts per 15-minute window per IP.  Helps mitigate brute-force
@@ -45,5 +46,10 @@ router.post('/reset-password', resetPassword);
 // POST /api/auth/change-password — protected (NFR-02 / BUG-09)
 // Authenticated user changes their own password — must supply the current one first.
 router.post('/change-password', authenticate, changePassword);
+
+// POST /api/auth/profile-image — protected (Spec s.4.1)
+// Upload or replace the authenticated user's profile photo.
+// Requires an employee profile to exist.  Stored in Cloudinary 'profile-images'.
+router.post('/profile-image', authenticate, uploadImage.single('profile_image'), uploadProfileImage);
 
 module.exports = router;

@@ -33,6 +33,11 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(100),
     allowNull: false,
   },
+  middle_name: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'Optional middle name. Display helper: show as "First Middle Last" only when non-null (spec s.2.5).',
+  },
   last_name: {
     type: DataTypes.STRING(100),
     allowNull: false,

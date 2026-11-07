@@ -126,6 +126,7 @@ const directorRoutes        = require('./routes/directorRoutes');
 const contractRoutes        = require('./routes/contractRoutes');
 const taxDeclarationRoutes  = require('./routes/taxDeclarationRoutes');
 const hrdcTrainingRoutes    = require('./routes/hrdcTrainingRoutes');
+const systemConfigRoutes    = require('./routes/systemConfigRoutes');
 
 app.use('/api/auth',              authRoutes);
 app.use('/api/departments',       departmentRoutes);
@@ -145,6 +146,7 @@ app.use('/api/director',          directorRoutes);
 app.use('/api/contracts',         contractRoutes);
 app.use('/api/tax-declarations',  taxDeclarationRoutes);
 app.use('/api/hrdc-training',     hrdcTrainingRoutes);
+app.use('/api/system-config',     systemConfigRoutes);
 
 // =============================================================================
 // 404 HANDLER

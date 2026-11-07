@@ -140,15 +140,15 @@ const assignManager = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Department not found.' });
     }
 
-    // Validate the manager exists and is an active LINE_MANAGER
+    // Validate the manager exists and is an active LINE_MANAGER or HR_ADMIN
     const manager = await User.findOne({
-      where: { user_id: manager_id, role: 'LINE_MANAGER', is_active: true },
+      where: { user_id: manager_id, role: { [Op.in]: ['LINE_MANAGER', 'HR_ADMIN'] }, is_active: true },
       attributes: ['user_id', 'first_name', 'last_name', 'email'],
     });
     if (!manager) {
       return res.status(404).json({
         success: false,
-        message: 'The specified user does not exist, is not a Line Manager, or is inactive.',
+        message: 'The specified user does not exist, is not an active Line Manager or HR Administrator.',
       });
     }
 

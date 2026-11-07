@@ -10,8 +10,10 @@ import { useState, useEffect } from 'react'
 import { useNavigate }         from 'react-router-dom'
 import { useAuth }             from '@/context/AuthContext'
 import AppShell                from '@/components/shared/AppShell'
+import AvatarUpload             from '@/components/shared/AvatarUpload'
 import { getMe }               from '@/api/authApi'
-import { UserCircle, Loader2 } from 'lucide-react'
+import { uploadMyAvatar }      from '@/api/employeeApi'
+import { Loader2 }             from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const ROLE_LABELS = {
@@ -51,9 +53,12 @@ function Row({ label, value }) {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+// Roles that have an EmployeeProfile and may upload a profile photo
+const AVATAR_ROLES = ['NEW_EMPLOYEE', 'LINE_MANAGER', 'HR_ADMIN', 'DIRECTOR']
+
 export default function ProfilePage() {
-  const navigate    = useNavigate()
-  const { user }    = useAuth()
+  const navigate           = useNavigate()
+  const { user, refreshProfile } = useAuth()
 
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
@@ -82,13 +87,33 @@ export default function ProfilePage() {
   return (
     <AppShell>
       {/* Page header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div
-          className="flex h-10 w-10 items-center justify-center rounded-lg flex-shrink-0"
-          style={{ backgroundColor: '#e8f0fb' }}
-        >
-          <UserCircle className="h-5 w-5" style={{ color: '#3d7dd3' }} />
-        </div>
+      <div className="flex items-center gap-4 mb-6">
+        {AVATAR_ROLES.includes(user?.role) ? (
+          <AvatarUpload
+            firstName={data?.user?.first_name || user?.first_name}
+            lastName={data?.user?.last_name  || user?.last_name}
+            imageUrl={data?.employeeProfile?.profile_image_url}
+            onUpload={uploadMyAvatar}
+            onSuccess={async () => {
+              refreshProfile()
+              // Re-fetch so local display stays in sync
+              try {
+                const res = await getMe()
+                setData(res)
+              } catch { /* silent */ }
+            }}
+            size={56}
+          />
+        ) : (
+          <div
+            className="flex h-14 w-14 items-center justify-center rounded-full flex-shrink-0"
+            style={{ backgroundColor: '#e8f0fb' }}
+          >
+            <span className="text-lg font-bold" style={{ color: '#3d7dd3' }}>
+              {(user?.first_name?.[0] || '') + (user?.last_name?.[0] || '')}
+            </span>
+          </div>
+        )}
         <div>
           <h1 className="text-xl font-bold text-slate-800">My Profile</h1>
           <p className="text-sm text-slate-500">Your account and employment details</p>

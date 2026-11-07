@@ -102,6 +102,12 @@ import TaxDeclarationPage   from '@/pages/employee/TaxDeclarationPage'
 import ContractSigningPage  from '@/pages/employee/ContractSigningPage'
 // HRDC G1 Training Log — HR Admin panel
 import HRDCTrainingPage     from '@/pages/hr/hrdc/HRDCTrainingPage'
+// System Config — SYSTEM_ADMIN minimum salary management (Spec s.1.3)
+import SystemConfigPage     from '@/pages/admin/SystemConfigPage'
+// My Training — NEW_EMPLOYEE own training records (Spec s.4.3)
+import MyTrainingPage       from '@/pages/employee/training/MyTrainingPage'
+// My Profile — NEW_EMPLOYEE self-service profile completion (Spec s.2.3.1, s.4.4)
+import MyProfilePage        from '@/pages/employee/profile/MyProfilePage'
 
 // Root redirect — sends authenticated users to their dashboard
 function RootRedirect() {
@@ -202,6 +208,10 @@ export default function App() {
             <Route path="/employee/tax-declaration"    element={<TaxDeclarationPage />} />
             {/* Compliance — Contract review and digital signing */}
             <Route path="/employee/contract"           element={<ContractSigningPage />} />
+            {/* Spec s.4.3 — employee own training records */}
+            <Route path="/employee/training"           element={<MyTrainingPage />} />
+            {/* Spec s.2.3.1, s.4.4 — employee self-service profile completion */}
+            <Route path="/employee/profile"            element={<MyProfilePage />} />
           </Route>
 
           {/* ── System Administrator ───────────────────────────────── */}
@@ -212,6 +222,8 @@ export default function App() {
             <Route path="/admin/audit-log"      element={<AuditLogPage />} />
             {/* FR-01: User management — view all accounts, activate/deactivate */}
             <Route path="/admin/users"          element={<UserManagementPage />} />
+            {/* Spec s.1.3 — minimum salary configuration */}
+            <Route path="/admin/system-config"  element={<SystemConfigPage />} />
           </Route>
 
           {/* ── Notifications — all authenticated roles (FR-09) ───────── */}

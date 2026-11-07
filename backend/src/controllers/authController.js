@@ -143,18 +143,49 @@ const getMe = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    // For NEW_EMPLOYEE, include their employment profile details
+    // Spec s.4.1: include EmployeeProfile for all roles that have one, so the
+    // top-nav consolidated profile block can show job_title and profile_image_url.
+    // For NEW_EMPLOYEE the full profile is returned; for other roles a minimal
+    // subset (job_title, profile_image_url, department name) is included.
     let employeeProfile = null;
+
     if (user.role === 'NEW_EMPLOYEE') {
       employeeProfile = await EmployeeProfile.findOne({
         where: { user_id: user.user_id },
-        attributes: ['job_title', 'phone', 'start_date', 'probation_end_date', 'onboarding_status'],
+        attributes: [
+          'profile_id', 'job_title', 'phone', 'start_date', 'probation_end_date',
+          'onboarding_status', 'profile_image_url',
+          // Employment details (shown read-only on MyProfilePage)
+          'employment_type', 'work_schedule_type', 'weekly_working_hours', 'work_location',
+          // Identity & compliance (shown read-only on MyProfilePage)
+          'nic_number', 'tax_account_number', 'date_of_birth', 'nationality',
+          'id_document_type', 'passport_number',
+          // Banking details (shown read-only on MyProfilePage)
+          'bank_name', 'bank_account_number',
+          // Address (shown read-only on MyProfilePage)
+          'address_line_1', 'address_line_2', 'locality', 'district', 'country',
+          // Salary (shown read-only on MyProfilePage)
+          'salary_monthly',
+          // Employee-editable fields (editable on MyProfilePage)
+          'personal_email',
+          'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
+          'highest_qualification', 'field_of_study', 'educational_institution',
+          'previous_job_title',
+        ],
         include: [{
           model: Department,
           as: 'department',
           attributes: ['name'],
         }],
       });
+    } else {
+      // HR_ADMIN, LINE_MANAGER, DIRECTOR, SYSTEM_ADMIN may also have an
+      // EmployeeProfile created by HR (not mandatory — required: false).
+      employeeProfile = await EmployeeProfile.findOne({
+        where: { user_id: user.user_id },
+        attributes: ['profile_id', 'job_title', 'profile_image_url'],
+        required: false,
+      }) || null;
     }
 
     return res.status(200).json({ success: true, user, employeeProfile });
@@ -338,4 +369,89 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { login, logout, getMe, forgotPassword, resetPassword, changePassword };
+// =============================================================================
+// POST /api/auth/profile-image
+// Upload or replace the authenticated user's profile image.
+//
+// Spec s.4.1: profile image stored in Cloudinary under the 'profile-images'
+// folder; URL saved to EmployeeProfile.profile_image_url.
+// If the user has no EmployeeProfile, a 404 is returned.
+// The old Cloudinary image is deleted when a new one replaces it.
+//
+// FR-04 (profile management) | NFR-02, NFR-08
+// =============================================================================
+const uploadProfileImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No image file provided.' });
+    }
+
+    const profile = await EmployeeProfile.findOne({ where: { user_id: req.user.user_id } });
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: 'No employee profile found for this account.',
+      });
+    }
+
+    const { uploadToCloudinary, deleteFromCloudinary } = require('../utils/cloudinary');
+
+    // Delete the old profile image from Cloudinary if one exists
+    if (profile.profile_image_url) {
+      try {
+        // Extract public_id from the existing URL
+        // Cloudinary URLs look like: https://res.cloudinary.com/<cloud>/image/upload/v.../profile-images/<id>
+        const urlParts = profile.profile_image_url.split('/');
+        const publicIdWithExt = urlParts.slice(urlParts.indexOf('profile-images')).join('/');
+        const publicId = publicIdWithExt.replace(/\.[^.]+$/, ''); // strip extension
+        await deleteFromCloudinary(publicId);
+      } catch {
+        // Non-fatal: proceed even if old image deletion fails
+      }
+    }
+
+    // Upload new image to Cloudinary (public access — profile images are not sensitive)
+    const cloudinary = require('cloudinary').v2;
+    const { Readable } = require('stream');
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder:          'profile-images',
+          public_id:       `user_${req.user.user_id}_${Date.now()}`,
+          resource_type:   'image',
+          access_mode:     'public',
+          overwrite:       true,
+          transformation:  [{ width: 256, height: 256, crop: 'fill', gravity: 'face' }],
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        }
+      );
+      const readable = new Readable();
+      readable.push(req.file.buffer);
+      readable.push(null);
+      readable.pipe(stream);
+    });
+
+    await profile.update({ profile_image_url: uploadResult.secure_url });
+
+    await createAuditLog({
+      userId:      req.user.user_id,
+      actionType:  'UPDATE_PROFILE_IMAGE',
+      description: `Profile image updated for user ${req.user.user_id}.`,
+    });
+
+    return res.json({
+      success: true,
+      message: 'Profile image updated.',
+      profile_image_url: uploadResult.secure_url,
+    });
+  } catch (error) {
+    console.error('[authController.uploadProfileImage]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to upload profile image.' });
+  }
+};
+
+module.exports = { login, logout, getMe, forgotPassword, resetPassword, changePassword, uploadProfileImage };

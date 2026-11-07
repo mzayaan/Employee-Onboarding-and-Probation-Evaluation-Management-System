@@ -48,6 +48,19 @@ export const deleteTrainingLog = (trainingId) =>
   api.delete(`/hrdc-training/${trainingId}`).then((r) => r.data)
 
 /**
+ * Fetch the authenticated employee's own completed training records.
+ * NEW_EMPLOYEE access — returns only records belonging to the caller's profile.
+ * Spec s.4.3
+ */
+export const getMyTrainingLogs = () =>
+  api.get('/hrdc-training/mine')
+    .then((r) => r.data.data)
+    .catch((err) => {
+      if (err?.response?.status === 404) return []
+      throw err
+    })
+
+/**
  * Download the HRDC G1 Training Log PDF export.
  * Returns a Blob (application/pdf) ready for client-side download.
  * HR Admin access only.

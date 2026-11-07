@@ -65,6 +65,12 @@ const Contract = sequelize.define('Contract', {
     allowNull: true,
     comment: 'Date the employee signed the contract — null until signed.',
   },
+  // Spec s.2.6 — contract end date (conditional on FIXED_TERM)
+  contract_end_date: {
+    type:      DataTypes.DATEONLY,
+    allowNull: true,
+    comment:   'Fixed-term contract end date. Required when contract_type = FIXED_TERM. Triggers 30-day advance-warning notification (spec s.2.6). Validated in service layer.',
+  },
   cloudinary_url: {
     type: DataTypes.STRING(500),
     allowNull: true,
