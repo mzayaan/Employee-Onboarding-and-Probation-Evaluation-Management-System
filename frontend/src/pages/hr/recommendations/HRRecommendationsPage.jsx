@@ -22,9 +22,10 @@ import {
   endorseRecommendation,
   returnToManagerByHR,
 } from '@/api/directorApi'
+import { downloadReport } from '@/api/reportApi'
 import {
   ClipboardCheck, Loader2, AlertCircle, CheckCircle2,
-  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, RefreshCw,
+  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, RefreshCw, FileDown,
 } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -245,6 +246,29 @@ function PendingRow({ rec, onRefresh }) {
 
 // ── All-recommendations mini-table ────────────────────────────────────────────
 function AllRecommendationsTable({ recs }) {
+  const [downloadingId, setDownloadingId] = useState(null)
+  const [dlErr,         setDlErr]         = useState(null)
+
+  const handleDownload = async (r) => {
+    const periodId = r.probationPeriod?.period_id
+    if (!periodId) return
+    setDownloadingId(r.rec_id); setDlErr(null)
+    try {
+      const blob = await downloadReport(periodId)
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      const empName = `${r.probationPeriod?.employeeProfile?.user?.first_name ?? 'employee'}-${r.probationPeriod?.employeeProfile?.user?.last_name ?? ''}`.toLowerCase().replace(/\s+/g, '-')
+      a.download = `probation-report-${empName}-${periodId}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setDlErr('Report download failed. It may not have been generated yet.')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
   if (!recs.length) return null
   return (
     <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
@@ -252,6 +276,11 @@ function AllRecommendationsTable({ recs }) {
         <h3 className="font-semibold text-slate-800">All Recommendations</h3>
         <p className="mt-0.5 text-xs text-slate-400">Full history — all stages</p>
       </div>
+      {dlErr && (
+        <div className="mx-6 mt-4 flex items-center gap-2 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-700 ring-1 ring-red-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" /> {dlErr}
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -260,11 +289,14 @@ function AllRecommendationsTable({ recs }) {
             <th className="px-5 py-3 text-left">Score</th>
             <th className="px-5 py-3 text-left">Status</th>
             <th className="px-5 py-3 text-left">Submitted</th>
+            <th className="px-5 py-3 text-left">Report</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {recs.map((r) => {
             const emp = r.probationPeriod?.employeeProfile
+            const isApproved = r.approval_status === 'APPROVED'
+            const isDownloading = downloadingId === r.rec_id
             return (
               <tr key={r.rec_id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="px-5 py-3 font-medium text-slate-700">
@@ -277,6 +309,21 @@ function AllRecommendationsTable({ recs }) {
                 </td>
                 <td className="px-5 py-3"><StatusBadge status={r.approval_status} /></td>
                 <td className="px-5 py-3 text-slate-400 whitespace-nowrap">{fmtDate(r.generated_at)}</td>
+                <td className="px-5 py-3">
+                  {isApproved && (
+                    <button
+                      type="button"
+                      disabled={isDownloading}
+                      onClick={() => handleDownload(r)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                    >
+                      {isDownloading
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <FileDown className="h-3.5 w-3.5" />}
+                      PDF
+                    </button>
+                  )}
+                </td>
               </tr>
             )
           })}

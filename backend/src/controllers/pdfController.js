@@ -21,6 +21,7 @@ const {
   PerformanceNote,
   AttendanceRecord,
   GeneratedReport,
+  DevelopmentReview,
 } = require('../models');
 const { createAuditLog } = require('../utils/auditLogger');
 
@@ -190,6 +191,24 @@ const generateReport = async (req, res) => {
     if (role === 'LINE_MANAGER' && period.employeeProfile?.manager_id !== user_id) {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
+
+    // ── Fetch Director user (for Authorisation block) ─────────────────────
+    const finalRecForDirector = period.finalRecommendation;
+    let directorUser = null;
+    if (finalRecForDirector?.director_id) {
+      directorUser = await User.findByPk(finalRecForDirector.director_id, {
+        attributes: ['first_name', 'last_name'],
+      });
+    }
+
+    // ── Fetch Development Reviews for this employee ───────────────────────
+    const empProfileId = period.employeeProfile?.profile_id;
+    const devReviews = empProfileId
+      ? await DevelopmentReview.findAll({
+          where: { profile_id: empProfileId },
+          order: [['created_at', 'ASC']],
+        })
+      : [];
 
     // ── Business rule: Director must have approved the recommendation ────────
     // Lecturer requirement: PDF generation is locked until the Director gives
@@ -610,38 +629,195 @@ const generateReport = async (req, res) => {
          .text('No performance notes recorded during this probation period.', MARGIN, doc.y).restore();
       doc.moveDown(0.8);
     } else {
-      allNotes.slice(0, 2).forEach((note) => {
-        ensureSpace(doc, 34);
+      allNotes.forEach((note) => {
+        // Height depends on whether KPI data exists
+        const hasKpi = note.kpi_score != null || note.kpi_target != null || note.kpi_actual != null;
+        const noteH  = hasKpi ? 52 : 36;
+        ensureSpace(doc, noteH + 6);
         const noteY = doc.y;
 
-        // Left-border accent
-        doc.rect(MARGIN, noteY, 3, 24).fill(ACCENT);
+        // Left-border accent (colour by category)
+        const catColours = {
+          PERFORMANCE: ACCENT,
+          ATTENDANCE:  AMBER,
+          CONDUCT:     RED_C,
+          ACHIEVEMENT: GREEN,
+          GENERAL:     GREY,
+        };
+        const accentC = catColours[note.note_category] || ACCENT;
+        doc.rect(MARGIN, noteY, 3, noteH).fill(accentC);
 
-        // Checkpoint label chip
-        const chipTxt = (note._cpLabel || 'General').toUpperCase();
-        doc.save().fillColor(ACCENT).font('Helvetica-Bold').fontSize(6.5)
-           .text(chipTxt, MARGIN + 8, noteY, { width: 90 }).restore();
+        // Category chip + checkpoint label
+        const catLabel = (note.note_category || 'GENERAL').replace(/_/g, ' ');
+        const chipTxt  = `${catLabel}  ·  ${(note._cpLabel || 'General').toUpperCase()}`;
+        doc.save().fillColor(accentC).font('Helvetica-Bold').fontSize(6.5)
+           .text(chipTxt, MARGIN + 8, noteY + 2, { width: cW - 16 }).restore();
 
         // Recorder name + date
         const recorderName = note.recorder
           ? `${note.recorder.first_name} ${note.recorder.last_name}`
           : 'System';
+        const empFlag = note.is_employee_feedback ? '  [Employee Feedback]' : '';
         doc.save().fillColor(LGREY).font('Helvetica').fontSize(6.5)
-           .text(`${recorderName}  ·  ${fmtDate(note.created_at)}`, MARGIN + 8, noteY + 10, { width: cW - 16 }).restore();
+           .text(`${recorderName}${empFlag}  ·  ${fmtDate(note.created_at)}`, MARGIN + 8, noteY + 12, { width: cW - 16 }).restore();
 
         // Note body
         doc.save().fillColor(DARK).font('Helvetica').fontSize(8)
-           .text(note.note_text || '', MARGIN + 8, noteY + 18, { width: cW - 16, ellipsis: true })
+           .text(note.note_text || '', MARGIN + 8, noteY + 20, { width: hasKpi ? cW * 0.6 - 16 : cW - 16, ellipsis: true })
            .restore();
 
-        doc.y = Math.max(doc.y, noteY + 28) + 4;
+        // KPI data (right side, same row as note text)
+        if (hasKpi) {
+          const kpiX = MARGIN + cW * 0.62;
+          const kpiW = cW * 0.38 - 8;
+          doc.rect(kpiX, noteY + 18, kpiW, 24).fill('#f0f9ff');
+          doc.save().fillColor(LGREY).font('Helvetica-Bold').fontSize(6)
+             .text('KPI', kpiX + 4, noteY + 20, { width: kpiW }).restore();
+          const kpiParts = [];
+          if (note.kpi_score  != null) kpiParts.push(`Score: ${Number(note.kpi_score).toFixed(1)}/5`);
+          if (note.kpi_target != null) kpiParts.push(`Target: ${note.kpi_target}`);
+          if (note.kpi_actual != null) kpiParts.push(`Actual: ${note.kpi_actual}`);
+          doc.save().fillColor(DARK).font('Helvetica').fontSize(7.5)
+             .text(kpiParts.join('   '), kpiX + 4, noteY + 28, { width: kpiW }).restore();
+        }
+
+        doc.y = Math.max(doc.y, noteY + noteH) + 5;
       });
     }
 
     // =================================================================
-    // SECTION 5 — FINAL RECOMMENDATION
+    // SECTION 5 — DEVELOPMENT REVIEWS
     // =================================================================
-    sectionHeader(doc, '5. Final Recommendation');
+    sectionHeader(doc, '5. Development Reviews');
+
+    if (devReviews.length === 0) {
+      ensureSpace(doc, 20);
+      doc.save().fillColor(LGREY).font('Helvetica').fontSize(9)
+         .text('No development reviews recorded during this probation period.', MARGIN, doc.y).restore();
+      doc.moveDown(0.6);
+    } else {
+      devReviews.forEach((dr) => {
+        ensureSpace(doc, 72);
+        const drY = doc.y;
+        doc.rect(MARGIN, drY, cW, 68).fill('#f8fafc');
+        doc.rect(MARGIN, drY, 3, 68).fill('#6366f1');  // indigo accent
+
+        // Date + balance rating
+        const drDate = fmtDate(dr.created_at);
+        const rating = dr.work_life_balance_rating || 'Not assessed';
+        const ratingColour = {
+          'Well Balanced':      GREEN,
+          'Mostly Balanced':    '#3b82f6',
+          'Somewhat Unbalanced': AMBER,
+          'Very Unbalanced':    RED_C,
+        }[rating] || GREY;
+
+        doc.save().fillColor(LGREY).font('Helvetica').fontSize(6.5)
+           .text(drDate, MARGIN + 8, drY + 4, { width: cW - 16 }).restore();
+        doc.save().fillColor(ratingColour).font('Helvetica-Bold').fontSize(7.5)
+           .text(`Work-Life Balance: ${rating}`, MARGIN + 8, drY + 13, { width: cW - 16 }).restore();
+
+        // Three columns: Workload | Professional Balance | Actions
+        const colW = (cW - 24) / 3;
+        const cols = [
+          { label: 'Workload Assessment', value: dr.workload_assessment },
+          { label: 'Professional Balance', value: dr.professional_balance_notes },
+          { label: 'Actions to Balance', value: dr.actions_to_balance },
+        ];
+        cols.forEach(({ label, value }, ci) => {
+          const cx = MARGIN + 8 + ci * (colW + 8);
+          doc.save().fillColor(LGREY).font('Helvetica-Bold').fontSize(6)
+             .text(label.toUpperCase(), cx, drY + 24, { width: colW }).restore();
+          doc.save().fillColor(DARK).font('Helvetica').fontSize(7)
+             .text(value || '—', cx, drY + 32, { width: colW, height: 24, ellipsis: true }).restore();
+        });
+
+        // Next review date + acknowledgement
+        const ackTxt = dr.employee_acknowledgement
+          ? `Acknowledged by employee: ${fmtDate(dr.employee_acknowledgement_date)}`
+          : 'Employee acknowledgement pending';
+        const nextTxt = dr.next_review_date ? `Next review: ${fmtDate(dr.next_review_date)}` : '';
+        doc.save().fillColor(LGREY).font('Helvetica').fontSize(6.5)
+           .text(`${ackTxt}${nextTxt ? '   ·   ' + nextTxt : ''}`, MARGIN + 8, drY + 58, { width: cW - 16 }).restore();
+
+        doc.y = drY + 72;
+      });
+    }
+
+    // =================================================================
+    // SECTION 6 — ATTENDANCE SUMMARY
+    // =================================================================
+    sectionHeader(doc, '6. Attendance Summary');
+    {
+      const attRecords = period.attendanceRecords || [];
+      if (attRecords.length === 0) {
+        ensureSpace(doc, 20);
+        doc.save().fillColor(LGREY).font('Helvetica').fontSize(9)
+           .text('No attendance records found for this probation period.', MARGIN, doc.y).restore();
+        doc.moveDown(0.6);
+      } else {
+        // Tally each status
+        const tally = {};
+        attRecords.forEach(({ status }) => { tally[status] = (tally[status] || 0) + 1; });
+        const total = attRecords.length;
+
+        const ATT_ROWS = [
+          { key: 'PRESENT',         label: 'Present',          colour: GREEN   },
+          { key: 'ABSENT',          label: 'Absent',           colour: RED_C   },
+          { key: 'LATE',            label: 'Late',             colour: AMBER   },
+          { key: 'HALF_DAY',        label: 'Half Day',         colour: AMBER   },
+          { key: 'SICK_LEAVE',      label: 'Sick Leave',       colour: '#3b82f6' },
+          { key: 'ANNUAL_LEAVE',    label: 'Annual Leave',     colour: '#3b82f6' },
+          { key: 'VACATION_LEAVE',  label: 'Vacation Leave',   colour: '#3b82f6' },
+          { key: 'MATERNITY_LEAVE', label: 'Maternity Leave',  colour: '#8b5cf6' },
+          { key: 'PATERNITY_LEAVE', label: 'Paternity Leave',  colour: '#8b5cf6' },
+          { key: 'SPECIAL_LEAVE',   label: 'Special Leave',    colour: '#8b5cf6' },
+          { key: 'PUBLIC_HOLIDAY',  label: 'Public Holiday',   colour: GREY    },
+        ].filter(({ key }) => tally[key] > 0);
+
+        ensureSpace(doc, ATT_ROWS.length * 14 + 24);
+        const attY0 = doc.y;
+
+        // Header
+        doc.rect(MARGIN, attY0, cW, 13).fill(DARK);
+        doc.save().fillColor(WHITE).font('Helvetica-Bold').fontSize(7)
+           .text('STATUS', MARGIN + 6, attY0 + 4, { width: 160 }).restore();
+        doc.save().fillColor(WHITE).font('Helvetica-Bold').fontSize(7)
+           .text('COUNT', MARGIN + 180, attY0 + 4, { width: 60, align: 'center' }).restore();
+        doc.save().fillColor(WHITE).font('Helvetica-Bold').fontSize(7)
+           .text('% OF TOTAL', MARGIN + 260, attY0 + 4, { width: 80, align: 'center' }).restore();
+        doc.save().fillColor(WHITE).font('Helvetica-Bold').fontSize(7)
+           .text('BAR', MARGIN + 360, attY0 + 4, { width: cW - 360 - 6 }).restore();
+
+        let attRowY = attY0 + 13;
+        ATT_ROWS.forEach(({ key, label, colour }, idx) => {
+          if (idx % 2 === 1) doc.rect(MARGIN, attRowY, cW, 13).fill('#f8fafc');
+          const count = tally[key] || 0;
+          const pct   = total > 0 ? (count / total) : 0;
+          doc.save().fillColor(DARK).font('Helvetica').fontSize(7.5)
+             .text(label, MARGIN + 6, attRowY + 3, { width: 160 }).restore();
+          doc.save().fillColor(DARK).font('Helvetica-Bold').fontSize(7.5)
+             .text(String(count), MARGIN + 180, attRowY + 3, { width: 60, align: 'center' }).restore();
+          doc.save().fillColor(GREY).font('Helvetica').fontSize(7.5)
+             .text(`${(pct * 100).toFixed(1)}%`, MARGIN + 260, attRowY + 3, { width: 80, align: 'center' }).restore();
+          progressBar(doc, MARGIN + 360, attRowY + 5, cW - 366, pct, colour);
+          attRowY += 13;
+        });
+
+        // Total row
+        doc.rect(MARGIN, attRowY, cW, 13).fill(NAVY);
+        doc.save().fillColor(WHITE).font('Helvetica-Bold').fontSize(7.5)
+           .text('TOTAL RECORDS', MARGIN + 6, attRowY + 3, { width: 160 }).restore();
+        doc.save().fillColor(WHITE).font('Helvetica-Bold').fontSize(7.5)
+           .text(String(total), MARGIN + 180, attRowY + 3, { width: 60, align: 'center' }).restore();
+        doc.y = attRowY + 17;
+      }
+    }
+
+    // =================================================================
+    // SECTION 7 — FINAL RECOMMENDATION
+    // =================================================================
+    sectionHeader(doc, '7. Final Recommendation');
     ensureSpace(doc, 60);
 
     const recType   = finalRec?.recommendation_type ?? null;
@@ -674,7 +850,7 @@ const generateReport = async (req, res) => {
     doc.y = recBoxY + 64;
 
     // =================================================================
-    // RECOMMENDATION THRESHOLD LEGEND
+    // RECOMMENDATION THRESHOLD LEGEND (Section 7 continued)
     // =================================================================
     {
       const THRESHOLDS = [
@@ -703,55 +879,66 @@ const generateReport = async (req, res) => {
     }
 
     // =================================================================
-    // SECTION 6 — AUTHORISATION & SIGNATURES
+    // SECTION 8 — AUTHORISATION & SIGNATURES
     // =================================================================
-    sectionHeader(doc, '6. Authorisation & Signatures');
+    sectionHeader(doc, '8. Authorisation & Signatures');
     {
-      const SIG_GAP = 12;
-      const sigW    = (cW - SIG_GAP * 2) / 3;
-      const sigH    = 60;
+      const SIG_GAP = 10;
+      const sigW    = (cW - SIG_GAP * 3) / 4;   // 4 blocks now
+      const sigH    = 70;
       const sigY    = doc.y;
 
-      const hrAdminName = role === 'HR_ADMIN'
-        ? `${first_name} ${last_name}`
-        : 'HR Administrator';
+      ensureSpace(doc, sigH + 16);
+
+      const hrAdminName    = role === 'HR_ADMIN' ? `${first_name} ${last_name}` : 'HR Administrator';
+      const directorName   = directorUser
+        ? `${directorUser.first_name} ${directorUser.last_name}`
+        : 'Director';
+      const directorDate   = finalRec?.director_decision_at
+        ? fmtDate(finalRec.director_decision_at)
+        : fmtDate(new Date());
 
       const sigBlocks = [
-        { name: managerName,  sigRole: 'Line Manager',             date: fmtDate(new Date()), pending: false },
-        { name: hrAdminName,  sigRole: 'HR Administrator',         date: fmtDate(new Date()), pending: false },
-        { name: employeeName, sigRole: 'Employee Acknowledgement', date: 'Date: Pending',      pending: true  },
+        { name: managerName,   sigRole: 'Line Manager',             date: fmtDate(new Date()), pending: false, approved: true  },
+        { name: hrAdminName,   sigRole: 'HR Administrator',         date: fmtDate(new Date()), pending: false, approved: true  },
+        { name: directorName,  sigRole: 'Director (Final Approval)', date: directorDate,        pending: false, approved: true  },
+        { name: employeeName,  sigRole: 'Employee Acknowledgement',  date: 'Date: Pending',     pending: true,  approved: false },
       ];
 
-      sigBlocks.forEach(({ name, sigRole, date, pending }, i) => {
+      sigBlocks.forEach(({ name, sigRole, date, pending, approved }, i) => {
         const sx = MARGIN + i * (sigW + SIG_GAP);
-        // Box border
-        doc.rect(sx, sigY, sigW, sigH).fillAndStroke('#f8fafc', BORDER);
+
+        // Box — green tint for approved, amber tint for pending
+        const boxBg = approved ? '#f0fdf4' : '#fffbeb';
+        const boxBd = approved ? '#86efac' : '#fcd34d';
+        doc.rect(sx, sigY, sigW, sigH).fillAndStroke(boxBg, boxBd);
+
+        // Approved badge (top-right corner)
+        if (approved) {
+          doc.rect(sx + sigW - 46, sigY + 4, 42, 10).fill('#dcfce7');
+          doc.save().fillColor(GREEN).font('Helvetica-Bold').fontSize(5.5)
+             .text('✓ APPROVED', sx + sigW - 46, sigY + 6, { width: 42, align: 'center' }).restore();
+        }
+
         // Signature line
-        doc.moveTo(sx + 10, sigY + 26)
-           .lineTo(sx + sigW - 10, sigY + 26)
-           .lineWidth(0.5)
-           .strokeColor('#cbd5e1')
-           .stroke();
+        doc.moveTo(sx + 8, sigY + 30)
+           .lineTo(sx + sigW - 8, sigY + 30)
+           .lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+
         // Name
-        doc.save()
-           .fillColor(DARK)
-           .font('Helvetica-Bold')
-           .fontSize(8)
-           .text(name, sx + 10, sigY + 30, { width: sigW - 20 })
-           .restore();
+        doc.save().fillColor(DARK).font('Helvetica-Bold').fontSize(7.5)
+           .text(name, sx + 8, sigY + 34, { width: sigW - 16 }).restore();
+
         // Role label
-        doc.save()
-           .fillColor(GREY)
-           .font('Helvetica')
-           .fontSize(7)
-           .text(sigRole, sx + 10, sigY + 42, { width: sigW - 20 })
-           .restore();
+        doc.save().fillColor(GREY).font('Helvetica').fontSize(6.5)
+           .text(sigRole, sx + 8, sigY + 46, { width: sigW - 16 }).restore();
+
         // Date
         doc.save()
            .fillColor(pending ? AMBER : LGREY)
            .font(pending ? 'Helvetica-Bold' : 'Helvetica')
-           .fontSize(7)
-           .text(date, sx + 10, sigY + 50, { width: sigW - 20 })
+           .fontSize(6.5)
+           .text(date, sx + 8, sigY + 57, { width: sigW - 16 })
            .restore();
       });
 

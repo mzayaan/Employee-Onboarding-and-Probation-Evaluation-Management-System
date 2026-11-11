@@ -1,10 +1,10 @@
 // =============================================================================
 // src/api/contractApi.js
-// API calls for employee contract records and MRA tax declarations.
+// API calls for employee contract records.
 //
-// Endpoints served by the backend Contract model (contracts table).
+// MRA tax declaration calls have been moved to taxDeclarationApi.js.
 //
-// FR-04 (extended) | FR-NEW-02 (MRA EDF) | WRA 2019 s.13
+// FR-04 (extended) | WRA 2019 s.13
 // =============================================================================
 
 import api from './axiosInstance'
@@ -43,31 +43,4 @@ export const createContract = (payload) =>
 export const signContract = (contractId, payload) =>
   api.patch(`/contracts/${contractId}/sign`, payload).then((r) => r.data)
 
-// ── MRA Employee Tax Declaration ──────────────────────────────────────────────
-
-/**
- * Fetch the existing MRA tax declaration for the authenticated employee.
- * Returns null when no declaration has been submitted yet (graceful empty state).
- */
-export const getMyTaxDeclaration = () =>
-  api.get('/tax-declarations/mine')
-    .then((r) => r.data.data)
-    .catch((err) => {
-      if (err?.response?.status === 404) return null
-      throw err
-    })
-
-/**
- * Submit or update the MRA Employee Declaration Form (EDF) for the
- * authenticated employee.
- *
- * Payload shape:
- * {
- *   declaration_category: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G',
- *   num_dependants: number,
- *   spouse_employed: boolean,
- *   declaration_date: 'YYYY-MM-DD',
- * }
- */
-export const submitTaxDeclaration = (payload) =>
-  api.post('/tax-declarations', payload).then((r) => r.data)
+// MRA Employee Tax Declaration functions have been moved to taxDeclarationApi.js

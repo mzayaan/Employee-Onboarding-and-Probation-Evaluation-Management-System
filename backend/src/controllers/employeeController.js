@@ -1068,6 +1068,64 @@ const listAllUsers = async (req, res) => {
 
 
 // =============================================================================
+// GET /api/employees/me/leave-balance       — NEW_EMPLOYEE (own record)
+// GET /api/employees/:profileId/leave-balance — HR_ADMIN, LINE_MANAGER
+//
+// Returns the LeaveBalance record for the specified employee and the current
+// calendar year. If a record for the current year does not yet exist (e.g. the
+// employee was onboarded in a previous year and no year-end rollover has been
+// run), it falls back to the most recent year available.
+//
+// FR-04 (extended) | WRA 2019 s.45–47 | NFR-03
+// =============================================================================
+async function getLeaveBalance(req, res) {
+  try {
+    const { role, profileId: callerProfileId } = req.user;
+    let targetProfileId;
+
+    if (req.params.profileId) {
+      // HR / Manager path: :profileId supplied in URL
+      targetProfileId = Number(req.params.profileId);
+    } else {
+      // Self-service path: /me/leave-balance
+      targetProfileId = callerProfileId;
+    }
+
+    if (!targetProfileId) {
+      return res.status(400).json({ success: false, message: 'Profile ID could not be determined.' });
+    }
+
+    // NEW_EMPLOYEE may only fetch their own balance
+    if (role === 'NEW_EMPLOYEE' && targetProfileId !== callerProfileId) {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+
+    const currentYear = new Date().getFullYear();
+
+    // Try current year first; fall back to most recent available year
+    let balance = await LeaveBalance.findOne({
+      where: { profile_id: targetProfileId, year: currentYear },
+    });
+
+    if (!balance) {
+      balance = await LeaveBalance.findOne({
+        where: { profile_id: targetProfileId },
+        order: [['year', 'DESC']],
+      });
+    }
+
+    if (!balance) {
+      return res.status(404).json({ success: false, message: 'No leave balance record found for this employee.' });
+    }
+
+    return res.json({ success: true, data: balance });
+  } catch (err) {
+    console.error('[getLeaveBalance]', err);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve leave balance.' });
+  }
+}
+
+// =============================================================================
 // EXPORTS
 // =============================================================================
 
@@ -1081,6 +1139,7 @@ module.exports = {
   toggleUserStatus,
   listManagers,
   listAllUsers,
+  getLeaveBalance,
   // Exported so documentController and taskController can trigger auto-completion
   checkOnboardingCompletion,
 };

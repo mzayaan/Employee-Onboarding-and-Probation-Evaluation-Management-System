@@ -20,9 +20,10 @@ import {
   listMyRecommendations,
   resubmitRecommendation,
 } from '@/api/directorApi'
+import { downloadReport } from '@/api/reportApi'
 import {
   BadgeCheck, Loader2, AlertCircle, CheckCircle2,
-  ChevronDown, ChevronUp, RefreshCw, RotateCcw,
+  ChevronDown, ChevronUp, RefreshCw, RotateCcw, FileDown,
 } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,15 +64,37 @@ function RecBadge({ type }) {
 
 // ── Expandable recommendation row ────────────────────────────────────────────
 function RecRow({ rec, onRefresh }) {
-  const [open,  setOpen]  = useState(false)
-  const [notes, setNotes] = useState('')
-  const [busy,  setBusy]  = useState(false)
-  const [err,   setErr]   = useState('')
-  const [ok,    setOk]    = useState(false)
+  const [open,     setOpen]     = useState(false)
+  const [notes,    setNotes]    = useState('')
+  const [busy,     setBusy]     = useState(false)
+  const [err,      setErr]      = useState('')
+  const [ok,       setOk]       = useState(false)
+  const [pdfBusy,  setPdfBusy]  = useState(false)
+  const [pdfErr,   setPdfErr]   = useState('')
 
   const emp    = rec.probationPeriod?.employeeProfile
   const period = rec.probationPeriod
   const canResubmit = rec.approval_status === 'RETURNED_TO_MANAGER'
+
+  const handleDownloadPdf = async () => {
+    const periodId = rec.probationPeriod?.period_id
+    if (!periodId) return
+    setPdfBusy(true); setPdfErr('')
+    try {
+      const blob = await downloadReport(periodId)
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      const empName = `${emp?.user?.first_name ?? 'employee'}-${emp?.user?.last_name ?? ''}`.toLowerCase().replace(/\s+/g, '-')
+      a.download = `probation-report-${empName}-${periodId}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setPdfErr('Report download failed. The report may not have been generated yet.')
+    } finally {
+      setPdfBusy(false)
+    }
+  }
 
   const handleResubmit = async () => {
     if (!notes.trim()) {
@@ -185,6 +208,28 @@ function RecRow({ rec, onRefresh }) {
               <p className="font-medium text-slate-700">{fmtDate(rec.director_decision_at)}</p>
             </div>
           </div>
+
+          {/* PDF download — available once approved */}
+          {rec.approval_status === 'APPROVED' && (
+            <div>
+              {pdfErr && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-50 px-4 py-2 text-xs text-red-700 ring-1 ring-red-200">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" /> {pdfErr}
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={pdfBusy}
+                onClick={handleDownloadPdf}
+                className="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50 transition-colors"
+              >
+                {pdfBusy
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <FileDown className="h-4 w-4" />}
+                Download Evaluation Report (PDF)
+              </button>
+            </div>
+          )}
 
           {/* Success banner */}
           {ok && (

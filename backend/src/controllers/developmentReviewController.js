@@ -6,7 +6,8 @@
 // =============================================================================
 
 const { DevelopmentReview, EmployeeProfile, User, EvaluationCheckpoint } = require('../models');
-const { createAuditLog } = require('../utils/auditLogger');
+const { createAuditLog }        = require('../utils/auditLogger');
+const { createNotification }    = require('../services/notificationService');
 
 // ── Helper: include config ─────────────────────────────────────────────────
 const REVIEW_INCLUDE = [
@@ -79,6 +80,22 @@ exports.createReview = async (req, res) => {
     });
 
     const full = await DevelopmentReview.findByPk(review.review_id, { include: REVIEW_INCLUDE });
+
+    // Notify the employee that a development review has been created for them
+    EmployeeProfile.findByPk(profile_id, { attributes: ['user_id'] })
+      .then((ep) => {
+        if (!ep) return;
+        const reviewerName = `${req.user.first_name} ${req.user.last_name}`;
+        createNotification({
+          userId:            ep.user_id,
+          type:              'DEVELOPMENT_REVIEW_CREATED',
+          message:           `A development review has been created for you by ${reviewerName}. Please log in to review and acknowledge it.`,
+          relatedEntityType: 'development_review',
+          relatedEntityId:   review.review_id,
+        }).catch(() => {});
+      })
+      .catch(() => {});
+
     return res.status(201).json({ success: true, data: full });
   } catch (err) {
     console.error('createReview error:', err);
@@ -244,6 +261,19 @@ exports.acknowledgeReview = async (req, res) => {
     });
 
     const updated = await DevelopmentReview.findByPk(reviewId, { include: REVIEW_INCLUDE });
+
+    // Notify the reviewer (manager/HR) that the employee has acknowledged the review
+    if (review.reviewed_by) {
+      const empName = `${req.user.first_name} ${req.user.last_name}`;
+      createNotification({
+        userId:            review.reviewed_by,
+        type:              'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
+        message:           `${empName} has acknowledged their development review.`,
+        relatedEntityType: 'development_review',
+        relatedEntityId:   review.review_id,
+      }).catch(() => {});
+    }
+
     return res.json({ success: true, data: updated });
   } catch (err) {
     console.error('acknowledgeReview error:', err);

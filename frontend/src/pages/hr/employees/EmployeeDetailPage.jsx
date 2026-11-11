@@ -15,17 +15,20 @@ import { getProbationByProfile } from '@/api/evaluationApi'
 import { downloadReport } from '@/api/reportApi'
 import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X, ClipboardList, PlusCircle, BarChart3, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import { getContractByProfile, createContract } from '@/api/contractApi'
-
-// ── Attendance status display config ──────────────────────────────────────────
-const ATTENDANCE_STATUS = {
-  PRESENT:  { label: 'Present',  bg: '#dcfce7', color: '#15803d' },
-  ABSENT:   { label: 'Absent',   bg: '#fee2e2', color: '#b91c1c' },
-  LATE:     { label: 'Late',     bg: '#fef9c3', color: '#854d0e' },
-  HALF_DAY: { label: 'Half Day', bg: '#e0e7ff', color: '#3730a3' },
-}
+import { getLeaveBalanceByProfile } from '@/api/leaveBalanceApi'
+import {
+  CalendarHeatmap,
+  ExceptionsTable,
+  STATUS_OPTIONS,
+  STATUS_GROUPS,
+} from '@/components/attendance/AttendanceHeatmap'
 
 // ── Attendance section sub-component (FR-12) ──────────────────────────────────
-function AttendanceSection({ periodId }) {
+// Props:
+//   periodId  — FK to probation_periods (required)
+//   startDate — YYYY-MM-DD period start for heatmap range (optional)
+//   endDate   — YYYY-MM-DD period end for heatmap range (optional)
+function AttendanceSection({ periodId, startDate, endDate }) {
   const [records,    setRecords]    = useState([])
   const [loading,    setLoading]    = useState(true)
   const [showForm,   setShowForm]   = useState(false)
@@ -36,7 +39,7 @@ function AttendanceSection({ periodId }) {
   useEffect(() => {
     if (!periodId) { setLoading(false); return }
     getAttendanceByPeriod(periodId)
-      .then(setRecords)
+      .then((data) => setRecords(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [periodId])
@@ -47,9 +50,8 @@ function AttendanceSection({ periodId }) {
     setSubmitting(true); setFormErr('')
     try {
       await addAttendanceRecord({ period_id: periodId, ...form })
-      // Re-fetch so the recorder association (first_name, last_name) is populated
       const updated = await getAttendanceByPeriod(periodId)
-      setRecords(updated)
+      setRecords(Array.isArray(updated) ? updated : [])
       setForm({ record_date: '', status: 'PRESENT', notes: '' })
       setShowForm(false)
     } catch (err) {
@@ -62,8 +64,9 @@ function AttendanceSection({ periodId }) {
   if (!periodId) return null
 
   return (
-    <div className="rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ClipboardList className="h-5 w-5" style={{ color: '#1e3a5f' }} />
           <h2 className="text-base font-semibold" style={{ color: '#0f1c2e' }}>Attendance Records</h2>
@@ -74,12 +77,13 @@ function AttendanceSection({ periodId }) {
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
         >
           <PlusCircle className="h-3.5 w-3.5" />
-          Add Record
+          {showForm ? 'Cancel' : 'Add Record'}
         </button>
       </div>
 
+      {/* Inline add-record form (collapsed by default) */}
       {showForm && (
-        <form onSubmit={handleAdd} className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+        <form onSubmit={handleAdd} className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
           {formErr && <p className="text-xs text-red-600">{formErr}</p>}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -88,6 +92,7 @@ function AttendanceSection({ periodId }) {
                 id="emp-att-date"
                 type="date"
                 value={form.record_date}
+                max={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setForm((f) => ({ ...f, record_date: e.target.value }))}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
@@ -100,8 +105,12 @@ function AttendanceSection({ periodId }) {
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               >
-                {Object.entries(ATTENDANCE_STATUS).map(([k, v]) => (
-                  <option key={k} value={k}>{v.label}</option>
+                {STATUS_GROUPS.map((group) => (
+                  <optgroup key={group} label={group}>
+                    {STATUS_OPTIONS.filter((o) => o.group === group).map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </div>
@@ -125,7 +134,7 @@ function AttendanceSection({ periodId }) {
               style={{ backgroundColor: '#1e3a5f' }}
             >
               {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              {submitting ? 'Saving…' : 'Save'}
+              {submitting ? 'Saving…' : 'Save Record'}
             </button>
             <button
               type="button"
@@ -138,44 +147,21 @@ function AttendanceSection({ periodId }) {
         </form>
       )}
 
+      {/* Loading / heatmap + exceptions */}
       {loading ? (
-        <p className="text-sm text-slate-400">Loading attendance records…</p>
-      ) : records.length === 0 ? (
-        <p className="text-sm text-slate-400">No attendance records yet. Click &ldquo;Add Record&rdquo; to begin.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
-                <th className="pb-2 pr-4">Date</th>
-                <th className="pb-2 pr-4">Status</th>
-                <th className="pb-2 pr-4">Notes</th>
-                <th className="pb-2">Recorded By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {records.map((r) => {
-                const cfg = ATTENDANCE_STATUS[r.status] || ATTENDANCE_STATUS.PRESENT
-                return (
-                  <tr key={r.record_id} className="border-b border-slate-50 hover:bg-slate-50">
-                    <td className="py-2.5 pr-4 font-medium text-slate-700">
-                      {new Date(r.record_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                    </td>
-                    <td className="py-2.5 pr-4">
-                      <span className="rounded-full px-2.5 py-0.5 text-xs font-medium" style={{ backgroundColor: cfg.bg, color: cfg.color }}>
-                        {cfg.label}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-4 text-slate-500">{r.notes || <span className="text-slate-300">—</span>}</td>
-                    <td className="py-2.5 text-slate-500">
-                      {r.recorder ? `${r.recorder.first_name} ${r.recorder.last_name}` : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="flex items-center gap-2 py-4 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading attendance records…
         </div>
+      ) : (
+        <>
+          <CalendarHeatmap
+            records={records}
+            startIso={startDate ? startDate.slice(0, 10) : null}
+            endIso={endDate   ? endDate.slice(0, 10)   : null}
+            compact
+          />
+          <ExceptionsTable records={records} compact />
+        </>
       )}
     </div>
   )
@@ -662,6 +648,94 @@ const ONBOARDING_BADGE = {
   COMPLETED:   { label: 'Onboarding Completed',   bg: '#dcfce7', color: '#15803d' },
 }
 
+// ── Leave balance section (FR-04 extended | WRA 2019 s.45–47) ────────────────
+// Shows the employee's annual, sick and vacation leave entitlements and usage
+// for the current calendar year. Available to HR Admin and Line Manager.
+function LeaveBalanceSection({ profileId }) {
+  const [balance, setBalance] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [err,     setErr]     = useState(null)
+
+  useEffect(() => {
+    if (!profileId) { setLoading(false); return }
+    getLeaveBalanceByProfile(profileId)
+      .then((data) => { setBalance(data); setLoading(false) })
+      .catch(() => { setErr('Failed to load leave balance.'); setLoading(false) })
+  }, [profileId])
+
+  const LeaveRow = ({ label, entitled, used, accumulated }) => {
+    const remaining = Math.max(0, (entitled ?? 0) - (used ?? 0) + (accumulated ?? 0))
+    const pct = entitled > 0 ? Math.min(100, ((used ?? 0) / entitled) * 100) : 0
+    return (
+      <div className="rounded-lg bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs font-semibold text-slate-600">{label}</span>
+          <span className="text-xs text-slate-400">{(used ?? 0).toFixed(1)} / {(entitled ?? 0).toFixed(1)} days used</span>
+        </div>
+        <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-400' : pct >= 60 ? 'bg-amber-400' : 'bg-green-400'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <div className="mt-1 flex items-center justify-between">
+          <span className="text-xs text-slate-400">
+            {accumulated > 0 && <span className="mr-1 text-blue-600">+{accumulated.toFixed(1)} accumulated</span>}
+            {remaining.toFixed(1)} days remaining
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+      <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>
+        Leave Balance — WRA 2019
+      </h2>
+      {loading ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading leave balance…
+        </div>
+      ) : err ? (
+        <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-700 ring-1 ring-red-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" /> {err}
+        </div>
+      ) : !balance ? (
+        <p className="text-sm text-slate-400">No leave balance record found for this employee.</p>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400 mb-1">Year: {balance.year}</p>
+          <LeaveRow
+            label="Annual Leave (s.45)"
+            entitled={balance.annual_leave_entitled}
+            used={balance.annual_leave_used}
+            accumulated={0}
+          />
+          <LeaveRow
+            label="Sick Leave (s.46)"
+            entitled={balance.sick_leave_entitled}
+            used={balance.sick_leave_used}
+            accumulated={balance.sick_leave_accumulated ?? 0}
+          />
+          {balance.vacation_leave_eligible ? (
+            <LeaveRow
+              label="Vacation Leave (s.47)"
+              entitled={balance.vacation_leave_entitled}
+              used={balance.vacation_leave_used}
+              accumulated={0}
+            />
+          ) : (
+            <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-400 ring-1 ring-slate-100">
+              Vacation Leave (s.47) — not eligible (salary above MUR 50,000/month threshold)
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function EmployeeDetailPage() {
   const { id }           = useParams()
   const navigate         = useNavigate()
@@ -1056,13 +1130,17 @@ export default function EmployeeDetailPage() {
           {/* FRONT-ISSUE-1 fix: use ACTIVE period first, fall back to most recent —
               same logic as handleDownloadReport. Using periods[0] (oldest) was wrong
               for employees whose probation has been extended (multiple periods). */}
-          <AttendanceSection
-            periodId={(() => {
-              const periods = employee?.probationPeriods ?? []
-              const p = periods.find((x) => x.status === 'ACTIVE') ?? periods[periods.length - 1]
-              return p?.period_id ?? null
-            })()}
-          />
+          {(() => {
+            const periods = employee?.probationPeriods ?? []
+            const p = periods.find((x) => x.status === 'ACTIVE') ?? periods[periods.length - 1]
+            return (
+              <AttendanceSection
+                periodId={p?.period_id ?? null}
+                startDate={p?.start_date ?? null}
+                endDate={p?.end_date ?? null}
+              />
+            )
+          })()}
 
           {/* Probation checkpoint scores — HR Admin (FR-13, FR-14, FR-16) */}
           <ProbationCheckpointsSection profileId={employee.profile_id} />
@@ -1071,6 +1149,9 @@ export default function EmployeeDetailPage() {
           {!isManager && (
             <ContractSection profileId={employee.profile_id} />
           )}
+
+          {/* Leave balance — HR Admin + Line Manager (FR-04 extended | WRA 2019 s.45–47) */}
+          <LeaveBalanceSection profileId={employee.profile_id} />
         </>
       ) : (
         /* Edit form — HR Admin only */

@@ -7,7 +7,8 @@
 // =============================================================================
 
 const { PerformanceNote, EmployeeProfile, User, EvaluationCheckpoint } = require('../models');
-const { createAuditLog } = require('../utils/auditLogger');
+const { createAuditLog }     = require('../utils/auditLogger');
+const { createNotification } = require('../services/notificationService');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -98,6 +99,22 @@ const createNote = async (req, res) => {
       description: `[NOTE_CREATED] Performance note created for profile_id ${profile_id} (note_id: ${note.note_id}).`,
       ipAddress:   getIp(req),
     });
+
+    // Notify the employee that a performance note has been added to their profile
+    EmployeeProfile.findByPk(Number(profile_id), { attributes: ['user_id'] })
+      .then((ep) => {
+        if (!ep) return;
+        const recorderName = `${req.user.first_name} ${req.user.last_name}`;
+        const categoryLabel = note_category && note_category !== 'GENERAL' ? ` (${note_category.replace(/_/g, ' ')})` : '';
+        createNotification({
+          userId:            ep.user_id,
+          type:              'PERFORMANCE_NOTE_ADDED',
+          message:           `A performance note${categoryLabel} has been added to your profile by ${recorderName}.`,
+          relatedEntityType: 'performance_note',
+          relatedEntityId:   note.note_id,
+        }).catch(() => {});
+      })
+      .catch(() => {});
 
     return res.status(201).json({ success: true, message: 'Performance note created.', data: note });
   } catch (error) {
@@ -312,6 +329,18 @@ const addEmployeeFeedback = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
+    // Notify the employee's line manager that feedback has been submitted
+    if (profile.manager_id) {
+      const empName = `${req.user.first_name} ${req.user.last_name}`;
+      createNotification({
+        userId:            profile.manager_id,
+        type:              'PERFORMANCE_NOTE_ADDED',
+        message:           `${empName} has submitted employee feedback on their performance record. Please log in to review it.`,
+        relatedEntityType: 'performance_note',
+        relatedEntityId:   created.note_id,
+      }).catch(() => {});
+    }
+
     return res.status(201).json({ success: true, message: 'Feedback submitted.', data: note });
   } catch (error) {
     console.error('[performanceNoteController.addEmployeeFeedback]', error.message);
@@ -358,6 +387,18 @@ const respondToNote = async (req, res) => {
       description: `[EMPLOYEE_RESPONSE_ADDED] Employee responded to note_id ${noteId}.`,
       ipAddress:   getIp(req),
     });
+
+    // Notify the note's recorder that the employee has responded
+    if (note.recorded_by && note.recorded_by !== userId) {
+      const empName = `${req.user.first_name} ${req.user.last_name}`;
+      createNotification({
+        userId:            note.recorded_by,
+        type:              'PERFORMANCE_NOTE_RESPONDED',
+        message:           `${empName} has responded to your performance note.`,
+        relatedEntityType: 'performance_note',
+        relatedEntityId:   note.note_id,
+      }).catch(() => {});
+    }
 
     return res.json({ success: true, message: 'Response saved.', data: note });
   } catch (error) {

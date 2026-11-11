@@ -286,7 +286,7 @@ const runPendingDocumentReminders = async () => {
         {
           model: User,
           as: 'user',
-          attributes: ['email', 'first_name'],
+          attributes: ['user_id', 'email', 'first_name'],
           where: { is_active: true },
         },
         {
@@ -314,6 +314,18 @@ const runPendingDocumentReminders = async () => {
         firstName:    profile.user.first_name,
         pendingTypes: missing.map((rt) => ({ name: rt.name })),
       });
+
+      // FR-09: Also create an in-app notification so the reminder appears in the bell
+      // (consistent with Jobs 1 and 2 which always pair email + in-app)
+      if (profile.user.user_id) {
+        await createNotification({
+          userId:            profile.user.user_id,
+          type:              'DOCUMENT_PENDING',
+          message:           `Reminder: you have ${missing.length} required document${missing.length !== 1 ? 's' : ''} still pending submission: ${missing.map((rt) => rt.name).join(', ')}.`,
+          relatedEntityType: null,
+          relatedEntityId:   null,
+        });
+      }
     }
 
     console.log(`[Notifications] Pending document reminder job completed for ${profiles.length} profile(s) checked.`);

@@ -11,47 +11,24 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import AppShell from '@/components/shared/AppShell'
+import {
+  CalendarHeatmap,
+  ExceptionsTable,
+  STATUS_OPTIONS,
+  STATUS_GROUPS,
+} from '@/components/attendance/AttendanceHeatmap'
 import { addAttendanceRecord, getAttendanceByPeriod } from '@/api/attendanceApi'
 import {
   CalendarDays, ChevronLeft, Loader2, AlertCircle,
   CheckCircle2, Plus, ClipboardList,
 } from 'lucide-react'
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helper ────────────────────────────────────────────────────────────────────
 const fmtDate = (iso) => {
   if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-// Full WRA 2019 leave-type ENUM (matches AttendanceRecord.status in backend)
-// Grouped with a separator for usability in the <select>
-const STATUS_OPTIONS = [
-  // Attendance
-  { value: 'PRESENT',         label: 'Present',                    colour: 'bg-emerald-100 text-emerald-700', group: 'Attendance' },
-  { value: 'ABSENT',          label: 'Absent',                     colour: 'bg-red-100     text-red-700',     group: 'Attendance' },
-  { value: 'LATE',            label: 'Late',                       colour: 'bg-amber-100   text-amber-700',   group: 'Attendance' },
-  { value: 'HALF_DAY',        label: 'Half Day',                   colour: 'bg-blue-100    text-blue-700',    group: 'Attendance' },
-  // WRA 2019 statutory leave
-  { value: 'SICK_LEAVE',      label: 'Sick Leave (WRA s.46)',      colour: 'bg-orange-100  text-orange-700',  group: 'WRA 2019 Leave' },
-  { value: 'ANNUAL_LEAVE',    label: 'Annual Leave (WRA s.45)',    colour: 'bg-teal-100    text-teal-700',    group: 'WRA 2019 Leave' },
-  { value: 'VACATION_LEAVE',  label: 'Vacation Leave (WRA s.47)', colour: 'bg-cyan-100    text-cyan-700',    group: 'WRA 2019 Leave' },
-  { value: 'MATERNITY_LEAVE', label: 'Maternity Leave (WRA s.48)','colour': 'bg-pink-100   text-pink-700',    group: 'WRA 2019 Leave' },
-  { value: 'PATERNITY_LEAVE', label: 'Paternity Leave (WRA s.49)','colour': 'bg-violet-100 text-violet-700',  group: 'WRA 2019 Leave' },
-  { value: 'SPECIAL_LEAVE',   label: 'Special Leave',              colour: 'bg-indigo-100  text-indigo-700',  group: 'WRA 2019 Leave' },
-  // Public holiday
-  { value: 'PUBLIC_HOLIDAY',  label: 'Public Holiday',             colour: 'bg-slate-100   text-slate-600',   group: 'Other' },
-]
-
-// Groups for <optgroup> rendering in the status <select>
-const STATUS_GROUPS = ['Attendance', 'WRA 2019 Leave', 'Other']
-
-function StatusBadge({ status }) {
-  const opt = STATUS_OPTIONS.find((o) => o.value === status) || STATUS_OPTIONS[0]
-  return (
-    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${opt.colour}`}>
-      {opt.label}
-    </span>
-  )
+  return new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  })
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -60,10 +37,9 @@ export default function AttendanceLogPage() {
   const navigate     = useNavigate()
   const location     = useLocation()
 
-  // Optional context passed via router state from EvaluationFormPage / MyTeamPage
   const routeState = location.state || {}
   const {
-    employeeName   = '',
+    employeeName    = '',
     checkpointLabel = '',
     fromDate: contextFrom = null,
     toDate:   contextTo   = null,
@@ -76,14 +52,10 @@ export default function AttendanceLogPage() {
 
   // ── Form ──────────────────────────────────────────────────────────────────
   const today = new Date().toISOString().slice(0, 10)
-  const [form, setForm] = useState({
-    record_date: today,
-    status:      'PRESENT',
-    notes:       '',
-  })
-  const [saving,   setSaving]   = useState(false)
-  const [formErr,  setFormErr]  = useState(null)
-  const [formOk,   setFormOk]   = useState(false)
+  const [form,    setForm]    = useState({ record_date: today, status: 'PRESENT', notes: '' })
+  const [saving,  setSaving]  = useState(false)
+  const [formErr, setFormErr] = useState(null)
+  const [formOk,  setFormOk]  = useState(false)
 
   const fetchRecords = () => {
     setLoading(true)
@@ -96,7 +68,7 @@ export default function AttendanceLogPage() {
 
   useEffect(() => {
     if (periodId) fetchRecords()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodId])
 
   const handleChange = (field, value) => {
@@ -109,7 +81,6 @@ export default function AttendanceLogPage() {
     e.preventDefault()
     if (!form.record_date) { setFormErr('Please select a date.'); return }
     if (!form.status)      { setFormErr('Please select a status.'); return }
-
     setSaving(true)
     setFormErr(null)
     setFormOk(false)
@@ -130,7 +101,7 @@ export default function AttendanceLogPage() {
     }
   }
 
-  // ── Summary counts — all 11 WRA 2019 statuses ────────────────────────────
+  // ── Summary counts ────────────────────────────────────────────────────────
   const summary = records.reduce(
     (acc, r) => {
       const s = r.status
@@ -150,8 +121,7 @@ export default function AttendanceLogPage() {
     {
       present: 0, absent: 0, late: 0, halfDay: 0,
       sickLeave: 0, annualLeave: 0, vacationLeave: 0,
-      maternityLeave: 0, paternityLeave: 0, specialLeave: 0,
-      publicHoliday: 0,
+      maternityLeave: 0, paternityLeave: 0, specialLeave: 0, publicHoliday: 0,
     }
   )
   const totalLeave = summary.sickLeave + summary.annualLeave + summary.vacationLeave
@@ -194,9 +164,29 @@ export default function AttendanceLogPage() {
         </div>
       </div>
 
+      {/* ── Calendar Heatmap (full width) ───────────────────────────────────── */}
+      {loading ? (
+        <div className="mb-6 flex items-center justify-center rounded-xl bg-white py-16 shadow-sm ring-1 ring-slate-200">
+          <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
+        </div>
+      ) : loadErr ? (
+        <div className="mb-6 flex items-center gap-2 rounded-xl bg-red-50 px-6 py-4 text-sm text-red-600 ring-1 ring-red-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" /> {loadErr}
+        </div>
+      ) : (
+        <div className="mb-6">
+          <CalendarHeatmap
+            records={records}
+            startIso={contextFrom ? contextFrom.slice(0, 10) : null}
+            endIso={contextTo   ? contextTo.slice(0, 10)   : null}
+          />
+        </div>
+      )}
+
+      {/* ── Main 3-column grid ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
-        {/* ── LEFT: Add form + records list ──────────────────────────────── */}
+        {/* LEFT: Add form + Exceptions table */}
         <div className="lg:col-span-2 space-y-5">
 
           {/* Add record form */}
@@ -219,7 +209,6 @@ export default function AttendanceLogPage() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                {/* Date */}
                 <div>
                   <label htmlFor="att-log-date" className="mb-1.5 block text-xs font-medium text-slate-700">
                     Date <span className="text-red-500">*</span>
@@ -234,8 +223,6 @@ export default function AttendanceLogPage() {
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                   />
                 </div>
-
-                {/* Status */}
                 <div>
                   <label htmlFor="att-log-status" className="mb-1.5 block text-xs font-medium text-slate-700">
                     Status <span className="text-red-500">*</span>
@@ -260,7 +247,6 @@ export default function AttendanceLogPage() {
                 </div>
               </div>
 
-              {/* Notes */}
               <div>
                 <label htmlFor="att-log-notes" className="mb-1.5 block text-xs font-medium text-slate-700">
                   Notes <span className="text-slate-400">(optional)</span>
@@ -289,73 +275,26 @@ export default function AttendanceLogPage() {
             </form>
           </div>
 
-          {/* Records table */}
-          <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
-            <div className="flex items-center gap-2 border-b border-slate-100 px-6 py-4">
-              <ClipboardList className="h-4 w-4 text-slate-400" />
-              <h2 className="font-semibold text-slate-800">
-                Attendance Records
-                {records.length > 0 && (
-                  <span className="ml-2 text-sm font-normal text-slate-400">
-                    ({records.length})
-                  </span>
-                )}
-              </h2>
-            </div>
+          {/* Exceptions table */}
+          {!loading && !loadErr && <ExceptionsTable records={records} />}
 
-            {loading ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-5 w-5 animate-spin text-slate-300" />
-              </div>
-            ) : loadErr ? (
-              <div className="flex items-center gap-2 px-6 py-4 text-sm text-red-600">
-                <AlertCircle className="h-4 w-4" /> {loadErr}
-              </div>
-            ) : records.length === 0 ? (
-              <div className="px-6 py-12 text-center text-sm text-slate-400">
-                No attendance records yet. Add the first one above.
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                    <th className="px-6 py-3 text-left">Date</th>
-                    <th className="px-6 py-3 text-left">Status</th>
-                    <th className="px-6 py-3 text-left">Notes</th>
-                    <th className="px-6 py-3 text-left">Recorded By</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {records.map((r) => (
-                    <tr key={r.record_id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-6 py-3 font-medium text-slate-700 whitespace-nowrap">
-                        {fmtDate(r.record_date)}
-                      </td>
-                      <td className="px-6 py-3">
-                        <StatusBadge status={r.status} />
-                      </td>
-                      <td className="px-6 py-3 text-slate-500 max-w-xs truncate">
-                        {r.notes || <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-6 py-3 text-slate-500 whitespace-nowrap">
-                        {r.recorder
-                          ? `${r.recorder.first_name} ${r.recorder.last_name}`
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+          {/* Total record count footnote */}
+          {!loading && !loadErr && records.length > 0 && (
+            <div className="flex items-center gap-2 px-1">
+              <ClipboardList className="h-3.5 w-3.5 text-slate-300" />
+              <span className="text-xs text-slate-400">
+                {records.length} total record{records.length !== 1 ? 's' : ''} in this period —
+                heatmap shows all; table shows exceptions only.
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* ── RIGHT: Summary card ────────────────────────────────────────── */}
+        {/* RIGHT: Summary card */}
         <div>
           <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
             <h2 className="mb-4 font-semibold text-slate-800">Period Summary</h2>
 
-            {/* Core attendance */}
             <div className="space-y-2">
               {[
                 { label: 'Days Present',  value: summary.present,  colour: 'text-emerald-600', bg: 'bg-emerald-50'  },
@@ -370,7 +309,6 @@ export default function AttendanceLogPage() {
               ))}
             </div>
 
-            {/* WRA 2019 leave breakdown */}
             <p className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
               WRA 2019 Leave
             </p>

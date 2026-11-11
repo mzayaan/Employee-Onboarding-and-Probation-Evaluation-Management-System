@@ -28,7 +28,7 @@ import { useEffect, useState } from 'react'
 import AppShell from '@/components/shared/AppShell'
 import { useAuth } from '@/context/AuthContext'
 import { getMyContract } from '@/api/contractApi'
-import { getMyTaxDeclaration, submitTaxDeclaration } from '@/api/contractApi'
+import { getMyTaxDeclaration, submitTaxDeclaration } from '@/api/taxDeclarationApi'
 import {
   Calculator, CheckCircle, AlertTriangle, Info,
   ChevronRight, Save,

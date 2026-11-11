@@ -19,9 +19,10 @@
 import { useEffect, useState } from 'react'
 import AppShell                 from '@/components/shared/AppShell'
 import { getMyEmployeeProfile, updateMyProfile, uploadMyAvatar } from '@/api/employeeApi'
+import { getMyLeaveBalance } from '@/api/leaveBalanceApi'
 import { useAuth }              from '@/context/AuthContext'
 import AvatarUpload             from '@/components/shared/AvatarUpload'
-import { CheckCircle2, Loader2, Lock } from 'lucide-react'
+import { CheckCircle2, Loader2, Lock, AlertCircle } from 'lucide-react'
 
 const INPUT_CLS = 'w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
 const READONLY_CLS = 'w-full rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 cursor-not-allowed'
@@ -53,10 +54,18 @@ export default function MyProfilePage() {
   const [user,        setUser]        = useState(null)
   const [form,        setForm]        = useState({})
   const [errors,      setErrors]      = useState({})
-  const [loading,     setLoading]     = useState(true)
-  const [saving,      setSaving]      = useState(false)
-  const [saved,       setSaved]       = useState(false)
-  const [serverError, setServerError] = useState('')
+  const [loading,      setLoading]      = useState(true)
+  const [saving,       setSaving]       = useState(false)
+  const [saved,        setSaved]        = useState(false)
+  const [serverError,  setServerError]  = useState('')
+  const [leaveBalance, setLeaveBalance] = useState(null)
+  const [leaveErr,     setLeaveErr]     = useState(null)
+
+  useEffect(() => {
+    getMyLeaveBalance()
+      .then(setLeaveBalance)
+      .catch(() => setLeaveErr('Failed to load leave balance.'))
+  }, [])
 
   useEffect(() => {
     getMyEmployeeProfile()
@@ -316,6 +325,86 @@ export default function MyProfilePage() {
           </button>
         </div>
       </form>
+
+      {/* ── WRA 2019 Leave Balance (read-only self-view) ─────────────────────── */}
+      <div className="mt-6 rounded-xl bg-white px-6 py-6 shadow-sm ring-1 ring-slate-200">
+        <h2 className="mb-4 text-base font-semibold" style={{ color: '#0f1c2e' }}>
+          My Leave Balance — WRA 2019
+        </h2>
+        {leaveErr ? (
+          <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-700 ring-1 ring-red-200">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" /> {leaveErr}
+          </div>
+        ) : !leaveBalance ? (
+          <p className="text-sm text-slate-400">Leave balance not available yet.</p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-400">Year: {leaveBalance.year}</p>
+            {[
+              {
+                label: 'Annual Leave (s.45)',
+                entitled: leaveBalance.annual_leave_entitled,
+                used: leaveBalance.annual_leave_used,
+                accumulated: 0,
+              },
+              {
+                label: 'Sick Leave (s.46)',
+                entitled: leaveBalance.sick_leave_entitled,
+                used: leaveBalance.sick_leave_used,
+                accumulated: leaveBalance.sick_leave_accumulated ?? 0,
+              },
+            ].map(({ label, entitled, used, accumulated }) => {
+              const remaining = Math.max(0, (entitled ?? 0) - (used ?? 0) + accumulated)
+              const pct = entitled > 0 ? Math.min(100, ((used ?? 0) / entitled) * 100) : 0
+              return (
+                <div key={label} className="rounded-lg bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-semibold text-slate-600">{label}</span>
+                    <span className="text-xs text-slate-400">{(used ?? 0).toFixed(1)} / {(entitled ?? 0).toFixed(1)} days used</span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-400' : pct >= 60 ? 'bg-amber-400' : 'bg-green-400'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {accumulated > 0 && <span className="mr-1 text-blue-600">+{accumulated.toFixed(1)} accumulated</span>}
+                    {remaining.toFixed(1)} days remaining
+                  </p>
+                </div>
+              )
+            })}
+            {leaveBalance.vacation_leave_eligible ? (
+              (() => {
+                const entitled = leaveBalance.vacation_leave_entitled ?? 0
+                const used     = leaveBalance.vacation_leave_used ?? 0
+                const remaining = Math.max(0, entitled - used)
+                const pct = entitled > 0 ? Math.min(100, (used / entitled) * 100) : 0
+                return (
+                  <div className="rounded-lg bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs font-semibold text-slate-600">Vacation Leave (s.47)</span>
+                      <span className="text-xs text-slate-400">{used.toFixed(1)} / {entitled.toFixed(1)} days used</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-red-400' : pct >= 60 ? 'bg-amber-400' : 'bg-green-400'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-400">{remaining.toFixed(1)} days remaining</p>
+                  </div>
+                )
+              })()
+            ) : (
+              <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-400 ring-1 ring-slate-100">
+                Vacation Leave (s.47) — not eligible (salary above MUR 50,000/month threshold)
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </AppShell>
   )
 }

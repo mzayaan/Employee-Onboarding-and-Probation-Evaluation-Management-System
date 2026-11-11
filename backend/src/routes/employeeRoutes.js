@@ -23,6 +23,7 @@ const {
   toggleUserStatus,
   listManagers,
   listAllUsers,
+  getLeaveBalance,
 } = require('../controllers/employeeController');
 
 router.use(authenticate);
@@ -42,15 +43,13 @@ router.post('/', authorize('HR_ADMIN'), validateNIC, validateProbationDuration, 
 // GET  /api/employees           — HR, Manager, and Director (Director needs the employee list for approval context)
 router.get('/', authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'), listEmployees);
 
-// GET  /api/employees/:id       — HR, Manager, Employee (own profile only), Director (for approval review)
-router.get('/:id', authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'DIRECTOR'), getEmployee);
-
-// PUT  /api/employees/:id/profile — HR only
-router.put('/:id/profile', authorize('HR_ADMIN'), updateEmployeeProfile);
-
 // PATCH /api/employees/me/profile — NEW_EMPLOYEE self-service (Spec s.4.4)
 // Must be declared BEFORE /:id to avoid being consumed by the param route.
 router.patch('/me/profile', authorize('NEW_EMPLOYEE'), updateMyProfile);
+
+// GET /api/employees/me/leave-balance — NEW_EMPLOYEE: own WRA leave balance (FR-04 extended | WRA 2019 s.45–47)
+// Must be declared BEFORE /:id to avoid being consumed by the param route.
+router.get('/me/leave-balance', authorize('NEW_EMPLOYEE'), getLeaveBalance);
 
 // PATCH /api/employees/me/avatar — self-service profile image upload (Spec s.4.1)
 // Open to any role that has an EmployeeProfile (NEW_EMPLOYEE, LINE_MANAGER, HR_ADMIN, DIRECTOR).
@@ -60,6 +59,17 @@ router.patch(
   uploadImage.single('profile_image'),
   updateMyAvatar
 );
+
+// GET  /api/employees/:id       — HR, Manager, Employee (own profile only), Director (for approval review)
+router.get('/:id', authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'DIRECTOR'), getEmployee);
+
+// PUT  /api/employees/:id/profile — HR only
+router.put('/:id/profile', authorize('HR_ADMIN'), updateEmployeeProfile);
+
+// GET /api/employees/:profileId/leave-balance — HR_ADMIN, LINE_MANAGER, DIRECTOR
+// Declared after /:id — Express matches the more specific path first because
+// /:profileId/leave-balance has an additional segment.
+router.get('/:profileId/leave-balance', authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'), getLeaveBalance);
 
 // PATCH /api/employees/:userId/status — HR or SYSTEM_ADMIN (FR-01)
 router.patch('/:userId/status', authorize('HR_ADMIN', 'SYSTEM_ADMIN'), toggleUserStatus);

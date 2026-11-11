@@ -77,6 +77,16 @@ export function AuthProvider({ children }) {
       setUser(newUser)
       localStorage.setItem('token', newToken)
       localStorage.setItem('user', JSON.stringify(newUser))
+      // Immediately fetch the employee profile so the top-nav avatar shows
+      // on the very first render after login (without needing an F5 refresh).
+      try {
+        const meRes = await api.get('/auth/me')
+        if (meRes.data.success) {
+          const ep = meRes.data.employeeProfile || null
+          setEmployeeProfile(ep)
+          localStorage.setItem('employeeProfile', JSON.stringify(ep))
+        }
+      } catch { /* non-fatal — avatar will fall back to initials */ }
       return newUser
     }
     throw new Error(data.message || 'Login failed')
