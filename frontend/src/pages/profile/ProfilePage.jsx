@@ -168,22 +168,28 @@ export default function ProfilePage() {
                 </h2>
               </div>
               <div className="px-5">
-                <Row label="Job Title"       value={profile.job_title} />
-                <Row label="Department"      value={profile.department?.name} />
-                <Row label="Phone"           value={profile.phone} />
-                <Row label="Start Date"      value={fmt(profile.start_date)} />
-                <Row label="Probation Ends"  value={fmt(profile.probation_end_date)} />
-                <div className="flex flex-col sm:flex-row sm:items-center gap-1 py-3">
-                  <span className="text-sm font-medium text-slate-500 sm:w-48 flex-shrink-0">
-                    Onboarding Status
-                  </span>
-                  <span
-                    className="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold"
-                    style={{ backgroundColor: statusStyle.bg, color: statusStyle.text }}
-                  >
-                    {statusStyle.label}
-                  </span>
-                </div>
+                <Row label="Job Title"   value={profile.job_title} />
+                <Row label="Department"  value={profile.department?.name} />
+                <Row label="Phone"       value={profile.phone} />
+                {/* Start date, probation end and onboarding status are only
+                    meaningful for employees on probation — hide for HR/Manager/Director */}
+                {user?.role === 'NEW_EMPLOYEE' && (
+                  <>
+                    <Row label="Start Date"     value={fmt(profile.start_date)} />
+                    <Row label="Probation Ends" value={fmt(profile.probation_end_date)} />
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 py-3">
+                      <span className="text-sm font-medium text-slate-500 sm:w-48 flex-shrink-0">
+                        Onboarding Status
+                      </span>
+                      <span
+                        className="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                        style={{ backgroundColor: statusStyle.bg, color: statusStyle.text }}
+                      >
+                        {statusStyle.label}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             </section>
           )}

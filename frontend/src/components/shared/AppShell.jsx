@@ -130,7 +130,7 @@ export default function AppShell({ children }) {
             className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors text-left"
             title="My Profile"
           >
-            <ProfileAvatar user={user} employeeProfile={employeeProfile} size={32} />
+            <ProfileAvatar user={user} employeeProfile={employeeProfile} size={60} />
             <span className="hidden sm:flex flex-col leading-tight">
               <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">
                 {fullName}

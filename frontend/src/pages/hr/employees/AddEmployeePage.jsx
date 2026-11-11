@@ -62,6 +62,19 @@ const WORK_SCHEDULE_OPTIONS = [
   { value: 'Part-Time',  label: 'Part-Time'  },
 ]
 
+// Mauritius Workers' Rights Act 2019 s.21(1): normal working week ≤ 45 hours.
+// Dropdown starts at 10 hours (practical minimum) and steps up to 45 hours (legal max).
+const WEEKLY_HOURS_OPTIONS = [
+  { value: '10', label: '10 hours / week' },
+  { value: '15', label: '15 hours / week' },
+  { value: '20', label: '20 hours / week' },
+  { value: '25', label: '25 hours / week' },
+  { value: '30', label: '30 hours / week' },
+  { value: '35', label: '35 hours / week' },
+  { value: '40', label: '40 hours / week' },
+  { value: '45', label: '45 hours / week (Standard Full-Time, WRA 2019)' },
+]
+
 // Spec s.2.3.1 — identity document types
 const ID_DOC_OPTIONS = [
   { value: 'NIC',               label: 'National Identity Card (NIC)' },
@@ -352,10 +365,9 @@ export default function AddEmployeePage() {
         e.salary_monthly = 'Monthly salary must be at least MUR 17,745 (National Minimum Wage, Workers\' Rights Act 2019).'
       }
     }
-    if (isPartTime) {
-      const wh = parseFloat(form.weekly_working_hours)
-      if (!form.weekly_working_hours) e.weekly_working_hours = 'Weekly working hours are required for Part-Time employees.'
-      else if (isNaN(wh) || wh <= 0 || wh > 48) e.weekly_working_hours = 'Weekly working hours must be between 0.5 and 48.'
+    // WRA 2019 s.21(1): weekly hours required for all employees
+    if (!form.weekly_working_hours) {
+      e.weekly_working_hours = 'Weekly working hours are required (Workers\' Rights Act 2019).'
     }
     if (isFixedTerm && !form.contract_end_date) {
       e.contract_end_date = 'Contract end date is required for Fixed-Term / Contract employees.'
@@ -829,23 +841,24 @@ export default function AddEmployeePage() {
                 placeholder="e.g. Head Office - Port Louis, Remote" className={INPUT_CLS} />
             </FIELD>
 
-            {/* Spec s.2.3.1 — weekly hours (required when Part-Time) */}
-            {isPartTime && (
-              <FIELD
-                label="Weekly Working Hours"
-                required
-                error={errors.weekly_working_hours}
-                hint="Contracted weekly hours for Part-Time employee. Must be ≤ 48 (WRA 2019)."
+            {/* Spec s.2.3.1 — weekly hours (required for ALL employees, WRA 2019 s.21) */}
+            <FIELD
+              label="Weekly Working Hours"
+              required
+              error={errors.weekly_working_hours}
+              hint="Contracted weekly hours per WRA 2019 s.21(1). Normal working week ≤ 45 hours. Full-Time standard is 45 hours."
+            >
+              <select
+                value={form.weekly_working_hours}
+                onChange={set('weekly_working_hours')}
+                className={SELECT_CLS}
               >
-                <input
-                  type="number" min="0.5" max="48" step="0.5"
-                  value={form.weekly_working_hours}
-                  onChange={set('weekly_working_hours')}
-                  placeholder="e.g. 20"
-                  className={INPUT_CLS}
-                />
-              </FIELD>
-            )}
+                <option value="">— Select weekly hours —</option>
+                {WEEKLY_HOURS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </FIELD>
 
             {/* Spec s.2.6 — contract end date (required when Fixed-Term) */}
             {isFixedTerm && (

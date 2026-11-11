@@ -22,8 +22,31 @@ import AppShell from '@/components/shared/AppShell'
 import { getMyProbation, getCheckpoint, submitSelfAssessment } from '@/api/evaluationApi'
 import {
   Star, Loader2, AlertCircle, CheckCircle2, ChevronLeft,
-  ClipboardList, Info
+  ClipboardList, Info, MessageSquare
 } from 'lucide-react'
+
+// ── Yes/Partially/No radio group ─────────────────────────────────────────────
+function YPNRadio({ name, value, onChange, disabled }) {
+  const opts = ['Yes', 'Partially', 'No']
+  return (
+    <div className="flex gap-4">
+      {opts.map((opt) => (
+        <label key={opt} className={`flex items-center gap-1.5 text-sm cursor-pointer ${disabled ? 'cursor-default opacity-60' : ''}`}>
+          <input
+            type="radio"
+            name={name}
+            value={opt}
+            checked={value === opt}
+            onChange={() => !disabled && onChange(opt)}
+            disabled={disabled}
+            className="accent-blue-700"
+          />
+          {opt}
+        </label>
+      ))}
+    </div>
+  )
+}
 
 // ── Star rating ───────────────────────────────────────────────────────────────
 function StarRating({ value, onChange, disabled = false }) {
@@ -116,6 +139,19 @@ export default function SelfAssessmentPage() {
   const [error,   setError]   = useState(null)
   const [success, setSuccess] = useState(false)
 
+  // Two-way probation feedback fields
+  const [twoway, setTwoway] = useState({
+    onboarding_progress_notes:     '',
+    understands_responsibilities:  '',
+    received_sufficient_training:  '',
+    has_required_system_access:    '',
+    areas_needing_support:         '',
+    training_support_requested:    '',
+    employee_comments:             '',
+    employee_acknowledgement_date: '',
+  })
+  const setTW = (field) => (val) => setTwoway((prev) => ({ ...prev, [field]: val }))
+
   const [loadingProbation,  setLoadingProbation]  = useState(true)
   const [loadingCheckpoint, setLoadingCheckpoint] = useState(false)
 
@@ -155,7 +191,18 @@ export default function SelfAssessmentPage() {
           const pre = {}
           existing.scores.forEach((s) => { pre[s.criterion_id] = s.raw_score })
           setScores(pre)
-          setNotes(existing.self_reflection_notes || '')  // confirmed model field name
+          setNotes(existing.self_reflection_notes || '')
+          // Pre-fill two-way probation fields
+          setTwoway({
+            onboarding_progress_notes:     existing.onboarding_progress_notes     || '',
+            understands_responsibilities:  existing.understands_responsibilities  || '',
+            received_sufficient_training:  existing.received_sufficient_training  || '',
+            has_required_system_access:    existing.has_required_system_access    || '',
+            areas_needing_support:         existing.areas_needing_support         || '',
+            training_support_requested:    existing.training_support_requested    || '',
+            employee_comments:             existing.employee_comments             || '',
+            employee_acknowledgement_date: existing.employee_acknowledgement_date || '',
+          })
         }
       })
       .catch(() => setError('Failed to load checkpoint details.'))
@@ -181,7 +228,16 @@ export default function SelfAssessmentPage() {
           criterion_id: Number.parseInt(criterion_id, 10),
           raw_score,
         })),
-        self_reflection_notes: notes.trim() || null,  // confirmed backend body param (evaluationController.js:505)
+        self_reflection_notes: notes.trim() || null,
+        // Two-way probation feedback
+        onboarding_progress_notes:     twoway.onboarding_progress_notes.trim()     || null,
+        understands_responsibilities:  twoway.understands_responsibilities          || null,
+        received_sufficient_training:  twoway.received_sufficient_training          || null,
+        has_required_system_access:    twoway.has_required_system_access            || null,
+        areas_needing_support:         twoway.areas_needing_support.trim()          || null,
+        training_support_requested:    twoway.training_support_requested.trim()     || null,
+        employee_comments:             twoway.employee_comments.trim()              || null,
+        employee_acknowledgement_date: twoway.employee_acknowledgement_date         || null,
       }
       await submitSelfAssessment(selectedCheckpoint, payload)
       setSuccess(true)
@@ -338,6 +394,135 @@ export default function SelfAssessmentPage() {
                 placeholder="Describe your achievements, challenges, and areas where you have grown or need improvement…"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 resize-none"
               />
+            </div>
+
+            {/* ── Two-way probation feedback ──────────────────────────────── */}
+            <div className="rounded-xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+              <div className="mb-4 flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-slate-400" />
+                <h2 className="font-semibold text-slate-800">Onboarding Feedback</h2>
+              </div>
+              <p className="mb-5 text-xs text-slate-400">
+                This section captures your experience as a new employee. Your responses help HR and your manager better support your onboarding journey.
+              </p>
+
+              <div className="space-y-5">
+                {/* How is your onboarding progressing? */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    How is your onboarding progressing?
+                  </label>
+                  <textarea
+                    value={twoway.onboarding_progress_notes}
+                    onChange={(e) => setTW('onboarding_progress_notes')(e.target.value)}
+                    disabled={alreadySubmitted}
+                    rows={3}
+                    placeholder="Describe how your onboarding has been going so far…"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 resize-none"
+                  />
+                </div>
+
+                {/* Do you understand your responsibilities? */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Do you understand your responsibilities?
+                  </label>
+                  <YPNRadio
+                    name="understands_responsibilities"
+                    value={twoway.understands_responsibilities}
+                    onChange={setTW('understands_responsibilities')}
+                    disabled={alreadySubmitted}
+                  />
+                </div>
+
+                {/* Have you received sufficient training? */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Have you received sufficient training?
+                  </label>
+                  <YPNRadio
+                    name="received_sufficient_training"
+                    value={twoway.received_sufficient_training}
+                    onChange={setTW('received_sufficient_training')}
+                    disabled={alreadySubmitted}
+                  />
+                </div>
+
+                {/* Do you have the required system access? */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Do you have the required system access?
+                  </label>
+                  <YPNRadio
+                    name="has_required_system_access"
+                    value={twoway.has_required_system_access}
+                    onChange={setTW('has_required_system_access')}
+                    disabled={alreadySubmitted}
+                  />
+                </div>
+
+                {/* Areas needing support */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Are there areas where additional support is required?
+                  </label>
+                  <textarea
+                    value={twoway.areas_needing_support}
+                    onChange={(e) => setTW('areas_needing_support')(e.target.value)}
+                    disabled={alreadySubmitted}
+                    rows={2}
+                    placeholder="Describe any areas where you need more guidance or support…"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 resize-none"
+                  />
+                </div>
+
+                {/* Training/support requested */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Training / support requested
+                  </label>
+                  <textarea
+                    value={twoway.training_support_requested}
+                    onChange={(e) => setTW('training_support_requested')(e.target.value)}
+                    disabled={alreadySubmitted}
+                    rows={2}
+                    placeholder="List any specific training programmes, tools, or support resources you would like access to…"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 resize-none"
+                  />
+                </div>
+
+                {/* Employee comments */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Employee comments
+                  </label>
+                  <textarea
+                    value={twoway.employee_comments}
+                    onChange={(e) => setTW('employee_comments')(e.target.value)}
+                    disabled={alreadySubmitted}
+                    rows={3}
+                    placeholder="Any additional comments, concerns, or suggestions…"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 resize-none"
+                  />
+                </div>
+
+                {/* Employee acknowledgement date */}
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Employee acknowledgement date
+                  </label>
+                  <input
+                    type="date"
+                    value={twoway.employee_acknowledgement_date}
+                    onChange={(e) => setTW('employee_acknowledgement_date')(e.target.value)}
+                    disabled={alreadySubmitted}
+                    className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">
+                    Date you formally acknowledge this self-assessment.
+                  </p>
+                </div>
+              </div>
             </div>
 
             {!alreadySubmitted && !success && (

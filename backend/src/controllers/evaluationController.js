@@ -294,6 +294,8 @@ const getMyTeam = async (req, res) => {
           model:      User,
           as:         'user',
           attributes: ['user_id', 'first_name', 'last_name', 'email'],
+          where:      { role: 'NEW_EMPLOYEE' }, // exclude managers/HR with profiles
+          required:   true,
         },
         {
           model: ProbationPeriod,
@@ -572,7 +574,11 @@ const submitManagerEvaluation = async (req, res) => {
 // =============================================================================
 // POST /api/evaluations/checkpoint/:checkpointId/self
 // Employee submits their own self-assessment.
-// Body: { scores: [{criterion_id, raw_score}], self_reflection_notes }
+// Body: { scores: [{criterion_id, raw_score}], self_reflection_notes,
+//         onboarding_progress_notes, understands_responsibilities,
+//         received_sufficient_training, has_required_system_access,
+//         areas_needing_support, training_support_requested,
+//         employee_comments, employee_acknowledgement_date }
 // FR-13, FR-14 | NFR-03
 // =============================================================================
 const submitSelfAssessment = async (req, res) => {
@@ -590,7 +596,19 @@ const submitSelfAssessment = async (req, res) => {
     const sequelize = require('../config/database');
 
     const { checkpointId } = req.params;
-    const { scores = [], self_reflection_notes = '' } = req.body;
+    const {
+      scores                       = [],
+      self_reflection_notes        = '',
+      // Two-way probation feedback fields (FR-13)
+      onboarding_progress_notes,
+      understands_responsibilities,
+      received_sufficient_training,
+      has_required_system_access,
+      areas_needing_support,
+      training_support_requested,
+      employee_comments,
+      employee_acknowledgement_date,
+    } = req.body;
 
     if (!scores.length) {
       return res.status(400).json({ success: false, message: 'At least one score is required.' });
@@ -664,11 +682,20 @@ const submitSelfAssessment = async (req, res) => {
 
     await sequelize.transaction(async (t) => {
       const assessment = await SelfAssessment.create({
-        checkpoint_id:          checkpointId,
-        employee_profile_id:    profile.profile_id,
-        self_reflection_notes:  self_reflection_notes?.trim() || null,
-        self_score:             totalSelfScore,
-        submitted_at:           new Date(),
+        checkpoint_id:                 checkpointId,
+        employee_profile_id:           profile.profile_id,
+        self_reflection_notes:         self_reflection_notes?.trim()          || null,
+        self_score:                    totalSelfScore,
+        submitted_at:                  new Date(),
+        // Two-way probation feedback fields (FR-13)
+        onboarding_progress_notes:     onboarding_progress_notes?.trim()      || null,
+        understands_responsibilities:  understands_responsibilities            || null,
+        received_sufficient_training:  received_sufficient_training            || null,
+        has_required_system_access:    has_required_system_access              || null,
+        areas_needing_support:         areas_needing_support?.trim()           || null,
+        training_support_requested:    training_support_requested?.trim()      || null,
+        employee_comments:             employee_comments?.trim()               || null,
+        employee_acknowledgement_date: employee_acknowledgement_date           || null,
       }, { transaction: t });
 
       await SelfAssessmentScore.bulkCreate(

@@ -1,7 +1,8 @@
 // =============================================================================
 // src/controllers/performanceNoteController.js
 // CRUD for performance notes attached to an employee's probation record.
-// HR Admins and Line Managers can create, view, edit and delete notes.
+// HR Admins and Line Managers: create / view / edit / delete all note fields.
+// NEW_EMPLOYEE: view own notes, create EMPLOYEE_FEEDBACK notes, respond to notes.
 // FR-12 | NFR-02, NFR-03 | Objective 2
 // =============================================================================
 
@@ -33,13 +34,31 @@ const checkProfileScope = async (profileId, user) => {
 // =============================================================================
 const createNote = async (req, res) => {
   try {
-    const { profile_id, note_text, evaluation_period_id } = req.body;
+    const {
+      profile_id,
+      note_text,
+      evaluation_period_id,
+      // KPI category fields (FR-12 enhancement)
+      note_category,
+      kpi_target,
+      kpi_achievement,
+      kpi_rating,
+      employee_response,
+    } = req.body;
 
     if (!profile_id || !note_text?.trim()) {
       return res.status(400).json({
         success: false,
         message: 'profile_id and note_text are required.',
       });
+    }
+
+    // Validate kpi_rating range if provided
+    if (kpi_rating !== undefined && kpi_rating !== null) {
+      const rating = Number(kpi_rating);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        return res.status(400).json({ success: false, message: 'kpi_rating must be between 1 and 5.' });
+      }
     }
 
     const { allowed, notFound } = await checkProfileScope(profile_id, req.user);
@@ -62,10 +81,15 @@ const createNote = async (req, res) => {
     }
 
     const note = await PerformanceNote.create({
-      profile_id:          Number(profile_id),
-      recorded_by:         req.user.user_id,
-      note_text:           note_text.trim(),
+      profile_id:           Number(profile_id),
+      recorded_by:          req.user.user_id,
+      note_text:            note_text.trim(),
       evaluation_period_id: evaluation_period_id || null,
+      note_category:        note_category        || 'GENERAL',
+      kpi_target:           kpi_target?.trim()   || null,
+      kpi_achievement:      kpi_achievement?.trim() || null,
+      kpi_rating:           kpi_rating           || null,
+      employee_response:    employee_response?.trim() || null,
     });
 
     await createAuditLog({
@@ -137,6 +161,14 @@ const updateNote = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Performance note not found.' });
     }
 
+    // Employee feedback notes are permanently read-only for HR/Manager
+    if (note.note_category === 'EMPLOYEE_FEEDBACK') {
+      return res.status(403).json({
+        success: false,
+        message: 'Employee feedback notes cannot be edited.',
+      });
+    }
+
     // LINE_MANAGER can only edit notes they personally recorded
     if (req.user.role === 'LINE_MANAGER' && note.recorded_by !== req.user.user_id) {
       return res.status(403).json({
@@ -169,6 +201,14 @@ const deleteNote = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Performance note not found.' });
     }
 
+    // Employee feedback notes are permanently read-only for HR/Manager
+    if (note.note_category === 'EMPLOYEE_FEEDBACK') {
+      return res.status(403).json({
+        success: false,
+        message: 'Employee feedback notes cannot be deleted.',
+      });
+    }
+
     // LINE_MANAGER can only delete notes they personally recorded
     if (req.user.role === 'LINE_MANAGER' && note.recorded_by !== req.user.user_id) {
       return res.status(403).json({
@@ -194,4 +234,145 @@ const deleteNote = async (req, res) => {
   }
 };
 
-module.exports = { createNote, getNotesByProfile, updateNote, deleteNote };
+// =============================================================================
+// GET /api/performance-notes/my
+// Employee: return all notes recorded for their own profile.
+// Read-only — employee cannot see other employees' notes.
+// FR-12 | NFR-03 | NEW_EMPLOYEE
+// =============================================================================
+const getMyNotes = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+
+    const profile = await EmployeeProfile.findOne({ where: { user_id: userId } });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+    }
+
+    const notes = await PerformanceNote.findAll({
+      where: { profile_id: profile.profile_id },
+      include: [
+        { model: User, as: 'recorder', attributes: ['user_id', 'first_name', 'last_name', 'role'] },
+      ],
+      order: [['created_at', 'DESC']],
+    });
+
+    return res.json({ success: true, data: notes });
+  } catch (error) {
+    console.error('[performanceNoteController.getMyNotes]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve your performance notes.' });
+  }
+};
+
+// =============================================================================
+// POST /api/performance-notes/my/feedback
+// Employee: create an EMPLOYEE_FEEDBACK note on their own profile.
+// note_category is forced to 'EMPLOYEE_FEEDBACK'; recorded_by = employee's user_id.
+// FR-12 | NFR-03 | NEW_EMPLOYEE
+// =============================================================================
+const addEmployeeFeedback = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+
+    const profile = await EmployeeProfile.findOne({ where: { user_id: userId } });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: 'Employee profile not found.' });
+    }
+
+    const { note_text, evaluation_period_id } = req.body;
+
+    if (!note_text?.trim()) {
+      return res.status(400).json({ success: false, message: 'note_text is required.' });
+    }
+
+    if (evaluation_period_id) {
+      const checkpoint = await EvaluationCheckpoint.findByPk(evaluation_period_id);
+      if (!checkpoint) {
+        return res.status(400).json({ success: false, message: 'Invalid evaluation_period_id.' });
+      }
+    }
+
+    const created = await PerformanceNote.create({
+      profile_id:           profile.profile_id,
+      recorded_by:          userId,
+      note_text:            note_text.trim(),
+      note_category:        'EMPLOYEE_FEEDBACK',
+      evaluation_period_id: evaluation_period_id || null,
+    });
+
+    // Re-fetch with recorder association so the frontend can display the name immediately
+    const note = await PerformanceNote.findByPk(created.note_id, {
+      include: [{ model: User, as: 'recorder', attributes: ['user_id', 'first_name', 'last_name', 'role'] }],
+    });
+
+    await createAuditLog({
+      userId,
+      actionType:  'EVALUATION_SUBMITTED',
+      description: `[EMPLOYEE_FEEDBACK_ADDED] Employee added feedback note (note_id: ${created.note_id}, profile_id: ${profile.profile_id}).`,
+      ipAddress:   getIp(req),
+    });
+
+    return res.status(201).json({ success: true, message: 'Feedback submitted.', data: note });
+  } catch (error) {
+    console.error('[performanceNoteController.addEmployeeFeedback]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to submit feedback.' });
+  }
+};
+
+// =============================================================================
+// PATCH /api/performance-notes/:noteId/respond
+// Employee: update employee_response on a note that belongs to their profile.
+// Cannot alter note_text, kpi_rating or any manager-owned fields.
+// FR-12 | NFR-03 | NEW_EMPLOYEE
+// =============================================================================
+const respondToNote = async (req, res) => {
+  try {
+    const userId     = req.user.user_id;
+    const { noteId } = req.params;
+    const { employee_response } = req.body;
+
+    if (!employee_response?.trim()) {
+      return res.status(400).json({ success: false, message: 'employee_response is required.' });
+    }
+
+    // Verify note exists
+    const note = await PerformanceNote.findByPk(noteId);
+    if (!note) {
+      return res.status(404).json({ success: false, message: 'Performance note not found.' });
+    }
+
+    // Verify note belongs to this employee's profile
+    const profile = await EmployeeProfile.findOne({ where: { user_id: userId } });
+    if (!profile || note.profile_id !== profile.profile_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You may only respond to notes on your own profile.',
+      });
+    }
+
+    await note.update({ employee_response: employee_response.trim() });
+
+    await createAuditLog({
+      userId,
+      actionType:  'EVALUATION_SUBMITTED',
+      description: `[EMPLOYEE_RESPONSE_ADDED] Employee responded to note_id ${noteId}.`,
+      ipAddress:   getIp(req),
+    });
+
+    return res.json({ success: true, message: 'Response saved.', data: note });
+  } catch (error) {
+    console.error('[performanceNoteController.respondToNote]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to save response.' });
+  }
+};
+
+module.exports = {
+  createNote,
+  getNotesByProfile,
+  updateNote,
+  deleteNote,
+  // Employee-facing
+  getMyNotes,
+  addEmployeeFeedback,
+  respondToNote,
+};

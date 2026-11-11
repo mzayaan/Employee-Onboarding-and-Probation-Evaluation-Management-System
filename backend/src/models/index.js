@@ -39,6 +39,7 @@ const Contract            = require('./Contract');
 const HRDCTrainingLog     = require('./HRDCTrainingLog');
 const TaxDeclaration      = require('./TaxDeclaration');
 const SystemConfig        = require('./SystemConfig');
+const DevelopmentReview   = require('./DevelopmentReview');
 
 // =============================================================================
 // ASSOCIATIONS
@@ -431,6 +432,36 @@ PerformanceNote.belongsTo(EvaluationCheckpoint, {
   as: 'checkpoint',
 });
 
+// ── DevelopmentReview associations ───────────────────────────────────────
+EmployeeProfile.hasMany(DevelopmentReview, {
+  foreignKey: 'profile_id',
+  as: 'developmentReviews',
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+DevelopmentReview.belongsTo(EmployeeProfile, {
+  foreignKey: 'profile_id',
+  as: 'employeeProfile',
+});
+User.hasMany(DevelopmentReview, {
+  foreignKey: 'reviewed_by',
+  as: 'conductedReviews',
+});
+DevelopmentReview.belongsTo(User, {
+  foreignKey: 'reviewed_by',
+  as: 'reviewer',
+});
+EvaluationCheckpoint.hasMany(DevelopmentReview, {
+  foreignKey: 'checkpoint_id',
+  as: 'developmentReviews',
+  onDelete: 'SET NULL',
+  onUpdate: 'CASCADE',
+});
+DevelopmentReview.belongsTo(EvaluationCheckpoint, {
+  foreignKey: 'checkpoint_id',
+  as: 'checkpoint',
+});
+
 // ── ProbationPeriod ↔ GeneratedReport ────────────────────────────────────
 ProbationPeriod.hasMany(GeneratedReport, {
   foreignKey: 'period_id',
@@ -597,4 +628,5 @@ module.exports = {
   HRDCTrainingLog,
   TaxDeclaration,
   SystemConfig,
+  DevelopmentReview,
 };

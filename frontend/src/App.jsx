@@ -84,7 +84,14 @@ import MyDocumentsPage    from '@/pages/employee/documents/MyDocumentsPage'
 import MyTasksPage from '@/pages/employee/tasks/MyTasksPage'
 
 // Performance Notes — HR Admin + Line Manager (FR-12)
-import PerformanceNotesPage from '@/pages/performance/PerformanceNotesPage'
+import PerformanceNotesPage       from '@/pages/performance/PerformanceNotesPage'
+import DevelopmentReviewPage      from '@/pages/performance/DevelopmentReviewPage'
+
+// Employee — Development Reviews (FR-12 employee acknowledgement)
+import MyDevelopmentReviewsPage   from '@/pages/employee/development/MyDevelopmentReviewsPage'
+
+// Employee — Performance Feedback (FR-12 employee view + response)
+import MyPerformanceFeedbackPage  from '@/pages/employee/performance/MyPerformanceFeedbackPage'
 
 // Notifications — all authenticated roles (FR-09)
 import NotificationsPage from '@/pages/notifications/NotificationsPage'
@@ -177,7 +184,8 @@ export default function App() {
 
           {/* Performance Notes — shared for HR Admin and Line Manager (FR-12) */}
           <Route element={<ProtectedRoute allowedRoles={['HR_ADMIN', 'LINE_MANAGER']} />}>
-            <Route path="/performance-notes" element={<PerformanceNotesPage />} />
+            <Route path="/performance-notes"   element={<PerformanceNotesPage />} />
+            <Route path="/development-reviews" element={<DevelopmentReviewPage />} />
           </Route>
 
           {/* ── Line Manager ───────────────────────────────────────── */}
@@ -212,6 +220,10 @@ export default function App() {
             <Route path="/employee/training"           element={<MyTrainingPage />} />
             {/* Spec s.2.3.1, s.4.4 — employee self-service profile completion */}
             <Route path="/employee/profile"            element={<MyProfilePage />} />
+            {/* FR-12 — employee reads and acknowledges development reviews */}
+            <Route path="/employee/development-reviews" element={<MyDevelopmentReviewsPage />} />
+            {/* FR-12 — employee views notes, submits feedback, responds to notes */}
+            <Route path="/employee/performance-feedback" element={<MyPerformanceFeedbackPage />} />
           </Route>
 
           {/* ── System Administrator ───────────────────────────────── */}

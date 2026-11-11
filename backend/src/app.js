@@ -120,7 +120,8 @@ const auditRoutes          = require('./routes/auditRoutes');
 const attendanceRoutes     = require('./routes/attendanceRoutes');
 const pdfRoutes            = require('./routes/pdfRoutes');
 const notificationRoutes   = require('./routes/notificationRoutes');
-const performanceNoteRoutes = require('./routes/performanceNoteRoutes');
+const performanceNoteRoutes    = require('./routes/performanceNoteRoutes');
+const developmentReviewRoutes  = require('./routes/developmentReviewRoutes');
 const directorRoutes        = require('./routes/directorRoutes');
 // ── Mauritius compliance routes (compliance spec) ─────────────────────────
 const contractRoutes        = require('./routes/contractRoutes');
@@ -140,7 +141,8 @@ app.use('/api/audit',             auditRoutes);
 app.use('/api/attendance',        attendanceRoutes);
 app.use('/api/reports',           pdfRoutes);
 app.use('/api/notifications',     notificationRoutes);
-app.use('/api/performance-notes', performanceNoteRoutes);
+app.use('/api/performance-notes',   performanceNoteRoutes);
+app.use('/api/development-reviews', developmentReviewRoutes);
 app.use('/api/director',          directorRoutes);
 // ── Mauritius compliance ───────────────────────────────────────────────────
 app.use('/api/contracts',         contractRoutes);

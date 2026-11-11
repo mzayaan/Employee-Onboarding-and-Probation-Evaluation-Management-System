@@ -18,7 +18,7 @@ import AppShell from '@/components/shared/AppShell'
 import { getCheckpoint, submitManagerEvaluation } from '@/api/evaluationApi'
 import {
   Star, Loader2, AlertCircle, CheckCircle2, ChevronLeft,
-  ClipboardList, TrendingUp, CalendarDays, ExternalLink
+  ClipboardList, TrendingUp, CalendarDays, ExternalLink, MessageSquare,
 } from 'lucide-react'
 
 // ── Star rating ───────────────────────────────────────────────────────────────
@@ -104,6 +104,109 @@ function HistoryEntry({ cp, currentId, onSelect }) {
           {cp.status === 'OVERDUE' ? 'Overdue' : 'Pending'}
         </span>
       )}
+    </div>
+  )
+}
+
+// ── YPN badge ─────────────────────────────────────────────────────────────────
+const YPN_COLOUR = {
+  Yes:       { bg: '#dcfce7', text: '#166534' },
+  Partially: { bg: '#fef9c3', text: '#854d0e' },
+  No:        { bg: '#fee2e2', text: '#991b1b' },
+}
+function YpnBadge({ value }) {
+  if (!value) return <span className="text-slate-400 text-xs">—</span>
+  const c = YPN_COLOUR[value] || { bg: '#f1f5f9', text: '#475569' }
+  return (
+    <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold"
+      style={{ backgroundColor: c.bg, color: c.text }}>
+      {value}
+    </span>
+  )
+}
+
+// ── Self-assessment panel (read-only, for manager's reference) ────────────────
+function SelfAssessmentPanel({ sa }) {
+  if (!sa) {
+    return (
+      <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+        <div className="flex items-center gap-2 mb-3">
+          <MessageSquare className="h-4 w-4 text-slate-400" />
+          <h2 className="font-semibold text-slate-800 text-sm">Employee Self-Assessment</h2>
+        </div>
+        <p className="text-xs text-slate-400 italic">The employee has not yet submitted a self-assessment for this checkpoint.</p>
+      </div>
+    )
+  }
+
+  const rows = [
+    { label: 'Understands responsibilities',  val: <YpnBadge value={sa.understands_responsibilities} /> },
+    { label: 'Received sufficient training',  val: <YpnBadge value={sa.received_sufficient_training} /> },
+    { label: 'Has required system access',    val: <YpnBadge value={sa.has_required_system_access} /> },
+  ]
+
+  return (
+    <div className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-slate-400" />
+          <h2 className="font-semibold text-slate-800 text-sm">Employee Self-Assessment</h2>
+        </div>
+        {sa.self_score != null && (
+          <span className="rounded-full px-2.5 py-0.5 text-xs font-bold"
+            style={{
+              backgroundColor: Number.parseFloat(sa.self_score) >= 75 ? '#dcfce7'
+                : Number.parseFloat(sa.self_score) >= 50 ? '#fef9c3' : '#fee2e2',
+              color: Number.parseFloat(sa.self_score) >= 75 ? '#15803d'
+                : Number.parseFloat(sa.self_score) >= 50 ? '#854d0e' : '#b91c1c',
+            }}
+          >
+            {Number.parseFloat(sa.self_score).toFixed(1)} pts
+          </span>
+        )}
+      </div>
+
+      {/* Structured Yes/Partially/No responses */}
+      <div className="space-y-2 mb-3">
+        {rows.map(({ label, val }) => (
+          <div key={label} className="flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">{label}</span>
+            {val}
+          </div>
+        ))}
+      </div>
+
+      {sa.self_reflection_notes && (
+        <SelfField label="Self-reflection notes" value={sa.self_reflection_notes} />
+      )}
+      {sa.onboarding_progress_notes && (
+        <SelfField label="Onboarding progress" value={sa.onboarding_progress_notes} />
+      )}
+      {sa.areas_needing_support && (
+        <SelfField label="Areas needing support" value={sa.areas_needing_support} />
+      )}
+      {sa.training_support_requested && (
+        <SelfField label="Training / support requested" value={sa.training_support_requested} />
+      )}
+      {sa.employee_comments && (
+        <SelfField label="Employee comments" value={sa.employee_comments} />
+      )}
+      {sa.employee_acknowledgement_date && (
+        <p className="mt-2 text-xs text-slate-400">
+          Acknowledged: {new Date(sa.employee_acknowledgement_date).toLocaleDateString('en-GB', {
+            day: '2-digit', month: 'short', year: 'numeric',
+          })}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function SelfField({ label, value }) {
+  return (
+    <div className="mt-2">
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-0.5">{label}</p>
+      <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line">{value}</p>
     </div>
   )
 }
@@ -499,6 +602,9 @@ export default function EvaluationFormPage() {
               </div>
             </div>
           )}
+
+          {/* Employee self-assessment — read-only reference for the manager (FR-13) */}
+          <SelfAssessmentPanel sa={checkpoint.selfAssessment} />
         </div>
       </div>
     </AppShell>

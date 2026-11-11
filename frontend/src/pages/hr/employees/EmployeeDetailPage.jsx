@@ -13,7 +13,7 @@ import { getEmployee, updateEmployeeProfile, getDepartments, getManagers } from 
 import { addAttendanceRecord, getAttendanceByPeriod } from '@/api/attendanceApi'
 import { getProbationByProfile } from '@/api/evaluationApi'
 import { downloadReport } from '@/api/reportApi'
-import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X, ClipboardList, PlusCircle, BarChart3, FileText } from 'lucide-react'
+import { ArrowLeft, Loader2, Save, AlertCircle, FileDown, Edit2, X, ClipboardList, PlusCircle, BarChart3, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import { getContractByProfile, createContract } from '@/api/contractApi'
 
 // ── Attendance status display config ──────────────────────────────────────────
@@ -190,11 +190,72 @@ function InfoField({ label, value }) {
   )
 }
 
+// ── YPN badge (for self-assessment two-way fields) ───────────────────────────
+const YPN_COLOUR = {
+  Yes:       { bg: '#dcfce7', text: '#166534' },
+  Partially: { bg: '#fef9c3', text: '#854d0e' },
+  No:        { bg: '#fee2e2', text: '#991b1b' },
+}
+function YpnBadge({ value }) {
+  if (!value) return <span className="text-slate-400">—</span>
+  const c = YPN_COLOUR[value] || { bg: '#f1f5f9', text: '#475569' }
+  return (
+    <span className="inline-block rounded-full px-2 py-0.5 text-xs font-semibold"
+      style={{ backgroundColor: c.bg, color: c.text }}>
+      {value}
+    </span>
+  )
+}
+
+// ── Expanded self-assessment detail panel ─────────────────────────────────────
+function SelfAssessmentDetail({ sa }) {
+  const ypnRows = [
+    { label: 'Understands responsibilities', field: 'understands_responsibilities' },
+    { label: 'Received sufficient training', field: 'received_sufficient_training' },
+    { label: 'Has required system access',   field: 'has_required_system_access'   },
+  ]
+  const textRows = [
+    { label: 'Onboarding progress',          field: 'onboarding_progress_notes'    },
+    { label: 'Self-reflection notes',        field: 'self_reflection_notes'        },
+    { label: 'Areas needing support',        field: 'areas_needing_support'        },
+    { label: 'Training / support requested', field: 'training_support_requested'   },
+    { label: 'Employee comments',            field: 'employee_comments'            },
+  ]
+  return (
+    <div className="bg-slate-50 px-4 py-3 text-sm space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        {ypnRows.map(({ label, field }) => (
+          <div key={field}>
+            <p className="text-xs text-slate-500 mb-0.5">{label}</p>
+            <YpnBadge value={sa[field]} />
+          </div>
+        ))}
+      </div>
+      {textRows.map(({ label, field }) =>
+        sa[field] ? (
+          <div key={field}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-0.5">{label}</p>
+            <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line">{sa[field]}</p>
+          </div>
+        ) : null
+      )}
+      {sa.employee_acknowledgement_date && (
+        <p className="text-xs text-slate-400">
+          Acknowledged: {new Date(sa.employee_acknowledgement_date).toLocaleDateString('en-GB', {
+            day: '2-digit', month: 'short', year: 'numeric',
+          })}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── Probation Checkpoints Section (FR-13, FR-14, FR-16) ──────────────────────
 // Shows HR both the manager score and employee self-assessment score per checkpoint.
 function ProbationCheckpointsSection({ profileId }) {
-  const [period,  setPeriod]  = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [period,       setPeriod]       = useState(null)
+  const [loading,      setLoading]      = useState(true)
+  const [expandedSelf, setExpandedSelf] = useState(null)   // checkpoint_id
 
   useEffect(() => {
     if (!profileId) { setLoading(false); return }
@@ -247,46 +308,60 @@ function ProbationCheckpointsSection({ profileId }) {
                 ? Number.parseFloat(cp.managerEvaluation.weighted_score) : null
               const self = cp.selfAssessment?.self_score != null
                 ? Number.parseFloat(cp.selfAssessment.self_score) : null
+              const hasSaDetail = !!cp.selfAssessment
+              const isExpanded  = expandedSelf === cp.checkpoint_id
 
               return (
-                <tr key={cp.checkpoint_id}>
-                  <td className="py-3 text-xs font-medium text-slate-700">{cp.checkpoint_label}</td>
-                  <td className="py-3">
-                    <span
-                      className="rounded-full px-2.5 py-0.5 text-xs font-semibold"
-                      style={{
-                        backgroundColor: cp.status === 'COMPLETED' ? '#dcfce7' : cp.status === 'OVERDUE' ? '#fee2e2' : '#f1f5f9',
-                        color:            cp.status === 'COMPLETED' ? '#15803d' : cp.status === 'OVERDUE' ? '#b91c1c' : '#64748b',
-                      }}
-                    >
-                      {cp.status}
-                    </span>
-                  </td>
-                  <td className="py-3 text-center">
-                    {mgr != null ? (
+                <>
+                  <tr key={cp.checkpoint_id}>
+                    <td className="py-3 text-xs font-medium text-slate-700">{cp.checkpoint_label}</td>
+                    <td className="py-3">
                       <span
-                        className="inline-block rounded-full px-3 py-0.5 text-xs font-bold"
-                        style={{ backgroundColor: scoreBg(mgr), color: scoreColour(mgr) }}
+                        className="rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                        style={{
+                          backgroundColor: cp.status === 'COMPLETED' ? '#dcfce7' : cp.status === 'OVERDUE' ? '#fee2e2' : '#f1f5f9',
+                          color:            cp.status === 'COMPLETED' ? '#15803d' : cp.status === 'OVERDUE' ? '#b91c1c' : '#64748b',
+                        }}
                       >
-                        {mgr.toFixed(1)}
+                        {cp.status}
                       </span>
-                    ) : (
-                      <span className="text-xs text-slate-400">Not submitted</span>
-                    )}
-                  </td>
-                  <td className="py-3 text-center">
-                    {self != null ? (
-                      <span
-                        className="inline-block rounded-full px-3 py-0.5 text-xs font-bold"
-                        style={{ backgroundColor: scoreBg(self), color: scoreColour(self) }}
-                      >
-                        {self.toFixed(1)}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-400">Not submitted</span>
-                    )}
-                  </td>
-                </tr>
+                    </td>
+                    <td className="py-3 text-center">
+                      {mgr != null ? (
+                        <span
+                          className="inline-block rounded-full px-3 py-0.5 text-xs font-bold"
+                          style={{ backgroundColor: scoreBg(mgr), color: scoreColour(mgr) }}
+                        >
+                          {mgr.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">Not submitted</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-center">
+                      {self != null ? (
+                        <button
+                          onClick={() => setExpandedSelf(isExpanded ? null : cp.checkpoint_id)}
+                          className="inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-bold transition-opacity hover:opacity-80"
+                          style={{ backgroundColor: scoreBg(self), color: scoreColour(self) }}
+                          title={isExpanded ? 'Hide details' : 'View self-assessment details'}
+                        >
+                          {self.toFixed(1)}
+                          {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">Not submitted</span>
+                      )}
+                    </td>
+                  </tr>
+                  {isExpanded && hasSaDetail && (
+                    <tr key={`${cp.checkpoint_id}-detail`}>
+                      <td colSpan={4} className="pb-3">
+                        <SelfAssessmentDetail sa={cp.selfAssessment} />
+                      </td>
+                    </tr>
+                  )}
+                </>
               )
             })}
           </tbody>

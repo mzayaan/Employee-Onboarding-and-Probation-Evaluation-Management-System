@@ -313,6 +313,8 @@ const getOnboardingProgress = async (req, res) => {
           model: User,
           as: 'user',
           attributes: ['first_name', 'last_name', 'email', 'is_active'],
+          where: { role: 'NEW_EMPLOYEE' }, // only show actual employees, not managers/HR with profiles
+          required: true,
         },
         {
           model: Department,

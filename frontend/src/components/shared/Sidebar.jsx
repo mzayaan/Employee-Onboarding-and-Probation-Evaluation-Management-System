@@ -24,6 +24,9 @@ import {
   GraduationCap,
   SlidersHorizontal,
   UserCircle,
+  Heart,
+  HeartHandshake,
+  MessageSquarePlus,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -41,6 +44,7 @@ const NAV_ITEMS = {
     { to: '/hr/tasks',           icon: ClipboardList,    label: 'Tasks'             },
     { to: '/manager/attendance',    icon: CalendarDays,    label: 'Attendance'         },
     { to: '/performance-notes',    icon: StickyNote,      label: 'Performance Notes'  },
+    { to: '/development-reviews', icon: Heart,           label: 'Development Reviews' },
     { to: '/hr/recommendations',   icon: BadgeCheck,      label: 'Recommendations'    },
     { to: '/hr/hrdc-training',     icon: BookOpen,        label: 'HRDC Training'      },
     { to: '/notifications',        icon: Bell,            label: 'Notifications'      },
@@ -53,7 +57,8 @@ const NAV_ITEMS = {
     { to: '/manager/recommendations', icon: BadgeCheck,      label: 'Recommendations'    },
     { to: '/manager/tasks',           icon: ClipboardList,   label: 'Tasks'              },
     { to: '/manager/attendance',      icon: CalendarDays,    label: 'Attendance'         },
-    { to: '/performance-notes',       icon: StickyNote,      label: 'Performance Notes'  },
+    { to: '/performance-notes',       icon: StickyNote,      label: 'Performance Notes'   },
+    { to: '/development-reviews',     icon: Heart,           label: 'Development Reviews' },
     { to: '/notifications',           icon: Bell,            label: 'Notifications'      },
   ],
   NEW_EMPLOYEE: [
@@ -64,8 +69,10 @@ const NAV_ITEMS = {
     { to: '/employee/self-assessments',icon: BarChart3,        label: 'Self-Assessment' },
     { to: '/employee/contract',        icon: FileSignature,    label: 'My Contract'     },
     { to: '/employee/tax-declaration', icon: Calculator,       label: 'Tax Declaration' },
-    { to: '/employee/training',        icon: GraduationCap,    label: 'My Training'     },
-    { to: '/notifications',            icon: Bell,             label: 'Notifications'   },
+    { to: '/employee/training',           icon: GraduationCap,  label: 'My Training'          },
+    { to: '/employee/development-reviews',   icon: HeartHandshake,    label: 'Development Reviews'  },
+    { to: '/employee/performance-feedback', icon: MessageSquarePlus, label: 'My Feedback'          },
+    { to: '/notifications',                 icon: Bell,              label: 'Notifications'         },
   ],
   SYSTEM_ADMIN: [
     { to: '/admin/dashboard',  icon: LayoutDashboard, label: 'Dashboard'      },

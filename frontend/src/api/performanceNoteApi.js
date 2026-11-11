@@ -18,9 +18,12 @@ export const getNotesByProfile = async (profileId) => {
   return res.data.data
 }
 
-// Update the text of an existing note
-export const updateNote = async (noteId, noteText) => {
-  const res = await api.patch(`/performance-notes/${noteId}`, { note_text: noteText })
+// Update a note — accepts either a plain string (backward-compat) or a full payload object
+export const updateNote = async (noteId, payloadOrText) => {
+  const body = typeof payloadOrText === 'string'
+    ? { note_text: payloadOrText }
+    : payloadOrText
+  const res = await api.patch(`/performance-notes/${noteId}`, body)
   return res.data.data
 }
 
@@ -28,4 +31,29 @@ export const updateNote = async (noteId, noteText) => {
 export const deleteNote = async (noteId) => {
   const res = await api.delete(`/performance-notes/${noteId}`)
   return res.data
+}
+
+// ── Employee-facing helpers ───────────────────────────────────────────────────
+
+// Employee: list all notes on own profile
+export const getMyNotes = async () => {
+  const res = await api.get('/performance-notes/my')
+  return res.data.data
+}
+
+// Employee: submit an EMPLOYEE_FEEDBACK note
+export const addEmployeeFeedback = async (note_text, evaluation_period_id = null) => {
+  const res = await api.post('/performance-notes/my/feedback', {
+    note_text,
+    evaluation_period_id,
+  })
+  return res.data.data
+}
+
+// Employee: add a response to a specific note
+export const respondToNote = async (noteId, employee_response) => {
+  const res = await api.patch(`/performance-notes/${noteId}/respond`, {
+    employee_response,
+  })
+  return res.data.data
 }
