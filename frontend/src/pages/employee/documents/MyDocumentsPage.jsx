@@ -41,7 +41,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 const viewDocument = async (documentId) => {
   try {
     const token = localStorage.getItem('token')
-    const res = await fetch(`${API_BASE}/api/documents/${documentId}/view`, {
+    const res = await fetch(`${API_BASE}/documents/${documentId}/view`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!res.ok) throw new Error('Failed to fetch document')

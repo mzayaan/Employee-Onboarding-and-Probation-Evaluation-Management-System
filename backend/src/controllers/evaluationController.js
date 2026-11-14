@@ -631,7 +631,7 @@ const submitSelfAssessment = async (req, res) => {
           model: ProbationPeriod,
           as:    'probationPeriod',
           include: [
-            { model: EmployeeProfile, as: 'employeeProfile', attributes: ['profile_id', 'user_id'] },
+            { model: EmployeeProfile, as: 'employeeProfile', attributes: ['profile_id', 'user_id', 'manager_id'] },
           ],
         },
       ],

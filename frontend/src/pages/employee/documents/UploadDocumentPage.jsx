@@ -10,7 +10,7 @@ import AppShell from '@/components/shared/AppShell'
 import { getDocumentTypes, uploadDocument } from '@/api/documentApi'
 import { UploadCloud, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 
-const ACCEPTED = '.pdf,.jpg,.jpeg,.png,.docx'
+const ACCEPTED = '.pdf,.jpg,.jpeg,.png'
 
 export default function UploadDocumentPage() {
   const navigate = useNavigate()
@@ -34,14 +34,13 @@ export default function UploadDocumentPage() {
   // ── File selection ─────────────────────────────────────────────────────────
   const handleFileChange = (selectedFile) => {
     if (!selectedFile) return
-    const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    const allowed = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png']
     if (!allowed.includes(selectedFile.type)) {
-      setFieldErrors((prev) => ({ ...prev, file: 'Only PDF, JPG, PNG and DOCX files are accepted.' }))
+      setFieldErrors((prev) => ({ ...prev, file: 'Invalid file type. Only PDF, JPG and PNG files are accepted.' }))
       return
     }
-    if (selectedFile.size > 5 * 1024 * 1024) {
-      setFieldErrors((prev) => ({ ...prev, file: 'File must be smaller than 5 MB.' }))
+    if (selectedFile.size > 10 * 1024 * 1024) {
+      setFieldErrors((prev) => ({ ...prev, file: 'File must be smaller than 10 MB.' }))
       return
     }
     setFile(selectedFile)
@@ -114,7 +113,7 @@ export default function UploadDocumentPage() {
         <h1 className="text-2xl font-bold" style={{ color: '#0f1c2e' }}>Upload Document</h1>
         <p className="mt-1 text-sm text-slate-500">
           Submit a required onboarding document for HR review.
-          Accepted formats: PDF, JPG, PNG, DOCX — max 5 MB.
+          Accepted formats: PDF, JPG, PNG — max 10 MB.
         </p>
       </div>
 

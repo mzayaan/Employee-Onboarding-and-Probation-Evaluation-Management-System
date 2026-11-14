@@ -117,7 +117,7 @@ const updateCriterion = async (req, res) => {
 
     // Also validate when only reactivating a criterion without changing its weight.
     // The weight block above already handles the combined weight+activate case.
-    if (is_active === true && !criterion.is_active && weight_percent === undefined) {
+    if ((is_active === true || is_active === 'true') && !criterion.is_active && weight_percent === undefined) {
       const others = await EvaluationCriterion.findAll({
         where: { is_active: true, criterion_id: { [Op.ne]: id } },
       });
