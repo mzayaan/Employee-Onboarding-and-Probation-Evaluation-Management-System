@@ -283,6 +283,7 @@ const getMyTeam = async (req, res) => {
       EmployeeProfile,
       ProbationPeriod,
       EvaluationCheckpoint,
+      FinalRecommendation,
       ManagerEvaluation,
       User,
     } = require('../models');
@@ -314,6 +315,16 @@ const getMyTeam = async (req, res) => {
               include: [
                 { model: ManagerEvaluation, as: 'managerEvaluation', attributes: ['eval_id', 'weighted_score', 'submitted_at'] },
               ],
+            },
+            {
+              // FR-15: include APPROVED final recommendations so the manager can see
+              // the outcome badge on their team overview. Using the hasMany alias
+              // 'finalRecommendations' (supports multi-cycle approval workflow).
+              model:      FinalRecommendation,
+              as:         'finalRecommendations',
+              where:      { approval_status: 'APPROVED' },
+              required:   false,
+              attributes: ['rec_id', 'recommendation_type', 'approval_status', 'cycle_number', 'generated_at'],
             },
           ],
         },

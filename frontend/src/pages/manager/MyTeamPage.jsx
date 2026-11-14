@@ -264,25 +264,32 @@ export default function MyTeamPage() {
                       <CheckpointPill checkpoint={cp90} />
                     </div>
 
-                    {/* Final recommendation if available */}
-                    {probation?.finalRecommendation && (
-                      <div className="flex items-center gap-1.5 text-xs">
-                        <span className="font-medium text-slate-600">Outcome:</span>
-                        <span
-                          className="rounded-full px-2 py-0.5 text-xs font-bold"
-                          style={{
-                            backgroundColor:
-                              probation.finalRecommendation.recommendation_type === 'CONFIRM' ? '#dcfce7' :
-                              probation.finalRecommendation.recommendation_type === 'EXTEND'  ? '#fef9c3' : '#fee2e2',
-                            color:
-                              probation.finalRecommendation.recommendation_type === 'CONFIRM' ? '#15803d' :
-                              probation.finalRecommendation.recommendation_type === 'EXTEND'  ? '#854d0e' : '#b91c1c',
-                          }}
-                        >
-                          {probation.finalRecommendation.recommendation_type}
-                        </span>
-                      </div>
-                    )}
+                    {/* Final recommendation if available — pick latest APPROVED cycle */}
+                    {(() => {
+                      const approvedRecs = (probation?.finalRecommendations || [])
+                        .slice()
+                        .sort((a, b) => (b.cycle_number || 0) - (a.cycle_number || 0))
+                      const finalRec = approvedRecs[0] || null
+                      if (!finalRec) return null
+                      return (
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <span className="font-medium text-slate-600">Outcome:</span>
+                          <span
+                            className="rounded-full px-2 py-0.5 text-xs font-bold"
+                            style={{
+                              backgroundColor:
+                                finalRec.recommendation_type === 'CONFIRM' ? '#dcfce7' :
+                                finalRec.recommendation_type === 'EXTEND'  ? '#fef9c3' : '#fee2e2',
+                              color:
+                                finalRec.recommendation_type === 'CONFIRM' ? '#15803d' :
+                                finalRec.recommendation_type === 'EXTEND'  ? '#854d0e' : '#b91c1c',
+                            }}
+                          >
+                            {finalRec.recommendation_type}
+                          </span>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
               </div>

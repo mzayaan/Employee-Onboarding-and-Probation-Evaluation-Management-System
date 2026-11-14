@@ -33,6 +33,20 @@ const { createNotification } = require('../services/notificationService');
 // DPA-2017: same sensitive-field list used by employeeController for list/detail endpoints.
 const { SENSITIVE_FIELDS }  = require('./employeeController');
 
+// ---------------------------------------------------------------------------
+// HELPER: strip SENSITIVE_FIELDS from the nested employeeProfile inside each
+// recommendation row.  Used by any list endpoint exposed to roles that must not
+// see payroll-sensitive employee data (LINE_MANAGER, DIRECTOR).
+// Serialises Sequelize model instances to plain objects in the same pass.
+// ---------------------------------------------------------------------------
+const stripSensitiveFromRecs = (recs) =>
+  recs.map((r) => {
+    const rec     = r.toJSON ? r.toJSON() : r;
+    const profile = rec?.probationPeriod?.employeeProfile;
+    if (profile) SENSITIVE_FIELDS.forEach((f) => delete profile[f]);
+    return rec;
+  });
+
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
 
@@ -176,7 +190,8 @@ const listPendingDirector = async (req, res) => {
       order: [['submitted_to_director_at', 'ASC']],
     });
 
-    return res.json({ success: true, data: recs });
+    // DPA-2017: DIRECTOR must not see payroll-sensitive employee fields in list views.
+    return res.json({ success: true, data: stripSensitiveFromRecs(recs) });
   } catch (error) {
     console.error('[directorController.listPendingDirector]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve pending director queue.' });
@@ -661,7 +676,11 @@ const listAllRecommendations = async (req, res) => {
       order: [['generated_at', 'DESC']],
     });
 
-    return res.json({ success: true, data: recs });
+    // DPA-2017: DIRECTOR must not see payroll-sensitive fields; HR_ADMIN may see all.
+    const data = req.user.role === 'DIRECTOR'
+      ? stripSensitiveFromRecs(recs)
+      : recs.map((r) => (r.toJSON ? r.toJSON() : r));
+    return res.json({ success: true, data });
   } catch (error) {
     console.error('[directorController.listAllRecommendations]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve recommendations.' });
@@ -699,7 +718,8 @@ const listMyRecommendations = async (req, res) => {
       order: [['generated_at', 'DESC']],
     });
 
-    return res.json({ success: true, data: recs });
+    // DPA-2017: LINE_MANAGER must not see payroll-sensitive employee fields.
+    return res.json({ success: true, data: stripSensitiveFromRecs(recs) });
   } catch (error) {
     console.error('[directorController.listMyRecommendations]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve your recommendations.' });
@@ -717,4 +737,5 @@ module.exports = {
   returnByDirector,
   listAllRecommendations,
   listMyRecommendations,
+  stripSensitiveFromRecs, // exported for unit testing (DPA-2017)
 };

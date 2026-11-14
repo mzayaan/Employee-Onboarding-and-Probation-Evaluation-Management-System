@@ -23,7 +23,9 @@ const {
   GeneratedReport,
   DevelopmentReview,
 } = require('../models');
-const { createAuditLog } = require('../utils/auditLogger');
+const { createAuditLog }                                        = require('../utils/auditLogger');
+const { filterCheckpointsByCycle, buildCriteriaMap,
+        calcCriteriaWeightedScores }                            = require('../utils/pdfHelpers');
 
 // ── Colour palette (matches Figma design) ──────────────────────────────────
 const NAVY      = '#1e3a5f';   // header background, avatar, table header
@@ -240,9 +242,22 @@ const generateReport = async (req, res) => {
       });
     }
 
+    // ── G42-CYCLE-ISO: derive cycle boundary timestamp ───────────────────
+    // Checkpoints completed AFTER the Director approved this cycle belong to
+    // the next (unapproved) cycle and must be excluded from this PDF.
+    // Use director_decision_at when available; fall back to generated_at so
+    // legacy rows without the timestamp still work correctly.
+    const cycleDecisionAt = finalRec?.director_decision_at
+      ? new Date(finalRec.director_decision_at)
+      : finalRec?.generated_at
+        ? new Date(finalRec.generated_at)
+        : null;
+
     // ── Business rule: at least one completed checkpoint ──────────────────
     const checkpoints  = [...(period.checkpoints || [])].sort((a, b) => a.day_number - b.day_number);
-    const completedCps = checkpoints.filter((cp) => cp.status === 'COMPLETED');
+    // filterCheckpointsByCycle: restricts to COMPLETED checkpoints within this
+    // approved cycle, preventing cycle 2 scores from appearing in a cycle 1 PDF.
+    const completedCps = filterCheckpointsByCycle(checkpoints, cycleDecisionAt);
 
     if (completedCps.length === 0) {
       return res.status(400).json({
@@ -265,42 +280,16 @@ const generateReport = async (req, res) => {
     const employeeId   = `EMP-${new Date().getFullYear()}-${String(emp?.profile_id || period.period_id).padStart(3, '0')}`;
 
     // ── Build criteria cross-tab ─────────────────────────────────────────
-    // criteriaMap: criterionName -> { weight, criterion_id, cpScores: {cpId: raw_score} }
-    const criteriaMap = {};
-    completedCps.forEach((cp) => {
-      (cp.managerEvaluation?.scores || []).forEach((s) => {
-        const name = s.criterion?.name ?? `Criterion ${s.criterion_id}`;
-        if (!criteriaMap[name]) {
-          criteriaMap[name] = {
-            name,
-            // G09: prefer the snapshot weight captured at submission time so that
-            // historical PDFs remain accurate even if criteria weights change later.
-            // Fall back to the current criterion weight for pre-migration rows.
-            weight:       Number.parseFloat(s.weight_percent_at_scoring ?? s.criterion?.weight_percent ?? 0),
-            criterion_id: s.criterion_id,
-            cpScores:     {},
-          };
-        }
-        criteriaMap[name].cpScores[cp.checkpoint_id] = Number.parseFloat(s.raw_score);
-      });
-    });
+    // buildCriteriaMap stores { raw_score, weight } per checkpoint so that each
+    // checkpoint contributes with its own weight snapshot (G09 / FR-14).
+    const criteriaMap  = buildCriteriaMap(completedCps);
     const criteriaList = Object.values(criteriaMap).sort((a, b) => b.weight - a.weight);
 
-    // Per-criterion weighted score: average across ALL completed checkpoints so the
-    // WEIGHTED column sums to the cumulative total displayed in the footer (FR-14).
-    // lastRaw is kept from the final checkpoint for the Manager vs Self-Assessment section.
+    // calcCriteriaWeightedScores: sets c.weightedScore using per-checkpoint weights
+    // so the WEIGHTED column always matches the cumulative footer (FR-14).
+    // Also sets c.lastRaw for the Manager vs Self-Assessment comparison section.
     const lastMgrScores = lastCp?.managerEvaluation?.scores || [];
-    criteriaList.forEach((c) => {
-      const lastS   = lastMgrScores.find((s) => s.criterion_id === c.criterion_id || s.criterion?.name === c.name);
-      c.lastRaw     = lastS ? Number.parseFloat(lastS.raw_score) : null;
-
-      // Average the raw score for this criterion across all completed checkpoints
-      const cpRaws  = completedCps
-        .map((cp) => c.cpScores[cp.checkpoint_id])
-        .filter((v) => v != null);
-      const avgRaw  = cpRaws.length > 0 ? cpRaws.reduce((a, b) => a + b, 0) / cpRaws.length : null;
-      c.weightedScore = avgRaw != null ? (avgRaw / 5) * c.weight : null;
-    });
+    calcCriteriaWeightedScores(criteriaList, completedCps, lastMgrScores);
 
     // Cumulative score: average of each checkpoint's stored weighted_score — matches the
     // dashboard and evaluationController formula exactly (FR-14).
