@@ -41,21 +41,18 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 // Open a document securely via an authenticated Blob fetch, so the JWT is
 // sent in the Authorization header rather than exposed in the URL (NFR-02).
+// Returns a Promise that rejects on failure so callers can surface the error.
 const viewDocument = async (documentId) => {
-  try {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${API_BASE}/documents/${documentId}/view`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) throw new Error('Failed to fetch document')
-    const blob = await res.blob()
-    const url  = URL.createObjectURL(blob)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    // Release the object URL after a minute to avoid memory leaks
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  } catch {
-    // Non-critical — a silent failure is acceptable here
-  }
+  const token = localStorage.getItem('token')
+  const res = await fetch(`${API_BASE}/documents/${documentId}/view`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Failed to fetch document')
+  const blob = await res.blob()
+  const url  = URL.createObjectURL(blob)
+  window.open(url, '_blank', 'noopener,noreferrer')
+  // Release the object URL after a minute to avoid memory leaks
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export default function MyDocumentsPage() {
