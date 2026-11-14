@@ -29,6 +29,11 @@ const SelfAssessmentScore = sequelize.define('SelfAssessmentScore', {
     comment: 'Employee rating 1–5',
     validate: { min: 1, max: 5 },
   },
+  weight_percent_at_scoring: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    comment: 'G45-FIX: Snapshot of criterion weight at self-assessment submission time',
+  },
   weighted_contribution: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: false,

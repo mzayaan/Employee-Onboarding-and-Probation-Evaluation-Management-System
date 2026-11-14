@@ -286,6 +286,7 @@ const getMyTeam = async (req, res) => {
       ManagerEvaluation,
       User,
     } = require('../models');
+    const { Op } = require('sequelize');
 
     const profiles = await EmployeeProfile.findAll({
       where: { manager_id: req.user.user_id },
@@ -300,7 +301,9 @@ const getMyTeam = async (req, res) => {
         {
           model: ProbationPeriod,
           as:    'probationPeriods',
-          where: { status: 'ACTIVE' },
+          // G42-FIX: Include EXTENDED periods so the manager can see employees
+          // whose probation has been extended by the Director.
+          where: { status: { [Op.in]: ['ACTIVE', 'EXTENDED'] } },
           required: false,
           include: [
             {
@@ -523,8 +526,20 @@ const submitManagerEvaluation = async (req, res) => {
           // Submit recommendation to HR for review (3-stage approval workflow).
           // ProbationPeriod.status stays ACTIVE until the Director approves
           // (directorController.approveRecommendation handles the final transition).
+          //
+          // G42-FIX: Scope the lookup to non-approved records only.
+          // On a second evaluation cycle (after EXTEND), the previous record has
+          // approval_status = 'APPROVED'.  findOrCreate would find that old record
+          // and return it without creating a fresh PENDING_HR_REVIEW record for
+          // the new cycle.  By excluding APPROVED, we always create a new record
+          // for the second cycle while still de-duplicating concurrent triggers
+          // within the same cycle.
+          const { Op: _Op1 } = require('sequelize');
           await FinalRecommendation.findOrCreate({
-            where: { period_id: period.period_id },
+            where: {
+              period_id:       period.period_id,
+              approval_status: { [_Op1.notIn]: ['APPROVED'] },
+            },
             defaults: {
               recommendation_type: recommendationType,
               cumulative_score:    cumulative,
@@ -779,8 +794,14 @@ const submitSelfAssessment = async (req, res) => {
           // ProbationPeriod.status stays ACTIVE until the Director approves.
           // submitted_by is the line manager (profile.manager_id), not the employee
           // who triggered this code path by completing their self-assessment (FR-15).
+          //
+          // G42-FIX: Same second-cycle fix as submitManagerEvaluation above.
+          const { Op: _Op2 } = require('sequelize');
           await FinalRecommendation.findOrCreate({
-            where: { period_id: period.period_id },
+            where: {
+              period_id:       period.period_id,
+              approval_status: { [_Op2.notIn]: ['APPROVED'] },
+            },
             defaults: {
               recommendation_type: recommendationType,
               cumulative_score:    cumulative,

@@ -161,6 +161,66 @@ ALTER TABLE `audit_logs`
 
 
 -- =============================================================================
+-- G45/G47 — self_assessment_scores.weight_percent_at_scoring
+-- Mirrors evaluation_scores.weight_percent_at_scoring so that self-assessment
+-- weighted contributions can be reproduced if criteria weights change later.
+-- =============================================================================
+
+CALL _add_col_if_missing(
+  'self_assessment_scores',
+  'weight_percent_at_scoring',
+  'DECIMAL(5,2) NULL AFTER `raw_score` COMMENT "G45: Snapshot of the criterion weight used at self-assessment submission time."'
+);
+
+
+-- =============================================================================
+-- G47 — notifications.type ENUM expansion
+--
+-- Four new notification types used by controllers:
+--   EMPLOYEE_ASSIGNED          — manager notified when HR assigns an employee
+--   SELF_ASSESSMENT_SUBMITTED  — HR/manager notified on employee self-assessment
+--   PERFORMANCE_NOTE_ADDED     — employee notified on a new performance note
+--   PERFORMANCE_NOTE_RESPONDED — manager notified when employee responds to a note
+--
+-- Uses unconditional MODIFY COLUMN (same idempotent pattern as audit_logs above).
+-- =============================================================================
+
+ALTER TABLE `notifications`
+  MODIFY COLUMN `type` ENUM(
+    -- Onboarding — document lifecycle
+    'DOCUMENT_PENDING',
+    'DOCUMENT_APPROVED',
+    'DOCUMENT_REJECTED',
+    -- Onboarding — tasks
+    'TASK_ASSIGNED',
+    'TASK_OVERDUE',
+    -- Evaluation — checkpoint reminders
+    'EVAL_DUE',
+    'EVAL_OVERDUE',
+    -- Account
+    'ACCOUNT_CREATED',
+    -- Reporting
+    'PDF_GENERATED',
+    -- Probation period
+    'PROBATION_COMPLETE',
+    -- Probation approval workflow (3-stage Director approval)
+    'RECOMMENDATION_PENDING',
+    'RECOMMENDATION_RETURNED',
+    'RECOMMENDATION_APPROVED',
+    -- Probation outcome (employee notification on Director final decision)
+    'PROBATION_OUTCOME',
+    -- Development reviews
+    'DEVELOPMENT_REVIEW_CREATED',
+    'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
+    -- Additional workflow events (G47)
+    'EMPLOYEE_ASSIGNED',
+    'SELF_ASSESSMENT_SUBMITTED',
+    'PERFORMANCE_NOTE_ADDED',
+    'PERFORMANCE_NOTE_RESPONDED'
+  ) NOT NULL;
+
+
+-- =============================================================================
 -- Clean up helper procedures
 -- =============================================================================
 DROP PROCEDURE IF EXISTS _add_col_if_missing;
@@ -186,3 +246,15 @@ DROP PROCEDURE IF EXISTS _add_col_if_missing;
 --  WHERE TABLE_SCHEMA = DATABASE()
 --    AND TABLE_NAME   = 'audit_logs'
 --    AND COLUMN_NAME  = 'action_type';
+--
+-- SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+--   FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE()
+--    AND TABLE_NAME   = 'self_assessment_scores'
+--    AND COLUMN_NAME  = 'weight_percent_at_scoring';
+--
+-- SELECT COLUMN_TYPE
+--   FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE()
+--    AND TABLE_NAME   = 'notifications'
+--    AND COLUMN_NAME  = 'type';

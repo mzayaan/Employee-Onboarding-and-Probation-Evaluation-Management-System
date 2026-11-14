@@ -121,16 +121,22 @@ const login = async (req, res) => {
 
 // =============================================================================
 // POST /api/auth/logout
-// Stateless JWT — client must discard the token.
-// Audit log records the intent to log out.
+// G48-FIX: Increment token_version on logout so the JWT is immediately invalid.
+// Any request that arrives after logout with the old token will fail the
+// version check in authenticate.js.
 // FR-01 | NFR-02
 // =============================================================================
 const logout = async (req, res) => {
   try {
+    const user = await User.findByPk(req.user.user_id);
+    if (user) {
+      await user.update({ token_version: (user.token_version ?? 0) + 1 });
+    }
+
     await createAuditLog({
       userId:      req.user.user_id,
       actionType:  'LOGOUT',
-      description: `User ${req.user.email} logged out.`,
+      description: `User ${req.user.email} logged out. Token version incremented to invalidate session.`,
       ipAddress:   getIp(req),
     });
 

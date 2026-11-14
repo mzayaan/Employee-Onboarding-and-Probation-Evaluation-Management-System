@@ -44,7 +44,12 @@ const Notification = sequelize.define('Notification', {
       'PROBATION_OUTCOME',
       // Development reviews
       'DEVELOPMENT_REVIEW_CREATED',
-      'DEVELOPMENT_REVIEW_ACKNOWLEDGED'
+      'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
+      // Additional workflow events (G47-FIX)
+      'EMPLOYEE_ASSIGNED',          // manager notified when an employee is assigned to them
+      'SELF_ASSESSMENT_SUBMITTED',  // HR/manager notified when employee submits self-assessment
+      'PERFORMANCE_NOTE_ADDED',     // employee notified when a performance note is added
+      'PERFORMANCE_NOTE_RESPONDED'  // manager notified when employee responds to a note
     ),
     allowNull: false,
   },
