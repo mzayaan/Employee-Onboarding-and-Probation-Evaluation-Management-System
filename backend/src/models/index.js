@@ -336,10 +336,15 @@ ProbationPeriod.hasMany(ProbationPeriod, {
   onUpdate: 'CASCADE',
 });
 
-// ── ProbationPeriod ↔ FinalRecommendation (1:1) ───────────────────────────
-ProbationPeriod.hasOne(FinalRecommendation, {
+// ── ProbationPeriod ↔ FinalRecommendation (1:many — one per approval cycle) ──
+// A period can have multiple FinalRecommendation rows when probation is extended
+// and a new cycle is opened.  Each row carries a cycle_number so the current
+// active record can be identified by selecting the highest cycle_number or the
+// latest APPROVED record.  Callers must NOT use a 1:1 (hasOne) alias; they must
+// use the 'finalRecommendations' array alias and select the relevant cycle.
+ProbationPeriod.hasMany(FinalRecommendation, {
   foreignKey: 'period_id',
-  as: 'finalRecommendation',
+  as: 'finalRecommendations',
   onDelete: 'CASCADE',
   onUpdate: 'CASCADE',
 });

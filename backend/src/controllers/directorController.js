@@ -30,6 +30,8 @@ const {
 
 const { createAuditLog }    = require('../utils/auditLogger');
 const { createNotification } = require('../services/notificationService');
+// DPA-2017: same sensitive-field list used by employeeController for list/detail endpoints.
+const { SENSITIVE_FIELDS }  = require('./employeeController');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -204,7 +206,16 @@ const getRecommendation = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, data: rec });
+    // NFR-03 / DPA-2017: LINE_MANAGER and DIRECTOR must not see payroll-sensitive
+    // fields on the nested EmployeeProfile returned inside a recommendation response.
+    // We serialise to plain JSON and strip the fields before sending.
+    const recData = rec.toJSON ? rec.toJSON() : rec;
+    const nestedProfile = recData?.probationPeriod?.employeeProfile;
+    if (nestedProfile && (req.user.role === 'LINE_MANAGER' || req.user.role === 'DIRECTOR')) {
+      SENSITIVE_FIELDS.forEach((f) => delete nestedProfile[f]);
+    }
+
+    return res.json({ success: true, data: recData });
   } catch (error) {
     console.error('[directorController.getRecommendation]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve recommendation.' });

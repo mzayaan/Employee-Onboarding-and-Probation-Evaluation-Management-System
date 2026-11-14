@@ -150,6 +150,9 @@ const generateReport = async (req, res) => {
                 {
                   model: EvaluationScore,
                   as: 'scores',
+                  // Include weight_percent_at_scoring (snapshot taken at submission, G09).
+                  // Falls back to criterion.weight_percent for rows predating migration 005.
+                  attributes: { include: ['weight_percent_at_scoring'] },
                   include: [
                     { model: EvaluationCriterion, as: 'criterion', attributes: ['name', 'weight_percent', 'criterion_id'] },
                   ],
@@ -164,6 +167,7 @@ const generateReport = async (req, res) => {
                 {
                   model: SelfAssessmentScore,
                   as: 'scores',
+                  attributes: { include: ['weight_percent_at_scoring'] },
                   include: [
                     { model: EvaluationCriterion, as: 'criterion', attributes: ['name', 'weight_percent', 'criterion_id'] },
                   ],
@@ -179,7 +183,12 @@ const generateReport = async (req, res) => {
           order: [['day_number', 'ASC']],
         },
         { model: AttendanceRecord,    as: 'attendanceRecords',  attributes: ['status'] },
-        { model: FinalRecommendation, as: 'finalRecommendation' },
+        // G42-CYCLE: use hasMany alias — select the current cycle below.
+        {
+          model: FinalRecommendation,
+          as:    'finalRecommendations',
+          order: [['cycle_number', 'ASC']],
+        },
       ],
     });
 
@@ -192,11 +201,22 @@ const generateReport = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
+    // ── G42-CYCLE: select the latest APPROVED recommendation cycle ─────────
+    // A period can have multiple FinalRecommendation rows (one per cycle when
+    // probation is extended).  For PDF generation we always use the highest
+    // cycle_number that has been APPROVED by the Director.  A newer PENDING
+    // cycle does not invalidate an older APPROVED one; the Director must
+    // approve the new cycle before that period's next PDF can be generated.
+    const allRecs = period.finalRecommendations || [];
+    const approvedRecs = allRecs
+      .filter((r) => r.approval_status === 'APPROVED')
+      .sort((a, b) => b.cycle_number - a.cycle_number);
+    const finalRec = approvedRecs[0] || null;
+
     // ── Fetch Director user (for Authorisation block) ─────────────────────
-    const finalRecForDirector = period.finalRecommendation;
     let directorUser = null;
-    if (finalRecForDirector?.director_id) {
-      directorUser = await User.findByPk(finalRecForDirector.director_id, {
+    if (finalRec?.director_id) {
+      directorUser = await User.findByPk(finalRec.director_id, {
         attributes: ['first_name', 'last_name'],
       });
     }
@@ -213,8 +233,7 @@ const generateReport = async (req, res) => {
     // ── Business rule: Director must have approved the recommendation ────────
     // Lecturer requirement: PDF generation is locked until the Director gives
     // final approval through the 3-stage approval workflow (FR-15, FR-16).
-    const finalRecForGuard = period.finalRecommendation;
-    if (!finalRecForGuard || finalRecForGuard.approval_status !== 'APPROVED') {
+    if (!finalRec) {
       return res.status(403).json({
         success: false,
         message: 'The PDF evaluation report is only available after the Director has approved the final recommendation.',
@@ -241,7 +260,7 @@ const generateReport = async (req, res) => {
     const managerName  = emp?.manager
       ? `${emp.manager.first_name} ${emp.manager.last_name}`
       : 'N/A';
-    const finalRec     = period.finalRecommendation;
+    // finalRec was resolved above (G42-CYCLE latest APPROVED cycle selection).
     const lastCp       = completedCps[completedCps.length - 1];
     const employeeId   = `EMP-${new Date().getFullYear()}-${String(emp?.profile_id || period.period_id).padStart(3, '0')}`;
 
@@ -254,7 +273,10 @@ const generateReport = async (req, res) => {
         if (!criteriaMap[name]) {
           criteriaMap[name] = {
             name,
-            weight:       Number.parseFloat(s.criterion?.weight_percent || 0),
+            // G09: prefer the snapshot weight captured at submission time so that
+            // historical PDFs remain accurate even if criteria weights change later.
+            // Fall back to the current criterion weight for pre-migration rows.
+            weight:       Number.parseFloat(s.weight_percent_at_scoring ?? s.criterion?.weight_percent ?? 0),
             criterion_id: s.criterion_id,
             cpScores:     {},
           };

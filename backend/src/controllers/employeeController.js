@@ -95,12 +95,17 @@ const checkOnboardingCompletion = async (profileId, transaction = null) => {
   try {
     const opts = transaction ? { transaction } : {};
 
-    // All submitted documents must be APPROVED (none PENDING or REJECTED)
-    const pendingOrRejected = await OnboardingDocument.count({
-      where: { profile_id: profileId, status: ['PENDING', 'REJECTED'] },
+    // Block completion only while a document is awaiting HR review (PENDING).
+    // A REJECTED document that has already been replaced by an APPROVED re-upload
+    // must not block completion — the per-required-type check below (lines ~115-130)
+    // already enforces that every required type has at least one APPROVED submission.
+    // Including REJECTED in this count would permanently block completion for any
+    // employee whose initial upload was rejected and then re-uploaded successfully.
+    const pending = await OnboardingDocument.count({
+      where: { profile_id: profileId, status: 'PENDING' },
       ...opts,
     });
-    if (pendingOrRejected > 0) return false;
+    if (pending > 0) return false;
 
     // There must be at least one approved document (guard against new employee with no docs yet)
     const approvedCount = await OnboardingDocument.count({
@@ -1187,4 +1192,7 @@ module.exports = {
   getLeaveBalance,
   // Exported so documentController and taskController can trigger auto-completion
   checkOnboardingCompletion,
+  // Exported so directorController can apply the same DPA-2017 field filtering
+  // to nested EmployeeProfile objects returned through recommendation endpoints.
+  SENSITIVE_FIELDS,
 };

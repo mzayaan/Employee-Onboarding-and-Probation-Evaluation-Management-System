@@ -338,10 +338,20 @@ const updateTaskStatus = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
-    // FR-08: when a task is marked COMPLETED, check if all tasks + docs are done
-    // so we can auto-set onboarding_status = 'COMPLETED' for this employee.
     if (status === 'COMPLETED') {
+      // FR-08: when a task is marked COMPLETED, check if all tasks + docs are done
+      // so we can auto-set onboarding_status = 'COMPLETED' for this employee.
       checkOnboardingCompletion(assignment.profile_id).catch(() => {});
+    } else {
+      // FR-08 / Task-46 stale-status fix: when a previously-completed task is
+      // reopened (moved to TODO or IN_PROGRESS) the employee's onboarding can no
+      // longer be considered complete, so reset the status to IN_PROGRESS.
+      const ownerProfile = await EmployeeProfile.findByPk(assignment.profile_id, {
+        attributes: ['profile_id', 'onboarding_status'],
+      });
+      if (ownerProfile?.onboarding_status === 'COMPLETED') {
+        await ownerProfile.update({ onboarding_status: 'IN_PROGRESS', updated_at: new Date() });
+      }
     }
 
     return res.json({
