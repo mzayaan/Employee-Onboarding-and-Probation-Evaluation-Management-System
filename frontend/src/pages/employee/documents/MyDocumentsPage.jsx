@@ -34,7 +34,10 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+// VITE_API_URL already includes /api (e.g. http://localhost:5000/api).
+// The fallback must also include /api so fetch paths like /documents/:id/view
+// resolve correctly when the env variable is unset.
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 // Open a document securely via an authenticated Blob fetch, so the JWT is
 // sent in the Authorization header rather than exposed in the URL (NFR-02).
@@ -329,7 +332,7 @@ export default function MyDocumentsPage() {
                         <button
                           type="button"
                           className="text-blue-500 hover:text-blue-700"
-                          onClick={(e) => { e.stopPropagation(); viewDocument(doc.document_id) }}
+                          onClick={(e) => { e.stopPropagation(); viewDocument(doc.document_id).catch(() => setError('Failed to open document. Please try again.')) }}
                           title="View document"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />

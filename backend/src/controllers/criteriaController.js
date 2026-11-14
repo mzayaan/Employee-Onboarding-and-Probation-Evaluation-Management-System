@@ -81,6 +81,15 @@ const updateCriterion = async (req, res) => {
   const { id } = req.params;
   const { name, description, weight_percent, is_active, display_order } = req.body;
 
+  // Normalise is_active to a strict boolean so string values ("true", "false"),
+  // numeric values (1, 0) and the raw boolean sent by different HTTP clients are
+  // all handled consistently.  undefined means "not provided — do not change".
+  const normalisedActive =
+    is_active === undefined                                                    ? undefined
+    : (is_active === true  || is_active === 1 || is_active === '1' || is_active === 'true')  ? true
+    : (is_active === false || is_active === 0 || is_active === '0' || is_active === 'false') ? false
+    : Boolean(is_active); // last-resort coercion for any other truthy/falsy value
+
   try {
     const criterion = await EvaluationCriterion.findByPk(id);
     if (!criterion) {
@@ -104,7 +113,7 @@ const updateCriterion = async (req, res) => {
       const othersTotal = others.reduce((sum, c) => sum + Number.parseFloat(c.weight_percent), 0);
 
       // When activating a previously inactive criterion also check
-      const effectivelyActive = is_active !== undefined ? is_active : criterion.is_active;
+      const effectivelyActive = normalisedActive !== undefined ? normalisedActive : criterion.is_active;
       if (effectivelyActive && Number.parseFloat((othersTotal + newWeight).toFixed(2)) > 100) {
         return res.status(400).json({
           success: false,
@@ -117,7 +126,7 @@ const updateCriterion = async (req, res) => {
 
     // Also validate when only reactivating a criterion without changing its weight.
     // The weight block above already handles the combined weight+activate case.
-    if ((is_active === true || is_active === 'true') && !criterion.is_active && weight_percent === undefined) {
+    if (normalisedActive === true && !criterion.is_active && weight_percent === undefined) {
       const others = await EvaluationCriterion.findAll({
         where: { is_active: true, criterion_id: { [Op.ne]: id } },
       });
@@ -132,7 +141,7 @@ const updateCriterion = async (req, res) => {
 
     if (name !== undefined)          criterion.name          = name.trim();
     if (description !== undefined)   criterion.description   = description?.trim() || null;
-    if (is_active !== undefined)     criterion.is_active     = Boolean(is_active);
+    if (normalisedActive !== undefined) criterion.is_active   = normalisedActive;
     if (display_order !== undefined) criterion.display_order = display_order;
     criterion.updated_at = new Date();
 

@@ -700,6 +700,16 @@ const submitSelfAssessment = async (req, res) => {
     });
     totalSelfScore = Number.parseFloat(totalSelfScore.toFixed(2));
 
+    // NFR-03 / FR-15: a line manager must be assigned so the final recommendation
+    // can be attributed to the correct user.  Reject before the transaction so
+    // the self-assessment write is not silently rolled back alongside this error.
+    if (!profile.manager_id) {
+      return res.status(422).json({
+        success: false,
+        message: 'No line manager has been assigned to your profile. Please contact HR to assign a manager before submitting your self-assessment.',
+      });
+    }
+
     await sequelize.transaction(async (t) => {
       const assessment = await SelfAssessment.create({
         checkpoint_id:                 checkpointId,
@@ -765,7 +775,7 @@ const submitSelfAssessment = async (req, res) => {
               cumulative_score:    cumulative,
               generated_at:        new Date(),
               generated_by:        req.user.user_id,
-              submitted_by:        profile.manager_id || req.user.user_id,
+              submitted_by:        profile.manager_id,
               approval_status:     'PENDING_HR_REVIEW',
             },
             transaction: t,
