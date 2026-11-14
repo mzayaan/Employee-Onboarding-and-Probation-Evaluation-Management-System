@@ -105,6 +105,16 @@ const assignTask = async (req, res) => {
       ipAddress:   getIp(req),
     });
 
+    // FR-08 / Task-46 stale-status fix: assigning a new task creates a TODO item —
+    // if onboarding was previously marked COMPLETED it is no longer complete.
+    // Reset to IN_PROGRESS so the HR dashboard reflects the correct state.
+    if (profile.onboarding_status === 'COMPLETED') {
+      await EmployeeProfile.update(
+        { onboarding_status: 'IN_PROGRESS', updated_at: new Date() },
+        { where: { profile_id: Number(profile_id) } }
+      );
+    }
+
     // FR-09: notify the employee by email (fire-and-forget — non-critical)
     sendTaskAssignedEmail({
       to:              profile.user.email,

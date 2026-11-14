@@ -37,6 +37,19 @@ function addCalendarMonths(baseDateStr, months) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// NFR-03 / NFR-08 — Fields that must not be exposed to LINE_MANAGER or DIRECTOR.
+// HR_ADMIN and the employee themselves retain full access.
+// Also includes passport_number and bank_name for completeness.
+const SENSITIVE_FIELDS = [
+  'nic_number',
+  'tax_account_number',
+  'bank_account_number',
+  'bank_name',
+  'passport_number',
+  'salary_monthly',
+  'previous_salary_monthly',
+];
+
 // Checkpoint month-offset matrix for each permitted probation duration.
 // Source: Spec s.1.4 — proposed company evaluation policy.
 const CHECKPOINT_MATRIX = {
@@ -692,7 +705,18 @@ const listEmployees = async (req, res) => {
       order: [['created_at', 'DESC']],
     });
 
-    return res.status(200).json({ success: true, data: profiles });
+    // NFR-03 / NFR-08: Strip sensitive identity and financial fields before
+    // returning the list to LINE_MANAGER or DIRECTOR.
+    const responseData =
+      role === 'LINE_MANAGER' || role === 'DIRECTOR'
+        ? profiles.map((p) => {
+            const obj = p.toJSON();
+            SENSITIVE_FIELDS.forEach((f) => delete obj[f]);
+            return obj;
+          })
+        : profiles;
+
+    return res.status(200).json({ success: true, data: responseData });
   } catch (error) {
     console.error('[employeeController.listEmployees]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve employees.' });
@@ -748,9 +772,8 @@ const getEmployee = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
-    // G11B-FIX: Strip sensitive identity and financial fields before returning to
-    // LINE_MANAGER or DIRECTOR. HR_ADMIN and the employee themselves retain full access.
-    const SENSITIVE_FIELDS = ['nic_number', 'bank_account_number', 'tax_account_number'];
+    // NFR-03 / NFR-08: Strip sensitive identity and financial fields before
+    // returning to LINE_MANAGER or DIRECTOR. HR_ADMIN and the employee themselves retain full access.
     if (role === 'LINE_MANAGER' || role === 'DIRECTOR') {
       const profileData = profile.toJSON();
       SENSITIVE_FIELDS.forEach((field) => delete profileData[field]);

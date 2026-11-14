@@ -17,6 +17,8 @@ const { uploadToCloudinary, deleteFromCloudinary, getSignedUrl } = require('../u
 const { sendDocumentApprovedEmail, sendDocumentRejectedEmail } = require('../utils/mailer');
 const { createAuditLog } = require('../utils/auditLogger');
 const { createNotification } = require('../services/notificationService');
+// FR-08: auto-complete onboarding when all required docs are approved and all tasks done
+const { checkOnboardingCompletion } = require('./employeeController');
 
 const getIp = (req) =>
   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
@@ -113,6 +115,13 @@ const uploadDocument = async (req, res) => {
       description: `Employee uploaded ${docType.name} (document_id: ${doc.document_id}).`,
       ipAddress:   getIp(req),
     });
+
+    // FR-08 / Task-46 stale-status fix: uploading a new document creates a PENDING
+    // item — if onboarding was previously marked COMPLETED it is no longer complete,
+    // so reset to IN_PROGRESS so the HR dashboard shows the work-in-progress state.
+    if (profile.onboarding_status === 'COMPLETED') {
+      await profile.update({ onboarding_status: 'IN_PROGRESS', updated_at: new Date() });
+    }
 
     // G1-FIX FR-09: Notify all active HR_ADMIN users that a new document is pending review.
     User.findAll({ where: { role: 'HR_ADMIN', is_active: true }, attributes: ['user_id'] })
@@ -335,6 +344,13 @@ const verifyDocument = async (req, res) => {
         relatedEntityType: 'document',
         relatedEntityId:   doc.document_id,
       });
+    }
+
+    // FR-08: when a document is approved, check whether the employee has now
+    // satisfied all onboarding conditions (all required doc types approved + all
+    // tasks completed) and auto-set onboarding_status = 'COMPLETED' if so.
+    if (status === 'APPROVED' && doc.employeeProfile?.profile_id) {
+      checkOnboardingCompletion(doc.employeeProfile.profile_id).catch(() => {});
     }
 
     return res.json({
