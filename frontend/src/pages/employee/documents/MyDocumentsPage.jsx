@@ -68,6 +68,7 @@ export default function MyDocumentsPage() {
   const [uploading,    setUploading]    = useState(false)
   const [uploadError,  setUploadError]  = useState('')
   const [uploadSuccess,setUploadSuccess]= useState(false)
+  const [viewError,    setViewError]    = useState('')
 
   const load = () => {
     setLoading(true)
@@ -144,6 +145,22 @@ export default function MyDocumentsPage() {
           Submit your onboarding documents and track their review status.
         </p>
       </div>
+
+      {viewError && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" /> {viewError}
+          </span>
+          <button
+            type="button"
+            onClick={() => setViewError('')}
+            className="ml-auto text-red-500 hover:text-red-700 font-medium"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-6 items-start">
 
@@ -329,7 +346,7 @@ export default function MyDocumentsPage() {
                         <button
                           type="button"
                           className="text-blue-500 hover:text-blue-700"
-                          onClick={(e) => { e.stopPropagation(); viewDocument(doc.document_id).catch(() => setError('Failed to open document. Please try again.')) }}
+                          onClick={(e) => { e.stopPropagation(); viewDocument(doc.document_id).catch(() => setViewError('Failed to open document. Please try again.')) }}
                           title="View document"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
