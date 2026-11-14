@@ -1130,25 +1130,30 @@ const listAllUsers = async (req, res) => {
 // =============================================================================
 async function getLeaveBalance(req, res) {
   try {
-    const { role, profileId: callerProfileId } = req.user;
+    const { user_id, role } = req.user;
     let targetProfileId;
 
     if (req.params.profileId) {
       // HR / Manager path: :profileId supplied in URL
       targetProfileId = Number(req.params.profileId);
     } else {
-      // Self-service path: /me/leave-balance
-      targetProfileId = callerProfileId;
+      // Self-service path: /me/leave-balance — resolve profile_id from user_id
+      const profile = await EmployeeProfile.findOne({
+        where: { user_id },
+        attributes: ['profile_id'],
+      });
+      if (!profile) {
+        return res.status(404).json({ success: false, message: 'No employee profile found for this account.' });
+      }
+      targetProfileId = profile.profile_id;
     }
 
     if (!targetProfileId) {
       return res.status(400).json({ success: false, message: 'Profile ID could not be determined.' });
     }
 
-    // NEW_EMPLOYEE may only fetch their own balance
-    if (role === 'NEW_EMPLOYEE' && targetProfileId !== callerProfileId) {
-      return res.status(403).json({ success: false, message: 'Access denied.' });
-    }
+    // NEW_EMPLOYEE is restricted to the /me/ route by authorize() on the router,
+    // so targetProfileId is already their own profile — no extra check needed here.
 
     const currentYear = new Date().getFullYear();
 
