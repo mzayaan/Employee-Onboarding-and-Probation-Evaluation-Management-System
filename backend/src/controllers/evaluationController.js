@@ -429,6 +429,16 @@ const submitManagerEvaluation = async (req, res) => {
       }
     }
 
+    // Ensure ALL active criteria are covered — partial submissions are rejected (FR-10)
+    const submittedCriteriaIds = new Set(scores.map((s) => String(s.criterion_id)));
+    const missingCriteriaIds   = Object.keys(criteriaMap).filter((id) => !submittedCriteriaIds.has(id));
+    if (missingCriteriaIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} active criteria. Missing criterion IDs: ${missingCriteriaIds.join(', ')}.`,
+      });
+    }
+
     // Calculate per-criterion contributions and total weighted score
     let totalWeighted = 0;
     const scoreRows = scores.map((s) => {
@@ -671,6 +681,16 @@ const submitSelfAssessment = async (req, res) => {
       }
     }
 
+    // Ensure ALL active criteria are covered — partial submissions are rejected (FR-10)
+    const submittedSelfCriteriaIds = new Set(scores.map((s) => String(s.criterion_id)));
+    const missingSelfCriteriaIds   = Object.keys(criteriaMap).filter((id) => !submittedSelfCriteriaIds.has(id));
+    if (missingSelfCriteriaIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} active criteria. Missing criterion IDs: ${missingSelfCriteriaIds.join(', ')}.`,
+      });
+    }
+
     // Calculate weighted self-score
     let totalSelfScore = 0;
     const scoreRows = scores.map((s) => {
@@ -736,6 +756,8 @@ const submitSelfAssessment = async (req, res) => {
 
           // Submit recommendation to HR for review (3-stage approval workflow).
           // ProbationPeriod.status stays ACTIVE until the Director approves.
+          // submitted_by is the line manager (profile.manager_id), not the employee
+          // who triggered this code path by completing their self-assessment (FR-15).
           await FinalRecommendation.findOrCreate({
             where: { period_id: period.period_id },
             defaults: {
@@ -743,7 +765,7 @@ const submitSelfAssessment = async (req, res) => {
               cumulative_score:    cumulative,
               generated_at:        new Date(),
               generated_by:        req.user.user_id,
-              submitted_by:        req.user.user_id,
+              submitted_by:        profile.manager_id || req.user.user_id,
               approval_status:     'PENDING_HR_REVIEW',
             },
             transaction: t,

@@ -115,6 +115,21 @@ const updateCriterion = async (req, res) => {
       criterion.weight_percent = newWeight;
     }
 
+    // Also validate when only reactivating a criterion without changing its weight.
+    // The weight block above already handles the combined weight+activate case.
+    if (is_active === true && !criterion.is_active && weight_percent === undefined) {
+      const others = await EvaluationCriterion.findAll({
+        where: { is_active: true, criterion_id: { [Op.ne]: id } },
+      });
+      const othersTotal = others.reduce((sum, c) => sum + Number.parseFloat(c.weight_percent), 0);
+      if (Number.parseFloat((othersTotal + Number.parseFloat(criterion.weight_percent)).toFixed(2)) > 100) {
+        return res.status(400).json({
+          success: false,
+          message: `Reactivating this criterion (${criterion.weight_percent}%) would push the total above 100%. Other active criteria sum: ${othersTotal.toFixed(2)}%.`,
+        });
+      }
+    }
+
     if (name !== undefined)          criterion.name          = name.trim();
     if (description !== undefined)   criterion.description   = description?.trim() || null;
     if (is_active !== undefined)     criterion.is_active     = Boolean(is_active);

@@ -19,8 +19,8 @@ const STATUS_CONFIG = {
   REJECTED: { label: 'Rejected',       icon: XCircle,     bg: '#fee2e2', color: '#b91c1c' },
 }
 
-const ACCEPTED = '.pdf,.jpg,.jpeg,.png,.docx'
-const MAX_MB   = 5
+const ACCEPTED = '.pdf,.jpg,.jpeg,.png'
+const MAX_MB   = 10
 
 function formatDate(dateStr) {
   if (!dateStr) return '—'
@@ -32,6 +32,27 @@ function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+
+// Open a document securely via an authenticated Blob fetch, so the JWT is
+// sent in the Authorization header rather than exposed in the URL (NFR-02).
+const viewDocument = async (documentId) => {
+  try {
+    const token = localStorage.getItem('token')
+    const res = await fetch(`${API_BASE}/api/documents/${documentId}/view`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) throw new Error('Failed to fetch document')
+    const blob = await res.blob()
+    const url  = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    // Release the object URL after a minute to avoid memory leaks
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch {
+    // Non-critical — a silent failure is acceptable here
+  }
 }
 
 export default function MyDocumentsPage() {
@@ -64,9 +85,8 @@ export default function MyDocumentsPage() {
     if (!f) return
     const allowed = [
       'application/pdf', 'image/jpeg', 'image/jpg', 'image/png',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ]
-    if (!allowed.includes(f.type)) { setUploadError('Only PDF, JPG, PNG and DOCX files are accepted.'); return }
+    if (!allowed.includes(f.type)) { setUploadError('Only PDF, JPG and PNG files are accepted.'); return }
     if (f.size > MAX_MB * 1024 * 1024) { setUploadError(`File must be smaller than ${MAX_MB} MB.`); return }
     setFile(f)
     setUploadError('')
@@ -198,7 +218,7 @@ export default function MyDocumentsPage() {
                 {selectedType ? `Upload: ${selectedType.name}` : 'Select a document type to upload'}
               </h2>
               {selectedType && (
-                <p className="mt-0.5 text-xs text-slate-400">Accepted: PDF, JPG, PNG, DOCX — max {MAX_MB} MB</p>
+                <p className="mt-0.5 text-xs text-slate-400">Accepted: PDF, JPG, PNG — max {MAX_MB} MB</p>
               )}
             </div>
             <div className="px-6 py-6">
@@ -306,15 +326,14 @@ export default function MyDocumentsPage() {
                         <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: cfg.bg, color: cfg.color }}>
                           {cfg.label}
                         </span>
-                        <a
-                          href={`http://localhost:5000/api/documents/${doc.document_id}/view?token=${localStorage.getItem('token')}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
                           className="text-blue-500 hover:text-blue-700"
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); viewDocument(doc.document_id) }}
+                          title="View document"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
+                        </button>
                       </div>
                     </div>
                   )

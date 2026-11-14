@@ -46,6 +46,13 @@ const login = async (req, res) => {
     }
 
     if (!user.is_active) {
+      // Audit: log deactivated-account login attempt (FR-18)
+      await createAuditLog({
+        userId:      user.user_id,
+        actionType:  'LOGIN_FAILED',
+        description: `Login attempt on deactivated account for ${user.email}.`,
+        ipAddress:   getIp(req),
+      });
       return res.status(403).json({
         success: false,
         message: 'Your account has been deactivated. Please contact HR.',
@@ -54,6 +61,13 @@ const login = async (req, res) => {
 
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
+      // Audit: log wrong-password attempt (FR-18)
+      await createAuditLog({
+        userId:      user.user_id,
+        actionType:  'LOGIN_FAILED',
+        description: `Failed login attempt for ${user.email} — incorrect password.`,
+        ipAddress:   getIp(req),
+      });
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password.',

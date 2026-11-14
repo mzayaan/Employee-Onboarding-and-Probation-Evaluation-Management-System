@@ -191,6 +191,18 @@ const getRecommendation = async (req, res) => {
     if (!rec) {
       return res.status(404).json({ success: false, message: 'Recommendation not found.' });
     }
+
+    // LINE_MANAGER may only view recommendations for employees they manage (NFR-03)
+    if (req.user.role === 'LINE_MANAGER') {
+      const managerUserId = rec.probationPeriod?.employeeProfile?.manager?.user_id;
+      if (!managerUserId || managerUserId !== req.user.user_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. This recommendation does not belong to one of your employees.',
+        });
+      }
+    }
+
     return res.json({ success: true, data: rec });
   } catch (error) {
     console.error('[directorController.getRecommendation]', error.message);
