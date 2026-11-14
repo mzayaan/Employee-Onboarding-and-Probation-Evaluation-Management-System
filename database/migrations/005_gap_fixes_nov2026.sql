@@ -256,16 +256,59 @@ CALL _add_col_if_missing(
   'INT NOT NULL DEFAULT 1 AFTER `period_id`'
 );
 
--- Drop the old single-column unique index on period_id (may be named differently
--- depending on how the table was created; try both common names).
-DROP INDEX IF EXISTS `period_id` ON `final_recommendations`;
-DROP INDEX IF EXISTS `period_id_2` ON `final_recommendations`;
-DROP INDEX IF EXISTS `final_recommendations_period_id` ON `final_recommendations`;
+-- Drop the old single-column unique index on period_id and add the composite one.
+-- DROP INDEX IF EXISTS requires MySQL 8.0.16+, so we use a stored procedure that
+-- checks information_schema.STATISTICS and is therefore compatible with MySQL 5.7+.
 
--- Add the composite unique key — silent no-op if the name already exists in MySQL 8.
--- In MySQL 5.7 this will error if the key exists; run SHOW INDEX first if needed.
-ALTER TABLE `final_recommendations`
-  ADD UNIQUE KEY `uq_recommendation_period_cycle` (`period_id`, `cycle_number`);
+DROP PROCEDURE IF EXISTS _fix_final_rec_unique_key;
+
+DELIMITER $$
+CREATE PROCEDURE _fix_final_rec_unique_key()
+BEGIN
+  SET @db = DATABASE();
+  SET @old_idx = NULL;
+
+  -- Step 1: Add composite unique key FIRST.
+  -- MySQL will not allow dropping an index that is the sole cover for a FK
+  -- column.  The composite index on (period_id, cycle_number) has period_id
+  -- as its leftmost column, so MySQL can use it to satisfy the FK constraint
+  -- once it exists, making the old single-column unique index removable.
+  SELECT COUNT(*) INTO @exists
+  FROM   information_schema.STATISTICS
+  WHERE  TABLE_SCHEMA = @db
+    AND  TABLE_NAME   = 'final_recommendations'
+    AND  INDEX_NAME   = 'uq_recommendation_period_cycle';
+
+  IF @exists = 0 THEN
+    SET @sql2 = 'ALTER TABLE `final_recommendations` ADD UNIQUE KEY `uq_recommendation_period_cycle` (`period_id`, `cycle_number`)';
+    PREPARE s2 FROM @sql2;
+    EXECUTE s2;
+    DEALLOCATE PREPARE s2;
+  END IF;
+
+  -- Step 2: Now drop the old single-column unique index.
+  -- Safe because the composite index now covers the FK lookup on period_id.
+  SELECT INDEX_NAME INTO @old_idx
+  FROM   information_schema.STATISTICS
+  WHERE  TABLE_SCHEMA = @db
+    AND  TABLE_NAME   = 'final_recommendations'
+    AND  INDEX_NAME  != 'PRIMARY'
+    AND  INDEX_NAME  != 'uq_recommendation_period_cycle'
+    AND  NON_UNIQUE   = 0
+    AND  COLUMN_NAME  = 'period_id'
+  LIMIT 1;
+
+  IF @old_idx IS NOT NULL THEN
+    SET @sql = CONCAT('ALTER TABLE `final_recommendations` DROP INDEX `', @old_idx, '`');
+    PREPARE s FROM @sql;
+    EXECUTE s;
+    DEALLOCATE PREPARE s;
+  END IF;
+END$$
+DELIMITER ;
+
+CALL _fix_final_rec_unique_key();
+DROP PROCEDURE IF EXISTS _fix_final_rec_unique_key;
 
 
 -- =============================================================================
