@@ -56,7 +56,7 @@ DELIMITER ;
 CALL _add_col_if_missing(
   'users',
   'token_version',
-  'INT NOT NULL DEFAULT 0 COMMENT "G11A: Incremented on password change/reset. JWT payload must match; mismatch rejects the token."'
+  'INT NOT NULL DEFAULT 0'
 );
 
 
@@ -70,7 +70,7 @@ CALL _add_col_if_missing(
 CALL _add_col_if_missing(
   'evaluation_scores',
   'weight_percent_at_scoring',
-  'DECIMAL(5,2) NULL COMMENT "G09: Snapshot of the criterion weight used at evaluation submission time."'
+  'DECIMAL(5,2) NULL'
 );
 
 
@@ -169,7 +169,7 @@ ALTER TABLE `audit_logs`
 CALL _add_col_if_missing(
   'self_assessment_scores',
   'weight_percent_at_scoring',
-  'DECIMAL(5,2) NULL AFTER `raw_score` COMMENT "G45: Snapshot of the criterion weight used at self-assessment submission time."'
+  'DECIMAL(5,2) NULL AFTER `raw_score`'
 );
 
 
