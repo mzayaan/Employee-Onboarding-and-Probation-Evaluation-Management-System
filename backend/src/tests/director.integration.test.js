@@ -124,7 +124,12 @@ jest.mock('../models', () => {
       findByPk: jest.fn(),
     },
     EmployeeProfile: {
-      findByPk: jest.fn(),
+      findByPk: jest.fn().mockResolvedValue({ user_id: 9, profile_id: 1 }),
+      update:   jest.fn().mockResolvedValue([1]),
+    },
+    EvaluationCheckpoint: {
+      findOne: jest.fn().mockResolvedValue({ checkpoint_id: 3, day_number: 90 }),
+      create:  jest.fn().mockResolvedValue({ checkpoint_id: 4, day_number: 180 }),
     },
     Department: {
       findAll: jest.fn().mockResolvedValue([]),

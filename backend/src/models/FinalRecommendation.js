@@ -24,8 +24,13 @@ const FinalRecommendation = sequelize.define('FinalRecommendation', {
   period_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    unique: true,
-    comment: 'FK to probation_periods — one recommendation per period',
+    comment: 'FK to probation_periods — composite unique with cycle_number',
+  },
+  cycle_number: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 1,
+    comment: 'Evaluation cycle within this probation period (1 = initial, 2+ = after EXTEND approval)',
   },
   recommendation_type: {
     type: DataTypes.ENUM('CONFIRM', 'EXTEND', 'DISMISS'),
@@ -126,6 +131,13 @@ const FinalRecommendation = sequelize.define('FinalRecommendation', {
 }, {
   tableName: 'final_recommendations',
   timestamps: false,
+  indexes: [
+    {
+      unique: true,
+      fields: ['period_id', 'cycle_number'],
+      name: 'uq_recommendation_period_cycle',
+    },
+  ],
 });
 
 module.exports = FinalRecommendation;

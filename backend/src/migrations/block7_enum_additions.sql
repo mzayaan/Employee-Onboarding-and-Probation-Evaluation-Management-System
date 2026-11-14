@@ -129,10 +129,9 @@ ALTER TABLE audit_logs
 
 
 -- ---------------------------------------------------------------------------
--- 3. contracts — add signature_string column
---    Stores the typed/drawn signature string captured when the employee signs.
+-- 3. contracts — signature_string column
+--    NOTE: MySQL does not support ADD COLUMN IF NOT EXISTS in ALTER TABLE.
+--    This column is added idempotently via the _add_col_if_missing stored
+--    procedure in database/migrations/005_gap_fixes_nov2026.sql (see block G30).
+--    Running this file alone will NOT add the column; run migration 005 instead.
 -- ---------------------------------------------------------------------------
-ALTER TABLE contracts
-  ADD COLUMN IF NOT EXISTS `signature_string` VARCHAR(500) NULL
-    COMMENT 'The typed/drawn signature string captured at signing time'
-  AFTER `signed_at`;

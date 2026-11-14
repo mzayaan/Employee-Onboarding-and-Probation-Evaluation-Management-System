@@ -155,8 +155,9 @@ jest.mock('../models', () => {
 
   return {
     sequelize: {
-      authenticate: jest.fn().mockResolvedValue(undefined),
-      sync:         jest.fn().mockResolvedValue(undefined),
+      authenticate:  jest.fn().mockResolvedValue(undefined),
+      sync:          jest.fn().mockResolvedValue(undefined),
+      transaction:   jest.fn().mockImplementation(async (cb) => cb({})),
     },
 
     User: {
@@ -179,8 +180,9 @@ jest.mock('../models', () => {
     },
 
     EmployeeProfile: {
-      findOne: jest.fn().mockResolvedValue(mockProfile),
+      findOne:  jest.fn().mockResolvedValue(mockProfile),
       findByPk: jest.fn().mockResolvedValue(mockProfile),
+      update:   jest.fn().mockResolvedValue([1]),
     },
 
     Contract: {

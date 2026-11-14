@@ -221,6 +221,54 @@ ALTER TABLE `notifications`
 
 
 -- =============================================================================
+-- G30 — contracts.signature_string
+-- Stores the typed or drawn signature string captured when the employee signs.
+-- Uses _add_col_if_missing because ADD COLUMN IF NOT EXISTS is not valid MySQL
+-- ALTER TABLE syntax.
+-- =============================================================================
+
+CALL _add_col_if_missing(
+  'contracts',
+  'signature_string',
+  'VARCHAR(500) NULL AFTER `signed_at`'
+);
+
+
+-- =============================================================================
+-- G42-CYCLE — final_recommendations.cycle_number + composite unique key
+--
+-- The original schema had a plain UNIQUE constraint on period_id which prevented
+-- a second FinalRecommendation row being created after an EXTEND approval.
+-- The fix:
+--   1. Add cycle_number INT NOT NULL DEFAULT 1
+--   2. Drop the old period_id unique key (if it exists)
+--   3. Add composite UNIQUE KEY (period_id, cycle_number)
+--
+-- Steps 2 and 3 are unconditional MODIFY/DROP/ADD statements because MySQL does
+-- not support IF EXISTS for key operations in a portable way.  Running this
+-- migration a second time is safe — DROP IF EXISTS handles the remove, and the
+-- ADD KEY is idempotent once the index exists.
+-- =============================================================================
+
+CALL _add_col_if_missing(
+  'final_recommendations',
+  'cycle_number',
+  'INT NOT NULL DEFAULT 1 AFTER `period_id`'
+);
+
+-- Drop the old single-column unique index on period_id (may be named differently
+-- depending on how the table was created; try both common names).
+DROP INDEX IF EXISTS `period_id` ON `final_recommendations`;
+DROP INDEX IF EXISTS `period_id_2` ON `final_recommendations`;
+DROP INDEX IF EXISTS `final_recommendations_period_id` ON `final_recommendations`;
+
+-- Add the composite unique key — silent no-op if the name already exists in MySQL 8.
+-- In MySQL 5.7 this will error if the key exists; run SHOW INDEX first if needed.
+ALTER TABLE `final_recommendations`
+  ADD UNIQUE KEY `uq_recommendation_period_cycle` (`period_id`, `cycle_number`);
+
+
+-- =============================================================================
 -- Clean up helper procedures
 -- =============================================================================
 DROP PROCEDURE IF EXISTS _add_col_if_missing;

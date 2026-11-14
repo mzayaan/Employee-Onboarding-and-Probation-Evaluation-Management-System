@@ -527,22 +527,23 @@ const submitManagerEvaluation = async (req, res) => {
           // ProbationPeriod.status stays ACTIVE until the Director approves
           // (directorController.approveRecommendation handles the final transition).
           //
-          // G42-FIX: Scope the lookup to non-approved records only.
-          // On a second evaluation cycle (after EXTEND), the previous record has
-          // approval_status = 'APPROVED'.  findOrCreate would find that old record
-          // and return it without creating a fresh PENDING_HR_REVIEW record for
-          // the new cycle.  By excluding APPROVED, we always create a new record
-          // for the second cycle while still de-duplicating concurrent triggers
-          // within the same cycle.
-          const { Op: _Op1 } = require('sequelize');
+          // cycle_number FIX: Each evaluation cycle (initial + each EXTEND extension)
+          // gets its own row identified by (period_id, cycle_number).  Count the
+          // number of APPROVED records to determine which cycle we are on.
+          const approvedCount1 = await FinalRecommendation.count({
+            where: { period_id: period.period_id, approval_status: 'APPROVED' },
+            transaction: t,
+          });
+          const currentCycle1 = approvedCount1 + 1;
           await FinalRecommendation.findOrCreate({
             where: {
-              period_id:       period.period_id,
-              approval_status: { [_Op1.notIn]: ['APPROVED'] },
+              period_id:    period.period_id,
+              cycle_number: currentCycle1,
             },
             defaults: {
               recommendation_type: recommendationType,
               cumulative_score:    cumulative,
+              cycle_number:        currentCycle1,
               generated_at:        new Date(),
               generated_by:        req.user.user_id,
               submitted_by:        req.user.user_id,
@@ -795,16 +796,21 @@ const submitSelfAssessment = async (req, res) => {
           // submitted_by is the line manager (profile.manager_id), not the employee
           // who triggered this code path by completing their self-assessment (FR-15).
           //
-          // G42-FIX: Same second-cycle fix as submitManagerEvaluation above.
-          const { Op: _Op2 } = require('sequelize');
+          // cycle_number FIX: same second-cycle pattern as submitManagerEvaluation above.
+          const approvedCount2 = await FinalRecommendation.count({
+            where: { period_id: period.period_id, approval_status: 'APPROVED' },
+            transaction: t,
+          });
+          const currentCycle2 = approvedCount2 + 1;
           await FinalRecommendation.findOrCreate({
             where: {
-              period_id:       period.period_id,
-              approval_status: { [_Op2.notIn]: ['APPROVED'] },
+              period_id:    period.period_id,
+              cycle_number: currentCycle2,
             },
             defaults: {
               recommendation_type: recommendationType,
               cumulative_score:    cumulative,
+              cycle_number:        currentCycle2,
               generated_at:        new Date(),
               generated_by:        req.user.user_id,
               submitted_by:        profile.manager_id,
