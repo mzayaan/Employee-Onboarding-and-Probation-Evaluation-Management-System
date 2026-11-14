@@ -48,7 +48,12 @@ ALTER TABLE notifications
     -- Probation approval workflow (Block 5 — 3-stage Director approval)
     'RECOMMENDATION_PENDING',
     'RECOMMENDATION_RETURNED',
-    'RECOMMENDATION_APPROVED'
+    'RECOMMENDATION_APPROVED',
+    -- Probation outcome (employee notification on Director final decision)
+    'PROBATION_OUTCOME',
+    -- Development reviews (Block 7)
+    'DEVELOPMENT_REVIEW_CREATED',
+    'DEVELOPMENT_REVIEW_ACKNOWLEDGED'
   ) NOT NULL;
 
 
@@ -111,5 +116,23 @@ ALTER TABLE audit_logs
     'CREATE_DEPARTMENT',
     'UPDATE_DEPARTMENT',
     'DEPARTMENT_MANAGER_ASSIGNED',
-    'DEPARTMENT_MANAGER_REMOVED'
+    'DEPARTMENT_MANAGER_REMOVED',
+    -- Development reviews (Block 7)
+    'DEVELOPMENT_REVIEW_CREATED',
+    'DEVELOPMENT_REVIEW_UPDATED',
+    'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
+    'DEVELOPMENT_REVIEW_DELETED',
+    -- Tax declaration and contract signing
+    'SUBMIT_TAX_DECLARATION',
+    'SIGN_CONTRACT'
   ) NOT NULL;
+
+
+-- ---------------------------------------------------------------------------
+-- 3. contracts — add signature_string column
+--    Stores the typed/drawn signature string captured when the employee signs.
+-- ---------------------------------------------------------------------------
+ALTER TABLE contracts
+  ADD COLUMN IF NOT EXISTS `signature_string` VARCHAR(500) NULL
+    COMMENT 'The typed/drawn signature string captured at signing time'
+  AFTER `signed_at`;

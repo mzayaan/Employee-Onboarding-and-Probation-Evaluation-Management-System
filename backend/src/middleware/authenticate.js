@@ -49,16 +49,25 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    // Confirm the user still exists and is active (NFR-03)
+    // Confirm the user still exists and is active (NFR-03).
+    // G11A-FIX: also fetch token_version to detect tokens issued before a password change/reset.
     const user = await User.findOne({
       where: { user_id: decoded.user_id, is_active: true },
-      attributes: ['user_id', 'email', 'role', 'first_name', 'last_name'],
+      attributes: ['user_id', 'email', 'role', 'first_name', 'last_name', 'token_version'],
     });
 
     if (!user) {
       return res.status(401).json({
         success: false,
         message: 'Account not found or has been deactivated.',
+      });
+    }
+
+    // Reject tokens issued before the most recent password change or reset.
+    if ((decoded.token_version ?? 0) !== (user.token_version ?? 0)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Session is no longer valid. Please log in again.',
       });
     }
 

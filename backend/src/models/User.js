@@ -57,6 +57,12 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  token_version: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'G11A-FIX: Incremented on password change/reset. JWT payload must match; mismatch rejects the token.',
+  },
   last_login_at: {
     type: DataTypes.DATE,
     allowNull: true,

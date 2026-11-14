@@ -72,11 +72,9 @@ exports.createReview = async (req, res) => {
     });
 
     await createAuditLog({
-      user_id: userId,
-      action_type: 'DEVELOPMENT_REVIEW_CREATED',
-      target_table: 'development_reviews',
-      target_record_id: review.review_id,
-      details: `Development review created for profile ${profile_id}`,
+      userId,
+      actionType:  'DEVELOPMENT_REVIEW_CREATED',
+      description: `Development review created for profile ${profile_id} by user ${userId}.`,
     });
 
     const full = await DevelopmentReview.findByPk(review.review_id, { include: REVIEW_INCLUDE });
@@ -187,11 +185,9 @@ exports.updateReview = async (req, res) => {
     await review.update(updates);
 
     await createAuditLog({
-      user_id: userId,
-      action_type: 'DEVELOPMENT_REVIEW_UPDATED',
-      target_table: 'development_reviews',
-      target_record_id: review.review_id,
-      details: `Development review ${reviewId} updated`,
+      userId,
+      actionType:  'DEVELOPMENT_REVIEW_UPDATED',
+      description: `Development review ${reviewId} updated by user ${userId}.`,
     });
 
     const updated = await DevelopmentReview.findByPk(reviewId, { include: REVIEW_INCLUDE });
@@ -253,11 +249,9 @@ exports.acknowledgeReview = async (req, res) => {
     });
 
     await createAuditLog({
-      user_id: userId,
-      action_type: 'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
-      target_table: 'development_reviews',
-      target_record_id: review.review_id,
-      details: `Employee acknowledged development review ${reviewId}`,
+      userId,
+      actionType:  'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
+      description: `Employee (user ${userId}) acknowledged development review ${reviewId}.`,
     });
 
     const updated = await DevelopmentReview.findByPk(reviewId, { include: REVIEW_INCLUDE });
@@ -298,11 +292,9 @@ exports.deleteReview = async (req, res) => {
     await review.destroy();
 
     await createAuditLog({
-      user_id: userId,
-      action_type: 'DEVELOPMENT_REVIEW_DELETED',
-      target_table: 'development_reviews',
-      target_record_id: reviewId,
-      details: `Development review ${reviewId} deleted`,
+      userId,
+      actionType:  'DEVELOPMENT_REVIEW_DELETED',
+      description: `Development review ${reviewId} deleted by user ${userId}.`,
     });
 
     return res.json({ success: true, message: 'Review deleted.' });

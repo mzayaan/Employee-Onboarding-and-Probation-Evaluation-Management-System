@@ -131,10 +131,21 @@ const createContract = async (req, res) => {
       created_at:                new Date(),
     });
 
+    // G07-FIX: If the contract has no probation clause, the employee is permanent
+    // from day one. The enforceProbationClause middleware sets req.skipCheckpointGeneration
+    // to signal this; here we act on that flag by updating employment_status to PERMANENT
+    // so that no probation evaluation checkpoints are generated for this employee.
+    if (req.skipCheckpointGeneration) {
+      await EmployeeProfile.update(
+        { employment_status: 'PERMANENT' },
+        { where: { profile_id } }
+      );
+    }
+
     await createAuditLog({
       userId:      req.user.user_id,
       actionType:  'CREATE_CONTRACT',
-      description: `Contract created for profile_id ${profile_id} by HR user ${req.user.user_id}.`,
+      description: `Contract created for profile_id ${profile_id} by HR user ${req.user.user_id}. Probation clause included: ${probation_clause_included !== false}.`,
     });
 
     return res.status(201).json({ success: true, message: 'Contract created.', data: contract });
@@ -187,8 +198,9 @@ const signContract = async (req, res) => {
       'unknown';
 
     await contract.update({
-      signed_at:  signingDate,
-      updated_at: new Date(),
+      signed_at:        signingDate,
+      signature_string: signature_string.trim(),
+      updated_at:       new Date(),
     });
 
     await createAuditLog({

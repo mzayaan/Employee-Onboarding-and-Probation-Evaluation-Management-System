@@ -22,6 +22,7 @@
 const {
   FinalRecommendation,
   ProbationPeriod,
+  EvaluationCheckpoint,
   EmployeeProfile,
   Department,
   User,
@@ -447,10 +448,56 @@ const approveRecommendation = async (req, res) => {
 
       // Update ProbationPeriod to reflect the Director's decision
       if (rec.probationPeriod) {
-        await rec.probationPeriod.update({
+        const periodUpdate = {
           status:     newPeriodStatus,
           updated_at: new Date(),
-        }, { transaction: t });
+        };
+
+        // FR-15 / EXTEND: push the end_date forward by the extension length and
+        // create a follow-up evaluation checkpoint so the system can track the
+        // extended period without requiring manual configuration.
+        if (rec.recommendation_type === 'EXTEND' && rec.probationPeriod.end_date) {
+          const extensionDays = 90; // default extension period — configurable in future
+          const currentEnd    = new Date(rec.probationPeriod.end_date);
+          const newEnd        = new Date(currentEnd);
+          newEnd.setDate(newEnd.getDate() + extensionDays);
+          periodUpdate.end_date = newEnd.toISOString().slice(0, 10);
+
+          // Determine the highest existing day_number so the new checkpoint
+          // sits after the last one (avoids the unique(period_id, day_number) constraint)
+          const lastCheckpoint = await EvaluationCheckpoint.findOne({
+            where:  { period_id: rec.probationPeriod.period_id },
+            order:  [['day_number', 'DESC']],
+            transaction: t,
+          });
+          const nextDayNumber = (lastCheckpoint?.day_number ?? 0) + extensionDays;
+
+          // Create a follow-up checkpoint at the new end date
+          await EvaluationCheckpoint.create({
+            period_id:        rec.probationPeriod.period_id,
+            checkpoint_label: 'Extension Review',
+            day_number:       nextDayNumber,
+            due_date:         newEnd.toISOString().slice(0, 10),
+            status:           'PENDING',
+          }, { transaction: t });
+        }
+
+        await rec.probationPeriod.update(periodUpdate, { transaction: t });
+
+        // G02-FIX: Sync EmployeeProfile.employment_status with the Director decision.
+        // CONFIRM → PERMANENT, EXTEND → EXTENDED, DISMISS → DISMISSED.
+        const employmentStatusMap = {
+          CONFIRM: 'PERMANENT',
+          EXTEND:  'EXTENDED',
+          DISMISS: 'DISMISSED',
+        };
+        const newEmploymentStatus = employmentStatusMap[rec.recommendation_type];
+        if (newEmploymentStatus) {
+          await EmployeeProfile.update(
+            { employment_status: newEmploymentStatus },
+            { where: { profile_id: rec.probationPeriod.profile_id }, transaction: t }
+          );
+        }
       }
     });
 

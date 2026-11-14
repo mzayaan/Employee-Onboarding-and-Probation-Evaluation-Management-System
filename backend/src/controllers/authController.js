@@ -75,13 +75,16 @@ const login = async (req, res) => {
     }
 
     // Sign 24-hour JWT (PAF approved — no refresh tokens for FYP)
+    // G11A-FIX: token_version is embedded so authenticate.js can reject tokens
+    // issued before a password change or reset.
     const token = jwt.sign(
       {
-        user_id:    user.user_id,
-        email:      user.email,
-        role:       user.role,
-        first_name: user.first_name,
-        last_name:  user.last_name,
+        user_id:       user.user_id,
+        email:         user.email,
+        role:          user.role,
+        first_name:    user.first_name,
+        last_name:     user.last_name,
+        token_version: user.token_version ?? 0,
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
@@ -307,10 +310,12 @@ const resetPassword = async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, 12);
 
+    // G11A-FIX: Incrementing token_version invalidates all JWTs issued before this reset.
     await user.update({
       password_hash,
       reset_token:        null,
       reset_token_expiry: null,
+      token_version:      (user.token_version ?? 0) + 1,
     });
 
     await createAuditLog({
@@ -367,7 +372,8 @@ const changePassword = async (req, res) => {
     }
 
     const password_hash = await bcrypt.hash(newPassword, 12);
-    await user.update({ password_hash });
+    // G11A-FIX: Incrementing token_version invalidates all JWTs issued before this change.
+    await user.update({ password_hash, token_version: (user.token_version ?? 0) + 1 });
 
     await createAuditLog({
       userId:      user.user_id,

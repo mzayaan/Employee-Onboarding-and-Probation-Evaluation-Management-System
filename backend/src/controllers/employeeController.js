@@ -9,7 +9,7 @@
 const bcrypt    = require('bcrypt');
 const { Readable } = require('stream');
 const cloudinaryPkg = require('cloudinary').v2;
-const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint, LeaveBalance, OnboardingDocument, TaskAssignment } = require('../models');
+const { sequelize, User, EmployeeProfile, Department, ProbationPeriod, EvaluationCheckpoint, LeaveBalance, OnboardingDocument, TaskAssignment, DocumentType } = require('../models');
 const { Op } = require('sequelize');
 const { createAuditLog }                                    = require('../utils/auditLogger');
 const { validatePasswordStrength }                          = require('../utils/passwordValidator');
@@ -96,9 +96,30 @@ const checkOnboardingCompletion = async (profileId, transaction = null) => {
     });
     if (approvedCount === 0) return false;
 
-    // All assigned tasks must be COMPLETED
+    // G01-FIX: Every required document type must have at least one APPROVED submission.
+    // Without this check an employee could skip a required document type entirely and
+    // still be marked as onboarding-complete as long as they had no PENDING/REJECTED docs.
+    const requiredTypes = await DocumentType.findAll({
+      where: { is_required: true },
+      attributes: ['type_id'],
+      ...opts,
+    });
+
+    for (const docType of requiredTypes) {
+      const approvedForType = await OnboardingDocument.count({
+        where: {
+          profile_id:       profileId,
+          document_type_id: docType.type_id,
+          status:           'APPROVED',
+        },
+        ...opts,
+      });
+      if (approvedForType === 0) return false;
+    }
+
+    // All assigned tasks must be COMPLETED (model ENUM: 'TODO', 'IN_PROGRESS', 'COMPLETED')
     const incompleteTasks = await TaskAssignment.count({
-      where: { profile_id: profileId, status: ['PENDING', 'IN_PROGRESS'] },
+      where: { profile_id: profileId, status: ['TODO', 'IN_PROGRESS'] },
       ...opts,
     });
     if (incompleteTasks > 0) return false;
@@ -727,6 +748,15 @@ const getEmployee = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
+    // G11B-FIX: Strip sensitive identity and financial fields before returning to
+    // LINE_MANAGER or DIRECTOR. HR_ADMIN and the employee themselves retain full access.
+    const SENSITIVE_FIELDS = ['nic_number', 'bank_account_number', 'tax_account_number'];
+    if (role === 'LINE_MANAGER' || role === 'DIRECTOR') {
+      const profileData = profile.toJSON();
+      SENSITIVE_FIELDS.forEach((field) => delete profileData[field]);
+      return res.status(200).json({ success: true, data: profileData });
+    }
+
     return res.status(200).json({ success: true, data: profile });
   } catch (error) {
     console.error('[employeeController.getEmployee]', error.message);
@@ -754,7 +784,9 @@ const updateEmployeeProfile = async (req, res) => {
       gender,
       nationality,
       salary_monthly,
-      employment_status,
+      // employment_status is intentionally excluded: it may only be changed by the
+      // Director-approval workflow (approveRecommendation in directorController).
+      // Accepting it here would allow HR to bypass the approval chain (G03-FIX).
     } = req.body;
 
     const profile = await EmployeeProfile.findByPk(id);
@@ -780,15 +812,6 @@ const updateEmployeeProfile = async (req, res) => {
       return res.status(400).json({ success: false, message: 'gender must be Male or Female.' });
     }
 
-    // Validate employment_status if supplied
-    const VALID_EMP_STATUSES = ['PROBATION', 'PERMANENT', 'DISMISSED', 'EXTENDED'];
-    if (employment_status !== undefined && !VALID_EMP_STATUSES.includes(employment_status)) {
-      return res.status(400).json({
-        success: false,
-        message: `employment_status must be one of: ${VALID_EMP_STATUSES.join(', ')}.`,
-      });
-    }
-
     // Use explicit undefined checks so that intentional null values (e.g.
     // unsetting a manager) are preserved instead of falling back to the
     // existing value. The ?? operator would swallow null and prevent clearing.
@@ -804,7 +827,6 @@ const updateEmployeeProfile = async (req, res) => {
       gender:             gender            !== undefined ? gender                   : profile.gender,
       nationality:        nationality       !== undefined ? nationality?.trim()      : profile.nationality,
       salary_monthly:     salary_monthly    !== undefined ? salary_monthly           : profile.salary_monthly,
-      employment_status:  employment_status !== undefined ? employment_status        : profile.employment_status,
       updated_at:         new Date(),
     });
 

@@ -442,12 +442,16 @@ const submitManagerEvaluation = async (req, res) => {
     // Calculate per-criterion contributions and total weighted score
     let totalWeighted = 0;
     const scoreRows = scores.map((s) => {
-      const contribution = calcContribution(s.raw_score, criteriaMap[s.criterion_id].weight_percent);
+      const weightAtScoring = criteriaMap[s.criterion_id].weight_percent;
+      const contribution    = calcContribution(s.raw_score, weightAtScoring);
       totalWeighted += contribution;
       return {
-        criterion_id:          s.criterion_id,
-        raw_score:             s.raw_score,
-        weighted_contribution: contribution,
+        criterion_id:              s.criterion_id,
+        raw_score:                 s.raw_score,
+        // G09-FIX: snapshot the weight used so historical reports remain reproducible
+        // even if criteria weights are reconfigured after this evaluation is submitted.
+        weight_percent_at_scoring: weightAtScoring,
+        weighted_contribution:     contribution,
       };
     });
     totalWeighted = Number.parseFloat(totalWeighted.toFixed(2));
@@ -694,9 +698,16 @@ const submitSelfAssessment = async (req, res) => {
     // Calculate weighted self-score
     let totalSelfScore = 0;
     const scoreRows = scores.map((s) => {
-      const contribution = calcContribution(s.raw_score, criteriaMap[s.criterion_id].weight_percent);
+      const weightAtScoring = criteriaMap[s.criterion_id].weight_percent;
+      const contribution    = calcContribution(s.raw_score, weightAtScoring);
       totalSelfScore += contribution;
-      return { criterion_id: s.criterion_id, raw_score: s.raw_score, weighted_contribution: contribution };
+      // G09-FIX: snapshot the weight used at the time of submission.
+      return {
+        criterion_id:              s.criterion_id,
+        raw_score:                 s.raw_score,
+        weight_percent_at_scoring: weightAtScoring,
+        weighted_contribution:     contribution,
+      };
     });
     totalSelfScore = Number.parseFloat(totalSelfScore.toFixed(2));
 

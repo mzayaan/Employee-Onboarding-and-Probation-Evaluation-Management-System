@@ -65,6 +65,11 @@ const Contract = sequelize.define('Contract', {
     allowNull: true,
     comment: 'Date the employee signed the contract — null until signed.',
   },
+  signature_string: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+    comment: 'The typed/drawn signature string captured at signing time. Stored for audit and verification.',
+  },
   // Spec s.2.6 — contract end date (conditional on FIXED_TERM)
   contract_end_date: {
     type:      DataTypes.DATEONLY,

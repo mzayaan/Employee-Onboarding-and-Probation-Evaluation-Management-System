@@ -30,6 +30,11 @@ const EvaluationScore = sequelize.define('EvaluationScore', {
     comment: 'Manager rating 1–5',
     validate: { min: 1, max: 5 },
   },
+  weight_percent_at_scoring: {
+    type: DataTypes.DECIMAL(5, 2),
+    allowNull: true,
+    comment: 'G09-FIX: Snapshot of EvaluationCriterion.weight_percent at the time of submission. Preserves the historical breakdown even if criteria weights are later adjusted.',
+  },
   weighted_contribution: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: false,

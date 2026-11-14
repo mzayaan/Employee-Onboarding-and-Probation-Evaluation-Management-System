@@ -8,8 +8,8 @@
 // FR-NEW-02 | NFR-08 | Objective 1 (extended)
 // =============================================================================
 
-const { TaxDeclaration, EmployeeProfile } = require('../models');
-const { createAuditLog }                  = require('../utils/auditLogger');
+const { TaxDeclaration, EmployeeProfile, sequelize } = require('../models');
+const { createAuditLog }                             = require('../utils/auditLogger');
 
 // =============================================================================
 // GET /api/tax-declarations/mine  (NEW_EMPLOYEE)
@@ -79,16 +79,18 @@ const submitTaxDeclaration = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Employee profile not found.' });
     }
 
-    // ── Upsert: delete existing declaration and recreate ────────────────────
-    await TaxDeclaration.destroy({ where: { profile_id: profile.profile_id } });
-
-    const declaration = await TaxDeclaration.create({
-      profile_id:           profile.profile_id,
-      declaration_category,
-      num_dependants:       num_dependants != null ? Number.parseInt(num_dependants, 10) : 0,
-      spouse_employed:      spouse_employed !== false && spouse_employed !== 'false',
-      declaration_date,
-      created_at:           new Date(),
+    // ── Upsert: delete existing declaration and recreate (wrapped in a
+    // transaction so a failed create never leaves the employee with no record)
+    const declaration = await sequelize.transaction(async (t) => {
+      await TaxDeclaration.destroy({ where: { profile_id: profile.profile_id }, transaction: t });
+      return TaxDeclaration.create({
+        profile_id:           profile.profile_id,
+        declaration_category,
+        num_dependants:       num_dependants != null ? Number.parseInt(num_dependants, 10) : 0,
+        spouse_employed:      spouse_employed !== false && spouse_employed !== 'false',
+        declaration_date,
+        created_at:           new Date(),
+      }, { transaction: t });
     });
 
     await createAuditLog({

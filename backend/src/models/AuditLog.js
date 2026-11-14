@@ -71,7 +71,29 @@ const AuditLog = sequelize.define('AuditLog', {
       'CREATE_DEPARTMENT',
       'UPDATE_DEPARTMENT',
       'DEPARTMENT_MANAGER_ASSIGNED',    // a manager was assigned to a department
-      'DEPARTMENT_MANAGER_REMOVED'      // a manager was removed from a department
+      'DEPARTMENT_MANAGER_REMOVED',     // a manager was removed from a department
+      // Development reviews (Block 7)
+      'DEVELOPMENT_REVIEW_CREATED',
+      'DEVELOPMENT_REVIEW_UPDATED',
+      'DEVELOPMENT_REVIEW_ACKNOWLEDGED',
+      'DEVELOPMENT_REVIEW_DELETED',
+      // Tax declaration
+      'SUBMIT_TAX_DECLARATION',
+      // Contract
+      'SIGN_CONTRACT',
+      'CREATE_CONTRACT',
+      // HRDC training
+      'ADD_HRDC_TRAINING_LOG',
+      'DELETE_HRDC_TRAINING_LOG',
+      'EXPORT_HRDC_G1',
+      // System config
+      'CREATE_SYSTEM_CONFIG',
+      'UPDATE_SYSTEM_CONFIG',
+      // Profile image (two controllers use different strings — both kept)
+      'PROFILE_IMAGE_UPDATED',
+      'UPDATE_PROFILE_IMAGE',
+      // Employee self-update
+      'EMPLOYEE_SELF_UPDATE'
     ),
     allowNull: false,
   },

@@ -39,7 +39,12 @@ const Notification = sequelize.define('Notification', {
       // Probation approval workflow (Block 5 — 3-stage Director approval)
       'RECOMMENDATION_PENDING',    // notified to HR when manager submits
       'RECOMMENDATION_RETURNED',   // notified to manager when HR or Director returns
-      'RECOMMENDATION_APPROVED'    // notified to HR + manager when Director approves
+      'RECOMMENDATION_APPROVED',   // notified to HR + manager when Director approves
+      // Probation outcome (employee notification on Director final decision)
+      'PROBATION_OUTCOME',
+      // Development reviews
+      'DEVELOPMENT_REVIEW_CREATED',
+      'DEVELOPMENT_REVIEW_ACKNOWLEDGED'
     ),
     allowNull: false,
   },
