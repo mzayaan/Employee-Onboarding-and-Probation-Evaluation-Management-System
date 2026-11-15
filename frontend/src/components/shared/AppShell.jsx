@@ -184,7 +184,7 @@ export default function AppShell({ children }) {
 
         {/* Scrollable main content */}
         <main className="flex-1 overflow-y-auto">
-          <div className="min-h-full px-8 py-8">
+          <div className="min-h-full px-8 pt-8 pb-16">
             {children}
           </div>
         </main>
