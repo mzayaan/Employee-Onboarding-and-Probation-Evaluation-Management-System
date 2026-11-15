@@ -341,7 +341,17 @@ const getMyTeam = async (req, res) => {
       });
     });
 
-    return res.json({ success: true, data: profiles });
+    // NFR-03 / NFR-08 / DPA-2017: LINE_MANAGER must not receive payroll-sensitive
+    // employee fields (NIC, bank account, salary, passport, etc.).
+    // Apply the same SENSITIVE_FIELDS list used by listEmployees and getEmployee.
+    const { SENSITIVE_FIELDS } = require('./employeeController');
+    const safeProfiles = profiles.map((p) => {
+      const obj = p.toJSON ? p.toJSON() : { ...p };
+      SENSITIVE_FIELDS.forEach((f) => delete obj[f]);
+      return obj;
+    });
+
+    return res.json({ success: true, data: safeProfiles });
   } catch (error) {
     console.error('[evaluationController.getMyTeam]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve team data.' });

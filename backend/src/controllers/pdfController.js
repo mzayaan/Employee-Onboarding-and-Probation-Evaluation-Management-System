@@ -6,6 +6,7 @@
 // =============================================================================
 
 const PDFDocument = require('pdfkit');
+const { Op }      = require('sequelize');
 const {
   ProbationPeriod,
   EmployeeProfile,
@@ -223,15 +224,6 @@ const generateReport = async (req, res) => {
       });
     }
 
-    // ── Fetch Development Reviews for this employee ───────────────────────
-    const empProfileId = period.employeeProfile?.profile_id;
-    const devReviews = empProfileId
-      ? await DevelopmentReview.findAll({
-          where: { profile_id: empProfileId },
-          order: [['created_at', 'ASC']],
-        })
-      : [];
-
     // ── Business rule: Director must have approved the recommendation ────────
     // Lecturer requirement: PDF generation is locked until the Director gives
     // final approval through the 3-stage approval workflow (FR-15, FR-16).
@@ -252,6 +244,21 @@ const generateReport = async (req, res) => {
       : finalRec?.generated_at
         ? new Date(finalRec.generated_at)
         : null;
+
+    // ── Fetch Development Reviews for this employee ───────────────────────
+    // G42-CYCLE-ISO: apply the same cycle boundary used for checkpoints so that
+    // development reviews written after the Director approved this cycle are not
+    // shown in the historical PDF for that cycle.
+    const empProfileId = period.employeeProfile?.profile_id;
+    const devReviews = empProfileId
+      ? await DevelopmentReview.findAll({
+          where: {
+            profile_id:  empProfileId,
+            ...(cycleDecisionAt ? { created_at: { [Op.lte]: cycleDecisionAt } } : {}),
+          },
+          order: [['created_at', 'ASC']],
+        })
+      : [];
 
     // ── Business rule: at least one completed checkpoint ──────────────────
     const checkpoints  = [...(period.checkpoints || [])].sort((a, b) => a.day_number - b.day_number);
@@ -316,8 +323,9 @@ const generateReport = async (req, res) => {
     const getSelfScore = (c) =>
       selfScoreMap[c.criterion_id] ?? selfScoreMap[`n:${c.name}`] ?? null;
 
-    // All performance notes across all checkpoints
-    const allNotes = checkpoints.flatMap((cp) =>
+    // All performance notes — restricted to completedCps so that notes from
+    // post-cycle checkpoints are excluded from historical PDFs (G42-CYCLE-ISO).
+    const allNotes = completedCps.flatMap((cp) =>
       (cp.performanceNotes || []).map((n) => ({ ...n.toJSON ? n.toJSON() : n, _cpLabel: cp.checkpoint_label }))
     );
 
@@ -487,8 +495,11 @@ const generateReport = async (req, res) => {
            .text(`${Number.parseFloat(c.weight).toFixed(0)}%`, CX_WT + 2, rowY + 5, { width: WT_W - 4, align: 'center' }).restore();
 
         // Per-checkpoint raw score
+        // cpScores entries are { raw_score, weight } objects (G09-WEIGHT fix) —
+        // read .raw_score explicitly to avoid fmtScore({...}) producing NaN/5.
         completedCps.slice(0, MAX_CP).forEach((cp, ci) => {
-          const raw = c.cpScores[cp.checkpoint_id];
+          const entry = c.cpScores[cp.checkpoint_id];
+          const raw   = entry?.raw_score ?? null;
           doc.save().fillColor(DARK).font('Helvetica').fontSize(8)
              .text(raw != null ? `${fmtScore(raw)}/5` : '—', CX_CP(ci) + 2, rowY + 5, { width: CP_W - 4, align: 'center' }).restore();
         });
