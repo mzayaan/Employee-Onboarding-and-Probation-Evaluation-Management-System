@@ -428,7 +428,7 @@ export default function HRDCTrainingPage() {
                         : `Profile #${log.profile_id}`
                       }
                     </td>
-                    <td className="px-5 py-3 text-slate-700 max-w-[180px] truncate">
+                    <td className="px-5 py-3 text-slate-700 max-w-xs" title={log.course_name}>
                       {log.course_name}
                     </td>
                     <td className="px-5 py-3 text-slate-600">{log.training_provider}</td>

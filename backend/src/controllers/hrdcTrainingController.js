@@ -154,7 +154,8 @@ const exportHRDCG1 = async (req, res) => {
     });
 
     // ── PDFKit document setup ────────────────────────────────────────────────
-    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    // Landscape gives ~742 pts usable width — enough for all 7 table columns.
+    const doc = new PDFDocument({ margin: 50, size: 'A4', layout: 'landscape' });
 
     const today = new Date().toLocaleDateString('en-MU', {
       day: '2-digit', month: 'long', year: 'numeric',
@@ -209,20 +210,24 @@ const exportHRDCG1 = async (req, res) => {
       .moveDown(1.5);
 
     // ── Table header ─────────────────────────────────────────────────────────
+    // Landscape A4 usable width: ~742 pts (x 50 → 792).
+    // Column layout: #(18) | Employee(130) | Course(205) | Provider(110) |
+    //                HRDC Code(88) | Cost(62) | Hrs(32) | Completed(85)
+    // Total content: 730 pts; table rect width: 732.
     const colX = {
-      no:         50,
-      employee:   75,
-      course:     195,
-      provider:   320,
-      code:       420,
-      cost:       480,
-      hrs:        530,
-      date:       560,
+      no:       50,
+      employee: 72,
+      course:   206,
+      provider: 415,
+      code:     529,
+      cost:     621,
+      hrs:      687,
+      date:     723,
     };
 
     const drawTableRow = (y, values, isHeader = false) => {
       doc
-        .rect(50, y, 495, isHeader ? 18 : 16)
+        .rect(50, y, 732, isHeader ? 18 : 16)
         .fillColor(isHeader ? '#1e3a5f' : (values._even ? '#f5f8ff' : '#ffffff'))
         .fill();
 
@@ -231,14 +236,14 @@ const exportHRDCG1 = async (req, res) => {
         .fontSize(isHeader ? 8 : 7.5)
         .font(isHeader ? 'Helvetica-Bold' : 'Helvetica');
 
-      doc.text(values.no,       colX.no,       y + (isHeader ? 5 : 4), { width: 22,  lineBreak: false });
-      doc.text(values.employee, colX.employee,  y + (isHeader ? 5 : 4), { width: 118, lineBreak: false });
-      doc.text(values.course,   colX.course,    y + (isHeader ? 5 : 4), { width: 122, lineBreak: false });
-      doc.text(values.provider, colX.provider,  y + (isHeader ? 5 : 4), { width: 98,  lineBreak: false });
-      doc.text(values.code,     colX.code,      y + (isHeader ? 5 : 4), { width: 58,  lineBreak: false });
-      doc.text(values.cost,     colX.cost,      y + (isHeader ? 5 : 4), { width: 48,  lineBreak: false, align: 'right' });
-      doc.text(values.hrs,      colX.hrs,       y + (isHeader ? 5 : 4), { width: 28,  lineBreak: false, align: 'right' });
-      doc.text(values.date,     colX.date,      y + (isHeader ? 5 : 4), { width: 80,  lineBreak: false });
+      doc.text(values.no,       colX.no,       y + (isHeader ? 5 : 4), { width: 18,  lineBreak: false });
+      doc.text(values.employee, colX.employee,  y + (isHeader ? 5 : 4), { width: 130, lineBreak: false });
+      doc.text(values.course,   colX.course,    y + (isHeader ? 5 : 4), { width: 205, lineBreak: false });
+      doc.text(values.provider, colX.provider,  y + (isHeader ? 5 : 4), { width: 110, lineBreak: false });
+      doc.text(values.code,     colX.code,      y + (isHeader ? 5 : 4), { width: 88,  lineBreak: false });
+      doc.text(values.cost,     colX.cost,      y + (isHeader ? 5 : 4), { width: 62,  lineBreak: false, align: 'right' });
+      doc.text(values.hrs,      colX.hrs,       y + (isHeader ? 5 : 4), { width: 32,  lineBreak: false, align: 'right' });
+      doc.text(values.date,     colX.date,      y + (isHeader ? 5 : 4), { width: 85,  lineBreak: false });
 
       doc.fillColor('#000000');
     };
@@ -258,8 +263,8 @@ const exportHRDCG1 = async (req, res) => {
     currentY += 20;
 
     logs.forEach((log, idx) => {
-      // Page break if needed (leave 60px margin at bottom)
-      if (currentY > 760) {
+      // Page break if needed — landscape height is 595 pts; leave 60 pt margin.
+      if (currentY > 535) {
         doc.addPage();
         currentY = 50;
         drawTableRow(currentY, {
@@ -277,7 +282,7 @@ const exportHRDCG1 = async (req, res) => {
 
       const emp = log.employeeProfile?.user;
       const empName = emp
-        ? `${emp.first_name} ${emp.last_name}`.slice(0, 22)
+        ? `${emp.first_name} ${emp.last_name}`.slice(0, 28)
         : `Profile ${log.profile_id}`;
 
       const costStr = Number.parseFloat(log.training_cost || 0)
@@ -286,8 +291,8 @@ const exportHRDCG1 = async (req, res) => {
       drawTableRow(currentY, {
         no:       String(idx + 1),
         employee: empName,
-        course:   (log.course_name || '').slice(0, 30),
-        provider: (log.training_provider || 'Internal').slice(0, 22),
+        course:   (log.course_name || '').slice(0, 50),
+        provider: (log.training_provider || 'Internal').slice(0, 24),
         code:     log.hrdc_approved_course_code || '—',
         cost:     costStr,
         hrs:      String(log.duration_hours || 0),

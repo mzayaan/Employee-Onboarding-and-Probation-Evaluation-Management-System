@@ -5,7 +5,7 @@
 // FR-04, FR-12, FR-16 | NFR-03 | Objective 1
 // =============================================================================
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AppShell from '@/components/shared/AppShell'
 import { useAuth } from '@/context/AuthContext'
@@ -298,8 +298,8 @@ function ProbationCheckpointsSection({ profileId }) {
               const isExpanded  = expandedSelf === cp.checkpoint_id
 
               return (
-                <>
-                  <tr key={cp.checkpoint_id}>
+                <Fragment key={cp.checkpoint_id}>
+                  <tr>
                     <td className="py-3 text-xs font-medium text-slate-700">{cp.checkpoint_label}</td>
                     <td className="py-3">
                       <span
@@ -341,13 +341,13 @@ function ProbationCheckpointsSection({ profileId }) {
                     </td>
                   </tr>
                   {isExpanded && hasSaDetail && (
-                    <tr key={`${cp.checkpoint_id}-detail`}>
+                    <tr>
                       <td colSpan={4} className="pb-3">
                         <SelfAssessmentDetail sa={cp.selfAssessment} />
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               )
             })}
           </tbody>
@@ -1126,22 +1126,6 @@ export default function EmployeeDetailPage() {
             )}
           </div>
 
-          {/* Attendance records — HR Admin and Line Manager (FR-12) */}
-          {/* FRONT-ISSUE-1 fix: use ACTIVE period first, fall back to most recent —
-              same logic as handleDownloadReport. Using periods[0] (oldest) was wrong
-              for employees whose probation has been extended (multiple periods). */}
-          {(() => {
-            const periods = employee?.probationPeriods ?? []
-            const p = periods.find((x) => x.status === 'ACTIVE') ?? periods[periods.length - 1]
-            return (
-              <AttendanceSection
-                periodId={p?.period_id ?? null}
-                startDate={p?.start_date ?? null}
-                endDate={p?.end_date ?? null}
-              />
-            )
-          })()}
-
           {/* Probation checkpoint scores — HR Admin (FR-13, FR-14, FR-16) */}
           <ProbationCheckpointsSection profileId={employee.profile_id} />
 
@@ -1462,6 +1446,22 @@ export default function EmployeeDetailPage() {
           </div>
         </form>
       )}
+
+      {/* Attendance records — always visible for HR Admin and Line Manager (FR-12).
+          Placed outside the read-only/edit ternary so HR can add attendance records
+          without first cancelling profile-edit mode. LINE_MANAGER also retains access.
+          FRONT-ISSUE-1 fix: use ACTIVE period first, fall back to most recent period. */}
+      {employee && (() => {
+        const periods = employee?.probationPeriods ?? []
+        const p = periods.find((x) => x.status === 'ACTIVE') ?? periods[periods.length - 1]
+        return (
+          <AttendanceSection
+            periodId={p?.period_id ?? null}
+            startDate={p?.start_date ?? null}
+            endDate={p?.end_date ?? null}
+          />
+        )
+      })()}
     </AppShell>
   )
 }

@@ -323,10 +323,16 @@ const generateReport = async (req, res) => {
     const getSelfScore = (c) =>
       selfScoreMap[c.criterion_id] ?? selfScoreMap[`n:${c.name}`] ?? null;
 
-    // All performance notes — restricted to completedCps so that notes from
-    // post-cycle checkpoints are excluded from historical PDFs (G42-CYCLE-ISO).
+    // All performance notes — two-level cycle isolation (G42-CYCLE-ISO):
+    //   1. Outer: only notes attached to checkpoints within completedCps (excludes
+    //      notes on post-approval checkpoints, e.g. cycle-2 cp90).
+    //   2. Inner: additionally filter each note's own created_at so that a note
+    //      written against an older in-scope checkpoint but created AFTER the
+    //      Director approved this cycle does not bleed into the historical PDF.
     const allNotes = completedCps.flatMap((cp) =>
-      (cp.performanceNotes || []).map((n) => ({ ...n.toJSON ? n.toJSON() : n, _cpLabel: cp.checkpoint_label }))
+      (cp.performanceNotes || [])
+        .filter((n) => !cycleDecisionAt || new Date(n.created_at) <= cycleDecisionAt)
+        .map((n) => ({ ...n.toJSON ? n.toJSON() : n, _cpLabel: cp.checkpoint_label }))
     );
 
     // ── Start PDF stream ──────────────────────────────────────────────────

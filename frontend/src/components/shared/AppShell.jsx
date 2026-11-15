@@ -119,7 +119,7 @@ export default function AppShell({ children }) {
       <Sidebar />
 
       {/* Right panel: top-bar + scrollable content */}
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 overflow-hidden min-h-0">
 
         {/* ── Top bar ─────────────────────────────────────────────────────── */}
         <header className="flex items-center justify-end gap-2 px-6 py-3 bg-white border-b border-slate-100 flex-shrink-0">
@@ -183,8 +183,8 @@ export default function AppShell({ children }) {
         </header>
 
         {/* Scrollable main content */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="min-h-full px-8 pt-8 pb-16">
+        <main className="flex-1 overflow-y-auto min-h-0">
+          <div className="min-h-full px-8 py-8">
             {children}
           </div>
         </main>

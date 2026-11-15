@@ -1190,24 +1190,26 @@ export default function AddEmployeePage() {
         </section>
 
         {/* ── Submit ──────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={loading}
-            className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60 transition hover:opacity-90"
-            style={{ backgroundColor: '#1e3a5f' }}
-          >
-            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {loading ? 'Creating…' : 'Create Employee'}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/hr/employees')}
-            className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-        </div>
+        <section className="rounded-xl bg-white px-6 py-5 shadow-sm ring-1 ring-slate-200">
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={loading}
+              className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60 transition hover:opacity-90"
+              style={{ backgroundColor: '#1e3a5f' }}
+            >
+              {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+              {loading ? 'Creating…' : 'Create Employee'}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/hr/employees')}
+              className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
       </form>
     </AppShell>
   )

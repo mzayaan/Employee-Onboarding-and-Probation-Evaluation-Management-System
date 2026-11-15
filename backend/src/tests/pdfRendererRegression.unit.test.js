@@ -292,4 +292,49 @@ describe('note boundary regression — allNotes must use completedCps, not all c
     expect(() => flattenNotes(completedCps)).not.toThrow();
     expect(flattenNotes(completedCps)).toHaveLength(0);
   });
+
+  // TC-RGR-010: note added to an in-scope checkpoint AFTER Director approval is excluded
+  //
+  // This is the second-level filter identified in code review: completedCps already
+  // restricts to checkpoints completed before cycleDecisionAt, but a note can be
+  // written against an older checkpoint (e.g. cp30) AFTER the Director signed off.
+  // The note's own created_at must also be compared against cycleDecisionAt.
+  it('TC-RGR-010: note created after cycleDecisionAt is excluded even when attached to an in-scope checkpoint', () => {
+    const cycleDecisionAt = new Date('2026-03-15T00:00:00.000Z');
+
+    // cp30 is within the cycle (completed before the boundary).
+    // It has two notes: one written before approval, one written after.
+    const makeNote = (id, text, createdAt) => ({
+      note_id:    id,
+      note_text:  text,
+      created_at: createdAt,
+      toJSON()    { return { note_id: this.note_id, note_text: this.note_text, created_at: this.created_at }; },
+    });
+
+    const cp30 = {
+      checkpoint_id:    1,
+      status:           'COMPLETED',
+      completed_at:     '2026-01-30T00:00:00Z',
+      checkpoint_label: 'Day 30',
+      performanceNotes: [
+        makeNote(1, 'Early observation',    '2026-02-01T00:00:00Z'), // before approval ✓
+        makeNote(2, 'Retrospective note',   '2026-04-01T00:00:00Z'), // AFTER approval  ✗
+      ],
+    };
+
+    const completedCps = filterCheckpointsByCycle([cp30], cycleDecisionAt);
+    expect(completedCps).toHaveLength(1); // cp30 is in scope
+
+    // Apply the two-level filter used in pdfController (outer = completedCps, inner = created_at)
+    const filteredNotes = completedCps.flatMap((cp) =>
+      (cp.performanceNotes || [])
+        .filter((n) => !cycleDecisionAt || new Date(n.created_at) <= cycleDecisionAt)
+        .map((n) => ({ ...(n.toJSON ? n.toJSON() : n), _cpLabel: cp.checkpoint_label }))
+    );
+
+    // Only the pre-approval note should appear
+    expect(filteredNotes).toHaveLength(1);
+    expect(filteredNotes[0].note_text).toBe('Early observation');
+    expect(filteredNotes.map((n) => n.note_text)).not.toContain('Retrospective note');
+  });
 });
