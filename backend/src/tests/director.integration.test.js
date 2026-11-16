@@ -64,7 +64,8 @@ const makeMockRec = (override = {}) => ({
   director_reason:    null,
   rejection_count:    0,
   probationPeriod:    {
-    period_id: 1,
+    period_id:  1,
+    profile_id: 1,            // G02 — required for employment_status sync
     status:    'ACTIVE',
     end_date:  new Date('2026-10-01'),
     update:    jest.fn().mockResolvedValue(true),
@@ -147,7 +148,7 @@ jest.mock('../models', () => {
 const request = require('supertest');
 const jwt     = require('jsonwebtoken');
 const app     = require('../app');
-const { User, FinalRecommendation } = require('../models');
+const { User, FinalRecommendation, EmployeeProfile, EvaluationCheckpoint } = require('../models');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const token = (payload) =>
@@ -574,6 +575,153 @@ describe('POST /api/director/:recId/return — Director return to manager (FR-20
 
     expect(res.status).toBe(403);
     expect(res.body.success).toBe(false);
+  });
+
+});
+
+// =============================================================================
+// G02 — EmployeeProfile.employment_status sync after Director approval
+//
+// When the Director approves a recommendation the system must update the
+// matching EmployeeProfile row:
+//   CONFIRM  → employment_status = PERMANENT
+//   EXTEND   → employment_status = EXTENDED
+//   DISMISS  → employment_status = DISMISSED
+//
+// directorController.js lines 513–526 carry the fix.  These tests verify
+// that EmployeeProfile.update is called with the correct status value for
+// each recommendation type.
+//
+// Requirements: FR-15, FR-16 | NFR-02 | Spec s.1.2
+// Test cases: TC-DIR-G02-001 through TC-DIR-G02-003
+// =============================================================================
+
+describe('G02 — EmployeeProfile.employment_status sync on Director approval (FR-15, NFR-02)', () => {
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    User.findOne.mockResolvedValue(mockDirectorUser);
+  });
+
+  // ── TC-DIR-G02-001 ──────────────────────────────────────────────────────────
+  test('TC-DIR-G02-001: CONFIRM recommendation → EmployeeProfile.employment_status set to PERMANENT', async () => {
+    FinalRecommendation.findByPk.mockResolvedValue(
+      makeMockRec({ approval_status: 'PENDING_DIRECTOR', recommendation_type: 'CONFIRM' })
+    );
+
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${dirToken}`)
+      .send({ director_reason: 'All criteria met.' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.approval_status).toBe('APPROVED');
+
+    // G02-FIX: employment_status must be synced
+    expect(EmployeeProfile.update).toHaveBeenCalledWith(
+      { employment_status: 'PERMANENT' },
+      expect.objectContaining({ where: { profile_id: 1 } })
+    );
+  });
+
+  // ── TC-DIR-G02-002 ──────────────────────────────────────────────────────────
+  test('TC-DIR-G02-002: EXTEND recommendation → EmployeeProfile.employment_status set to EXTENDED', async () => {
+    FinalRecommendation.findByPk.mockResolvedValue(
+      makeMockRec({ approval_status: 'PENDING_DIRECTOR', recommendation_type: 'EXTEND' })
+    );
+
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${dirToken}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.period_status).toBe('EXTENDED');
+
+    // employment_status synced; probation_end_date also synced (default end_date
+    // 2026-10-01 + 90 days = 2026-12-30)
+    expect(EmployeeProfile.update).toHaveBeenCalledWith(
+      { employment_status: 'EXTENDED', probation_end_date: '2026-12-30' },
+      expect.objectContaining({ where: { profile_id: 1 } })
+    );
+  });
+
+  // ── TC-DIR-G02-003 ──────────────────────────────────────────────────────────
+  test('TC-DIR-G02-003: DISMISS recommendation → EmployeeProfile.employment_status set to DISMISSED', async () => {
+    FinalRecommendation.findByPk.mockResolvedValue(
+      makeMockRec({ approval_status: 'PENDING_DIRECTOR', recommendation_type: 'DISMISS' })
+    );
+
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${dirToken}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.period_status).toBe('DISMISSED');
+
+    expect(EmployeeProfile.update).toHaveBeenCalledWith(
+      { employment_status: 'DISMISSED' },
+      expect.objectContaining({ where: { profile_id: 1 } })
+    );
+  });
+
+  // ── TC-DIR-G02-004 ──────────────────────────────────────────────────────────
+  // Verifies that a 90-day EXTEND approval:
+  //   • updates ProbationPeriod.end_date to 2027-03-01
+  //   • creates the extension checkpoint with due_date 2027-03-01
+  //   • sets EmployeeProfile.employment_status = EXTENDED
+  //   • sets EmployeeProfile.probation_end_date = 2027-03-01
+  //   • all writes share the same transaction object
+  test('TC-DIR-G02-004: EXTEND with start 2026-12-01 → new end 2027-03-01; EmployeeProfile.probation_end_date synced', async () => {
+    const startEnd = new Date('2026-12-01');
+    // 90 days forward: 2026-12-01 → 2027-03-01
+    const expectedNewEnd = '2027-03-01';
+
+    FinalRecommendation.findByPk.mockResolvedValue(
+      makeMockRec({
+        approval_status:     'PENDING_DIRECTOR',
+        recommendation_type: 'EXTEND',
+        probationPeriod: {
+          period_id:  1,
+          profile_id: 1,
+          status:     'ACTIVE',
+          end_date:   startEnd,
+          update:     jest.fn().mockResolvedValue(true),
+        },
+      })
+    );
+
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${dirToken}`)
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.period_status).toBe('EXTENDED');
+
+    // ProbationPeriod.update called with new end_date
+    const recMock = await FinalRecommendation.findByPk.mock.results[0].value;
+    expect(recMock.probationPeriod.update).toHaveBeenCalledWith(
+      expect.objectContaining({ end_date: expectedNewEnd, status: 'EXTENDED' }),
+      expect.anything()
+    );
+
+    // Extension checkpoint created with due_date = new end
+    expect(EvaluationCheckpoint.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        due_date:         expectedNewEnd,
+        checkpoint_label: 'Extension Review',
+        status:           'PENDING',
+      }),
+      expect.anything()
+    );
+
+    // EmployeeProfile synced: employment_status AND probation_end_date
+    expect(EmployeeProfile.update).toHaveBeenCalledWith(
+      { employment_status: 'EXTENDED', probation_end_date: expectedNewEnd },
+      expect.objectContaining({ where: { profile_id: 1 } })
+    );
   });
 
 });

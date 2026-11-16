@@ -12,20 +12,35 @@
 // is optional on employee creation and must not be forced to a value
 // it was not given.
 //
-// The minimum salary is read from SystemConfig using the row whose
-// effective_date is on or before today (most-recent first).  When no
-// SystemConfig row is found the minimum check is silently skipped so
-// that requests are never blocked solely due to a missing config entry.
+// Effective-date reference point
+// ──────────────────────────────
+// When options.referenceDateField is set (e.g. 'start_date'), the
+// middleware uses max(today, req.body[referenceDateField]) as the
+// reference date for the SystemConfig lookup.  This ensures that a
+// future minimum wage that becomes effective before the employee's
+// start date is applied at the time of creation rather than overlooked.
+//
+// For salary updates (PUT /employees/:id/profile), no referenceDateField
+// is passed and the reference date is always today — only the minimum
+// that is currently in force is applied.
+//
+// If referenceDateField is set but its value in req.body is absent,
+// invalid, or not in the future, today is used as a safe fallback.
 //
 // Usage:
 //   const validateSalary = require('../middleware/validateSalary');
 //
-//   // employee route  — validates req.body.salary_monthly (default)
+//   // employee creation — uses start_date as reference when in the future
 //   router.post('/', authorize('HR_ADMIN'), uploadImage.single(...),
 //               validateNIC, validateProbationDuration,
-//               validateSalary(), createEmployee);
+//               validateSalary('salary_monthly', { referenceDateField: 'start_date' }),
+//               createEmployee);
 //
-//   // contract route — validates req.body.basic_salary_mur
+//   // employee update  — always uses today
+//   router.put('/:id/profile', authorize('HR_ADMIN'),
+//              validateSalary(), updateEmployeeProfile);
+//
+//   // contract route — validates req.body.basic_salary_mur (uses today)
 //   router.post('/', authorize('HR_ADMIN'), enforceProbationClause,
 //               validateSalary('basic_salary_mur'), createContract);
 //
@@ -43,9 +58,15 @@ const { Op }            = require('sequelize');
  * @param {string} [fieldName='salary_monthly']
  *   The req.body field name to validate.  Pass 'basic_salary_mur' for the
  *   contract creation route; leave as default for employee routes.
+ * @param {{ referenceDateField?: string }} [options={}]
+ *   referenceDateField — when set, the middleware picks the later of today
+ *   and req.body[referenceDateField] as the effective-date reference point
+ *   for the SystemConfig minimum-salary lookup.  Omit for update routes
+ *   where only today's minimum is relevant.
  * @returns {import('express').RequestHandler}
  */
-const validateSalary = (fieldName = 'salary_monthly') => async (req, res, next) => {
+const validateSalary = (fieldName = 'salary_monthly', options = {}) => async (req, res, next) => {
+  const { referenceDateField } = options;
   const raw = req.body[fieldName];
 
   // ── No-op when field is absent, explicitly null, or empty string ───────────
@@ -75,15 +96,32 @@ const validateSalary = (fieldName = 'salary_monthly') => async (req, res, next) 
   }
 
   // ── Minimum salary check from SystemConfig ────────────────────────────────
-  // Find the most recent SystemConfig row whose effective_date is <= today.
+  // Find the most recent SystemConfig row whose effective_date is <= referenceDate.
   // • No row found (null config):  minimum check is skipped; proceed (next()).
   // • Row found, value below min:  400 Bad Request.
   // • SystemConfig read throws:    500 Server Error — a present salary field
   //   cannot be validated and the request must not proceed blindly.
+  //
+  // referenceDate = max(today, req.body[referenceDateField])
+  //   • For new employee creation (referenceDateField = 'start_date') this
+  //     means a future minimum that takes effect before the employee's start
+  //     date is applied.  If start_date is absent, invalid or in the past,
+  //     today is used as the safe fallback.
+  //   • For updates (referenceDateField omitted) today is always used.
   try {
     const today = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+
+    let referenceDate = today;
+    if (referenceDateField) {
+      const raw = req.body[referenceDateField];
+      // Accept only 'YYYY-MM-DD' strings that are strictly in the future
+      if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw) && raw > today) {
+        referenceDate = raw;
+      }
+    }
+
     const config = await SystemConfig.findOne({
-      where: { effective_date: { [Op.lte]: today } },
+      where: { effective_date: { [Op.lte]: referenceDate } },
       order: [['effective_date', 'DESC']],
     });
 

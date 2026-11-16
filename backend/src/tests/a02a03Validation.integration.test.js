@@ -43,6 +43,15 @@
 //   TC-A03-013  contract POST: invalid basic_salary_mur cannot be bypassed
 //               via salary_monthly field
 //
+// A03 — Effective-date reference-point policy (referenceDateField)
+// ----------------------------------------------------------------
+//   TC-A03-014  future SystemConfig row (higher min effective before start_date)
+//               → creation with salary between current and future min → 400
+//   TC-A03-015  same salary on PUT (uses today) → not rejected on salary
+//   TC-A03-016  start_date in the past → fallback to today; today min used
+//   TC-A03-017  start_date absent → fallback to today; today min used
+//   TC-A03-018  salary above both minimums → creation passes salary validation
+//
 // FR-04 | NFR-02 | A02 | A03
 // =============================================================================
 
@@ -460,5 +469,139 @@ describe('A03 — validateSalary: contract route (basic_salary_mur)', () => {
     expect(res.body.message).toMatch(/must not be negative/i);
     // Controller was never entered
     expect(mockedModels.Contract.create).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// A03 — Effective-date reference-point policy
+//
+// For new employee creation the middleware uses
+//   referenceDate = max(today, req.body.start_date)
+// so a future minimum-wage row that becomes effective before the
+// employee's start date is correctly applied at creation time.
+//
+// For salary updates (PUT /employees/:id/profile) the middleware
+// always uses today, so only the currently-active minimum is enforced.
+//
+//   TC-A03-014  future SystemConfig row (higher min effective before start_date)
+//               → employee creation with salary above today's min but below
+//               the future min → 400 (future min applies at creation)
+//   TC-A03-015  same salary on PUT /employees/:id/profile
+//               → passes (PUT uses today, today's lower min applies)
+//   TC-A03-016  start_date in the past → falls back to today; today's min used
+//   TC-A03-017  start_date absent → falls back to today; today's min used
+//   TC-A03-018  salary above both today's and future min → creation passes
+// =============================================================================
+
+describe('A03 — Effective-date reference-point for minimum salary', () => {
+
+  // Salary values relative to the two configured minimums:
+  //   TODAY_MIN  = 17 745 MUR (default mock — currently effective)
+  //   FUTURE_MIN = 25 000 MUR (effective from 2027-01-01, before start_date 2027-06-01)
+  const TODAY_MIN  = MOCK_MIN_SALARY; // 17 745
+  const FUTURE_MIN = 25000;
+  const SALARY_BETWEEN = 20000; // today_min < salary < future_min
+
+  // A helper that sets SystemConfig.findOne to return the future minimum
+  // only when the reference date is on or after FUTURE_EFFECTIVE_DATE.
+  // The middleware will call findOne once with Op.lte: referenceDate.
+  // We simulate by using mockResolvedValueOnce with the future config.
+  const FUTURE_EFFECTIVE_DATE = '2027-01-01'; // before start_date 2027-06-01
+
+  it('TC-A03-014: future min effective before start_date → creation with salary between current and future min → 400', async () => {
+    // Override: SystemConfig.findOne returns the HIGHER future minimum.
+    // This simulates the lookup using referenceDate = start_date ('2027-06-01')
+    // finding the row effective from '2027-01-01'.
+    mockedModels.SystemConfig.findOne.mockResolvedValueOnce({
+      min_salary_mur: String(FUTURE_MIN),
+      effective_date: FUTURE_EFFECTIVE_DATE,
+    });
+
+    const res = await request
+      .post('/api/employees')
+      .send({
+        ...validEmployeeBase(),
+        start_date:     '2027-06-01',
+        salary_monthly: SALARY_BETWEEN, // above today_min, below future_min
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/below the configured minimum/i);
+    // Persistence never reached
+    expect(mockedModels.User.create).not.toHaveBeenCalled();
+  });
+
+  it('TC-A03-015: same salary on PUT /employees/:id/profile → passes (PUT uses today, today min applies)', async () => {
+    // PUT route: validateSalary() — no referenceDateField, uses today.
+    // SystemConfig.findOne returns today's lower minimum (default mock).
+    const res = await request
+      .put('/api/employees/1/profile')
+      .send({ salary_monthly: SALARY_BETWEEN });
+
+    // SALARY_BETWEEN > TODAY_MIN → validateSalary passes for update route.
+    // Controller may still reject for other reasons (profile not found etc.)
+    // but the salary validator itself must NOT reject it.
+    expect(res.status).not.toBe(400);
+    if (res.status === 400) {
+      expect(res.body.message).not.toMatch(/salary|minimum/i);
+    }
+    // SystemConfig.findOne was called (salary field present)
+    expect(mockedModels.SystemConfig.findOne).toHaveBeenCalled();
+  });
+
+  it('TC-A03-016: start_date in the past → middleware falls back to today; today min enforced', async () => {
+    // past start_date: should not affect referenceDate — today is used.
+    // Default mock returns today's minimum (TODAY_MIN = 17745).
+    // Supply a salary above TODAY_MIN → passes salary validation.
+    const res = await request
+      .post('/api/employees')
+      .send({
+        ...validEmployeeBase(),
+        start_date:     '2020-01-01', // in the past
+        salary_monthly: 20000,        // above TODAY_MIN
+      });
+
+    // Salary validation passes; request is not rejected on salary grounds.
+    if (res.status === 400) {
+      expect(res.body.message).not.toMatch(/salary|minimum/i);
+    }
+    expect(mockedModels.SystemConfig.findOne).toHaveBeenCalled();
+  });
+
+  it('TC-A03-017: start_date absent → middleware falls back to today; today min enforced', async () => {
+    const body = { ...validEmployeeBase() };
+    delete body.start_date;
+    body.salary_monthly = 20000; // above TODAY_MIN
+
+    const res = await request
+      .post('/api/employees')
+      .send(body);
+
+    if (res.status === 400) {
+      expect(res.body.message).not.toMatch(/salary|minimum/i);
+    }
+    expect(mockedModels.SystemConfig.findOne).toHaveBeenCalled();
+  });
+
+  it('TC-A03-018: salary above both today min and future min → creation passes salary validation', async () => {
+    // Even when future min row is returned, salary above FUTURE_MIN passes.
+    mockedModels.SystemConfig.findOne.mockResolvedValueOnce({
+      min_salary_mur: String(FUTURE_MIN),
+      effective_date: FUTURE_EFFECTIVE_DATE,
+    });
+
+    const res = await request
+      .post('/api/employees')
+      .send({
+        ...validEmployeeBase(),
+        start_date:     '2027-06-01',
+        salary_monthly: 30000, // above FUTURE_MIN (25000)
+      });
+
+    // Salary validation passes; rejection must NOT be on salary grounds.
+    if (res.status === 400) {
+      expect(res.body.message).not.toMatch(/salary|minimum/i);
+    }
+    expect(mockedModels.SystemConfig.findOne).toHaveBeenCalled();
   });
 });

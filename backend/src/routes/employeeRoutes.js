@@ -42,7 +42,10 @@ router.get('/managers', authorize('HR_ADMIN'), listManagers);
 // validateNIC: checks Mauritian NIC format (FR-04 / NFR-02)
 // validateProbationDuration: enforces WRA 2019 s.13 max 6-month probation (NFR-08)
 // validateSalary: rejects non-finite, negative, or below-minimum salary_monthly (A03)
-router.post('/', authorize('HR_ADMIN'), uploadImage.single('profile_image'), validateNIC, validateProbationDuration, validateSalary(), createEmployee);
+// referenceDateField: 'start_date' — apply whichever minimum is effective on or before
+// the employee's start date, so a future minimum that takes effect before employment
+// begins is correctly enforced at creation time (A03 effective-date policy).
+router.post('/', authorize('HR_ADMIN'), uploadImage.single('profile_image'), validateNIC, validateProbationDuration, validateSalary('salary_monthly', { referenceDateField: 'start_date' }), createEmployee);
 
 // GET  /api/employees           — HR, Manager, and Director (Director needs the employee list for approval context)
 router.get('/', authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'), listEmployees);

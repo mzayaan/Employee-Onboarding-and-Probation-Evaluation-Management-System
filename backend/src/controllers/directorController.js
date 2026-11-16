@@ -510,8 +510,10 @@ const approveRecommendation = async (req, res) => {
 
         await rec.probationPeriod.update(periodUpdate, { transaction: t });
 
-        // G02-FIX: Sync EmployeeProfile.employment_status with the Director decision.
-        // CONFIRM → PERMANENT, EXTEND → EXTENDED, DISMISS → DISMISSED.
+        // G02-FIX: Sync EmployeeProfile with the Director decision.
+        //   employment_status: CONFIRM → PERMANENT, EXTEND → EXTENDED, DISMISS → DISMISSED
+        //   probation_end_date: synced to the new period end_date on EXTEND so that
+        //     HR and employee profile screens always display the current end date.
         const employmentStatusMap = {
           CONFIRM: 'PERMANENT',
           EXTEND:  'EXTENDED',
@@ -519,8 +521,13 @@ const approveRecommendation = async (req, res) => {
         };
         const newEmploymentStatus = employmentStatusMap[rec.recommendation_type];
         if (newEmploymentStatus) {
+          const profileUpdate = { employment_status: newEmploymentStatus };
+          // periodUpdate.end_date is only set when recommendation_type === 'EXTEND'
+          if (periodUpdate.end_date) {
+            profileUpdate.probation_end_date = periodUpdate.end_date;
+          }
           await EmployeeProfile.update(
-            { employment_status: newEmploymentStatus },
+            profileUpdate,
             { where: { profile_id: rec.probationPeriod.profile_id }, transaction: t }
           );
         }
