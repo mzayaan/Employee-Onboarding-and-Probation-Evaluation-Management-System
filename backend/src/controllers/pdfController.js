@@ -323,17 +323,13 @@ const generateReport = async (req, res) => {
     const getSelfScore = (c) =>
       selfScoreMap[c.criterion_id] ?? selfScoreMap[`n:${c.name}`] ?? null;
 
-    // All performance notes — two-level cycle isolation (G42-CYCLE-ISO):
-    //   1. Outer: only notes attached to checkpoints within completedCps (excludes
-    //      notes on post-approval checkpoints, e.g. cycle-2 cp90).
-    //   2. Inner: additionally filter each note's own created_at so that a note
-    //      written against an older in-scope checkpoint but created AFTER the
-    //      Director approved this cycle does not bleed into the historical PDF.
-    const allNotes = completedCps.flatMap((cp) =>
-      (cp.performanceNotes || [])
-        .filter((n) => !cycleDecisionAt || new Date(n.created_at) <= cycleDecisionAt)
-        .map((n) => ({ ...n.toJSON ? n.toJSON() : n, _cpLabel: cp.checkpoint_label }))
-    );
+    // All performance notes — three-level cycle/ownership isolation (G42-CYCLE-ISO + A01-PDF):
+    //   1. Outer : only notes on checkpoints within completedCps (excludes cycle-2 cps).
+    //   2. Inner : filter each note's created_at against cycleDecisionAt (G42-CYCLE-ISO).
+    //   3. A01-PDF: exclude notes whose profile_id !== empProfileId.
+    //              Defence-in-depth: A01 blocks creation of such notes going forward;
+    //              this ensures any pre-fix orphan note cannot appear in this PDF.
+    const allNotes = collectNotesForPDF(completedCps, empProfileId, cycleDecisionAt);
 
     // ── Start PDF stream ──────────────────────────────────────────────────
     // bufferPages: true is required for doc.switchToPage() and doc.bufferedPageRange()
@@ -1025,4 +1021,26 @@ const generateReport = async (req, res) => {
   }
 };
 
-module.exports = { generateReport };
+// =============================================================================
+// collectNotesForPDF
+// Pure helper: collect performance notes from a set of completed checkpoints,
+// applying three isolation layers before they enter the PDF.
+//
+//   completedCps    — EvaluationCheckpoint instances (each with .performanceNotes)
+//   empProfileId    — numeric profile_id of the employee whose PDF is being built
+//   cycleDecisionAt — Date|null: Director approval timestamp for cycle boundary
+//
+// Exported for unit testing (FR-12, FR-16, NFR-02, NFR-03, A01-PDF).
+// =============================================================================
+function collectNotesForPDF(completedCps, empProfileId, cycleDecisionAt) {
+  return completedCps.flatMap((cp) =>
+    (cp.performanceNotes || [])
+      // Layer 2 — time boundary (G42-CYCLE-ISO)
+      .filter((n) => !cycleDecisionAt || new Date(n.created_at) <= cycleDecisionAt)
+      // Layer 3 — ownership guard (A01-PDF)
+      .filter((n) => Number(n.profile_id) === Number(empProfileId))
+      .map((n) => ({ ...n.toJSON ? n.toJSON() : n, _cpLabel: cp.checkpoint_label }))
+  );
+}
+
+module.exports = { generateReport, collectNotesForPDF };

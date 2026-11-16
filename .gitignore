@@ -35,3 +35,6 @@ backend/uploads/
 
 # Jest cache
 .jest-cache/
+
+# Linux-sandbox bcrypt workaround — do NOT commit; not needed on Windows
+backend/jest.config.js
