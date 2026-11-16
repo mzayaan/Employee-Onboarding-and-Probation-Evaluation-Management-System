@@ -10,9 +10,10 @@ const express      = require('express');
 const router       = express.Router();
 const authenticate = require('../middleware/authenticate');
 const authorize    = require('../middleware/authorize');
-const validateNIC  = require('../middleware/validateNIC');
+const validateNIC      = require('../middleware/validateNIC');
 const { validateProbationDuration } = require('../middleware/validateProbationBoundary');
-const uploadImage  = require('../middleware/uploadImage');
+const validateSalary   = require('../middleware/validateSalary');
+const uploadImage      = require('../middleware/uploadImage');
 const {
   createEmployee,
   listEmployees,
@@ -36,9 +37,12 @@ router.get('/all-users', authorize('SYSTEM_ADMIN'), listAllUsers);
 router.get('/managers', authorize('HR_ADMIN'), listManagers);
 
 // POST /api/employees           — HR only
+// A02 fix: uploadImage (Multer) runs first so req.body is populated for
+//          multipart/form-data requests before validators read it.
 // validateNIC: checks Mauritian NIC format (FR-04 / NFR-02)
 // validateProbationDuration: enforces WRA 2019 s.13 max 6-month probation (NFR-08)
-router.post('/', authorize('HR_ADMIN'), validateNIC, validateProbationDuration, uploadImage.single('profile_image'), createEmployee);
+// validateSalary: rejects non-finite, negative, or below-minimum salary_monthly (A03)
+router.post('/', authorize('HR_ADMIN'), uploadImage.single('profile_image'), validateNIC, validateProbationDuration, validateSalary(), createEmployee);
 
 // GET  /api/employees           — HR, Manager, and Director (Director needs the employee list for approval context)
 router.get('/', authorize('HR_ADMIN', 'LINE_MANAGER', 'DIRECTOR'), listEmployees);
@@ -64,7 +68,8 @@ router.patch(
 router.get('/:id', authorize('HR_ADMIN', 'LINE_MANAGER', 'NEW_EMPLOYEE', 'DIRECTOR'), getEmployee);
 
 // PUT  /api/employees/:id/profile — HR only
-router.put('/:id/profile', authorize('HR_ADMIN'), updateEmployeeProfile);
+// validateSalary: rejects non-finite, negative, or below-minimum salary_monthly if supplied (A03)
+router.put('/:id/profile', authorize('HR_ADMIN'), validateSalary(), updateEmployeeProfile);
 
 // GET /api/employees/:profileId/leave-balance — HR_ADMIN, LINE_MANAGER, DIRECTOR
 // Declared after /:id — Express matches the more specific path first because

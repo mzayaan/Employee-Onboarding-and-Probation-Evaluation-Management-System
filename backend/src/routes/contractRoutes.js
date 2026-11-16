@@ -11,9 +11,10 @@
 
 const express    = require('express');
 const router     = express.Router();
-const authenticate = require('../middleware/authenticate');
-const authorize    = require('../middleware/authorize');
+const authenticate    = require('../middleware/authenticate');
+const authorize       = require('../middleware/authorize');
 const { enforceProbationClause } = require('../middleware/validateProbationBoundary');
+const validateSalary  = require('../middleware/validateSalary');
 
 const {
   getMyContract,
@@ -31,7 +32,8 @@ router.get('/mine', authorize('NEW_EMPLOYEE'), getMyContract);
 router.get('/profile/:profileId', authorize('HR_ADMIN'), getContractByProfile);
 
 // HR: create a new contract — enforceProbationClause checks WRA 2019 s.13
-router.post('/', authorize('HR_ADMIN'), enforceProbationClause, createContract);
+// validateSalary: rejects non-finite, negative, or below-minimum basic_salary_mur (A03)
+router.post('/', authorize('HR_ADMIN'), enforceProbationClause, validateSalary('basic_salary_mur'), createContract);
 
 // Employee: digitally sign their contract
 router.patch('/:contractId/sign', authorize('NEW_EMPLOYEE'), signContract);

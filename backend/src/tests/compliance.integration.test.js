@@ -223,6 +223,16 @@ jest.mock('../models', () => {
       create:  jest.fn().mockResolvedValue({ notification_id: 1 }),
       findAll: jest.fn().mockResolvedValue([]),
     },
+
+    // Required by validateSalary middleware on contract and employee routes.
+    // Without this entry, SystemConfig.findOne throws TypeError and the
+    // middleware now correctly returns 500 instead of silently bypassing validation.
+    SystemConfig: {
+      findOne: jest.fn().mockResolvedValue({
+        min_salary_mur: '17745',
+        effective_date: '2026-01-01',
+      }),
+    },
   };
 });
 
