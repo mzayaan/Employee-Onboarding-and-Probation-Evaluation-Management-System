@@ -6,7 +6,7 @@
 // FR-12 | NFR-02, NFR-03 | Objective 2
 // =============================================================================
 
-const { PerformanceNote, EmployeeProfile, User, EvaluationCheckpoint } = require('../models');
+const { PerformanceNote, EmployeeProfile, User, EvaluationCheckpoint, ProbationPeriod } = require('../models');
 const { createAuditLog }     = require('../utils/auditLogger');
 const { createNotification } = require('../services/notificationService');
 
@@ -75,9 +75,20 @@ const createNote = async (req, res) => {
 
     // Optionally link to an evaluation checkpoint (may be null)
     if (evaluation_period_id) {
-      const checkpoint = await EvaluationCheckpoint.findByPk(evaluation_period_id);
+      const checkpoint = await EvaluationCheckpoint.findByPk(evaluation_period_id, {
+        include: [{ model: ProbationPeriod, as: 'probationPeriod', attributes: ['profile_id'] }],
+      });
       if (!checkpoint) {
         return res.status(400).json({ success: false, message: 'Invalid evaluation_period_id.' });
+      }
+      // A01 — verify the checkpoint belongs to the employee identified by profile_id.
+      // Without this check a manager could link a note for employee A to a checkpoint
+      // from employee B's probation record.
+      if (checkpoint.probationPeriod?.profile_id !== Number(profile_id)) {
+        return res.status(403).json({
+          success: false,
+          message: 'The specified evaluation_period_id does not belong to this employee.',
+        });
       }
     }
 
@@ -303,9 +314,18 @@ const addEmployeeFeedback = async (req, res) => {
     }
 
     if (evaluation_period_id) {
-      const checkpoint = await EvaluationCheckpoint.findByPk(evaluation_period_id);
+      const checkpoint = await EvaluationCheckpoint.findByPk(evaluation_period_id, {
+        include: [{ model: ProbationPeriod, as: 'probationPeriod', attributes: ['profile_id'] }],
+      });
       if (!checkpoint) {
         return res.status(400).json({ success: false, message: 'Invalid evaluation_period_id.' });
+      }
+      // A01 — verify the checkpoint belongs to this employee's own profile.
+      if (checkpoint.probationPeriod?.profile_id !== profile.profile_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'The specified evaluation_period_id does not belong to your profile.',
+        });
       }
     }
 

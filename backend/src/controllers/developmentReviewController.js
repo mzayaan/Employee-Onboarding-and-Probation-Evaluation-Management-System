@@ -9,6 +9,32 @@ const { DevelopmentReview, EmployeeProfile, User, EvaluationCheckpoint } = requi
 const { createAuditLog }        = require('../utils/auditLogger');
 const { createNotification }    = require('../services/notificationService');
 
+// NFR-02 / NFR-08 / DPA-2017: sensitive profile fields that must not be
+// returned to LINE_MANAGER or DIRECTOR callers.  HR_ADMIN and the employee
+// viewing their own reviews retain full access.
+const { SENSITIVE_FIELDS } = require('./employeeController');
+const RESTRICTED_ROLES = ['LINE_MANAGER', 'DIRECTOR'];
+
+/**
+ * Convert a DevelopmentReview Sequelize instance (or array of instances) to
+ * plain JSON and delete the seven DPA-sensitive fields from the nested
+ * employeeProfile.  Called only for restricted-role responses.
+ *
+ * @param {object|object[]} reviewOrArray  - Sequelize instance or array thereof
+ * @returns {object|object[]}              - Plain object(s) with sensitive fields removed
+ */
+function stripReviewProfile(reviewOrArray) {
+  const toPlain = (r) => {
+    const obj = r.toJSON ? r.toJSON() : { ...r };
+    const ep = obj.employeeProfile;
+    if (ep) SENSITIVE_FIELDS.forEach((f) => delete ep[f]);
+    return obj;
+  };
+  return Array.isArray(reviewOrArray)
+    ? reviewOrArray.map(toPlain)
+    : toPlain(reviewOrArray);
+}
+
 // ── Helper: include config ─────────────────────────────────────────────────
 const REVIEW_INCLUDE = [
   {
@@ -94,7 +120,10 @@ exports.createReview = async (req, res) => {
       })
       .catch(() => {});
 
-    return res.status(201).json({ success: true, data: full });
+    const responseData = RESTRICTED_ROLES.includes(req.user.role)
+      ? stripReviewProfile(full)
+      : (full.toJSON ? full.toJSON() : full);
+    return res.status(201).json({ success: true, data: responseData });
   } catch (err) {
     console.error('createReview error:', err);
     return res.status(500).json({ success: false, message: 'Failed to create development review.' });
@@ -121,7 +150,10 @@ exports.getReviewsByProfile = async (req, res) => {
       order: [['created_at', 'DESC']],
     });
 
-    return res.json({ success: true, data: reviews });
+    const responseData = RESTRICTED_ROLES.includes(req.user.role)
+      ? stripReviewProfile(reviews)
+      : reviews.map((r) => (r.toJSON ? r.toJSON() : r));
+    return res.json({ success: true, data: responseData });
   } catch (err) {
     console.error('getReviewsByProfile error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch development reviews.' });
@@ -143,7 +175,10 @@ exports.getReviewById = async (req, res) => {
       }
     }
 
-    return res.json({ success: true, data: review });
+    const responseData = RESTRICTED_ROLES.includes(req.user.role)
+      ? stripReviewProfile(review)
+      : (review.toJSON ? review.toJSON() : review);
+    return res.json({ success: true, data: responseData });
   } catch (err) {
     console.error('getReviewById error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch review.' });
@@ -191,7 +226,10 @@ exports.updateReview = async (req, res) => {
     });
 
     const updated = await DevelopmentReview.findByPk(reviewId, { include: REVIEW_INCLUDE });
-    return res.json({ success: true, data: updated });
+    const responseData = RESTRICTED_ROLES.includes(req.user.role)
+      ? stripReviewProfile(updated)
+      : (updated.toJSON ? updated.toJSON() : updated);
+    return res.json({ success: true, data: responseData });
   } catch (err) {
     console.error('updateReview error:', err);
     return res.status(500).json({ success: false, message: 'Failed to update review.' });

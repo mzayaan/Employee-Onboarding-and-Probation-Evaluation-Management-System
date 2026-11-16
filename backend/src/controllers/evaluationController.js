@@ -265,7 +265,19 @@ const getCheckpoint = async (req, res) => {
       console.warn('[getCheckpoint] Could not compute attendance summary:', e.message);
     }
 
-    return res.json({ success: true, data: checkpoint, criteria, attendanceSummary });
+    // NFR-02 / NFR-08 / DPA-2017: strip payroll-sensitive fields from the
+    // embedded EmployeeProfile for LINE_MANAGER and DIRECTOR callers.
+    // HR_ADMIN retains full access; NEW_EMPLOYEE is already gated to their own
+    // record (line 211) so they also retain their own data.
+    const RESTRICTED_ROLES = ['LINE_MANAGER', 'DIRECTOR'];
+    const { SENSITIVE_FIELDS } = require('./employeeController');
+    const checkpointData = checkpoint.toJSON ? checkpoint.toJSON() : { ...checkpoint };
+    if (RESTRICTED_ROLES.includes(req.user.role)) {
+      const ep = checkpointData.probationPeriod?.employeeProfile;
+      if (ep) SENSITIVE_FIELDS.forEach((f) => delete ep[f]);
+    }
+
+    return res.json({ success: true, data: checkpointData, criteria, attendanceSummary });
   } catch (error) {
     console.error('[evaluationController.getCheckpoint]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve checkpoint.' });
