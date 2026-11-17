@@ -37,10 +37,12 @@ export const createContract = (payload) =>
 
 /**
  * Employee: submit a signed contract acknowledgement.
- * Payload: { signature_string, signature_timestamp }
- * The backend captures the IP from the request and persists the signed_at.
+ * Payload: { signature_string }
+ * The backend captures server time for signed_at and the client IP for the
+ * audit log. signature_timestamp is intentionally omitted: the backend always
+ * uses server time (G06-D1 fix) and would silently discard it anyway.
  */
-export const signContract = (contractId, payload) =>
-  api.patch(`/contracts/${contractId}/sign`, payload).then((r) => r.data)
+export const signContract = (contractId, { signature_string }) =>
+  api.patch(`/contracts/${contractId}/sign`, { signature_string }).then((r) => r.data)
 
 // MRA Employee Tax Declaration functions have been moved to taxDeclarationApi.js

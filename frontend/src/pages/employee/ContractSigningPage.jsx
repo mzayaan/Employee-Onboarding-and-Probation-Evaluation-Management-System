@@ -61,7 +61,12 @@ export default function ContractSigningPage() {
   const [submitError,    setSubmitError]    = useState('')
 
   // ── Full name required for signature match ────────────────────────────────
-  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
+  // Acceptable forms (G06): "First Last" or "First Middle Last".
+  // The backend enforces the same policy; this provides immediate UI feedback.
+  const fullName         = [user?.first_name, user?.last_name].filter(Boolean).join(' ')
+  const fullNameWithMid  = user?.middle_name
+    ? [user.first_name, user.middle_name, user.last_name].filter(Boolean).join(' ')
+    : null
 
   // ── Load contract ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -79,8 +84,12 @@ export default function ContractSigningPage() {
   }, [])
 
   // ── Signature validation ──────────────────────────────────────────────────
+  // Normalise: trim outer whitespace, collapse internal runs, lower-case.
+  const normInput = signatureInput.trim().replace(/\s+/g, ' ').toLowerCase()
   const signatureValid =
-    signatureInput.trim().toLowerCase() === fullName.toLowerCase()
+    normInput === fullName.trim().replace(/\s+/g, ' ').toLowerCase() ||
+    (fullNameWithMid !== null &&
+      normInput === fullNameWithMid.trim().replace(/\s+/g, ' ').toLowerCase())
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSign = async (e) => {
@@ -90,15 +99,16 @@ export default function ContractSigningPage() {
       return
     }
     if (!signatureValid) {
-      setSubmitError(`Signature must exactly match your full name: "${fullName}".`)
+      const hint = fullNameWithMid ? `"${fullName}" or "${fullNameWithMid}"` : `"${fullName}"`
+      setSubmitError(`Signature must exactly match your full name: ${hint}.`)
       return
     }
     setSubmitting(true)
     setSubmitError('')
     try {
       await signContract(contract.contract_id, {
-        signature_string:    signatureInput.trim(),
-        signature_timestamp: new Date().toISOString(),
+        signature_string: signatureInput.trim(),
+        // signature_timestamp removed (G06-D1): backend always uses server time
       })
       setSigned(true)
     } catch (err) {
@@ -319,7 +329,9 @@ export default function ContractSigningPage() {
                     />
                     {signatureInput && !signatureValid && (
                       <p className="mt-1 text-xs text-red-500">
-                        Must match exactly: <strong>{fullName}</strong>
+                        Must match exactly:{' '}
+                        <strong>{fullName}</strong>
+                        {fullNameWithMid && <span> or <strong>{fullNameWithMid}</strong></span>}
                       </p>
                     )}
                     {signatureValid && (

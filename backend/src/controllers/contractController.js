@@ -475,15 +475,65 @@ const createContract = async (req, res) => {
 // =============================================================================
 // PATCH /api/contracts/:contractId/sign  (NEW_EMPLOYEE)
 // Records the employee's digital signature and sets signed_at to today.
-// Captures the client IP address at the time of signing for audit purposes.
+//
+// Security model (G06):
+//   D1 — Signing date is always server-controlled (new Date()).
+//        Any client-supplied signature_timestamp is silently ignored for
+//        backward compatibility with existing frontend payloads that send it.
+//   D2 — Signature string is validated against the employee's stored name.
+//        Acceptable forms (case-insensitive, whitespace-normalised):
+//          "First Last"
+//          "First Middle Last"  (when middle_name is non-null)
+//        Max 500 characters (matches signature_string column length).
+//   D3 — Atomic concurrency guard: Contract.update() with
+//        WHERE signed_at IS NULL; 0 rows updated → 409 (already signed
+//        by a concurrent request).
+//   D4 — typeof check: signature_string must be a string.
+//   D5 — Length check: empty / whitespace-only / > 500 chars rejected.
+//
+// Precise signing instant: captured in updated_at (DataTypes.DATE = DATETIME)
+// on the contract row and in created_at of the SIGN_CONTRACT audit log entry.
+// signed_at remains DATEONLY (calendar date) — no migration required.
 // =============================================================================
 const signContract = async (req, res) => {
   try {
     const { contractId } = req.params;
-    const { signature_string, signature_timestamp } = req.body;
+    const { signature_string } = req.body;
+    // signature_timestamp from body is intentionally ignored (D1 — server controls time)
 
-    if (!signature_string || !signature_string.trim()) {
-      return res.status(400).json({ success: false, message: 'signature_string is required.' });
+    // ── D4: type guard ────────────────────────────────────────────────────────
+    if (typeof signature_string !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'signature_string must be a string.',
+      });
+    }
+
+    // ── D5: content / length guard ────────────────────────────────────────────
+    const trimmedSig = signature_string.trim();
+    if (!trimmedSig) {
+      return res.status(400).json({
+        success: false,
+        message: 'signature_string is required and must not be blank.',
+      });
+    }
+    if (trimmedSig.length > 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'signature_string must not exceed 500 characters.',
+      });
+    }
+
+    // ── Ownership: load profile from server-side user_id only ─────────────────
+    const profile = await EmployeeProfile.findOne({
+      where: { user_id: req.user.user_id },
+    });
+
+    if (!profile) {
+      return res.status(403).json({
+        success: false,
+        message: 'No employee profile found for this account.',
+      });
     }
 
     const contract = await Contract.findByPk(contractId);
@@ -491,22 +541,42 @@ const signContract = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contract not found.' });
     }
 
-    // Ensure the contract belongs to the requesting employee
-    const profile = await EmployeeProfile.findOne({
-      where: { user_id: req.user.user_id },
-    });
-
-    if (!profile || profile.profile_id !== contract.profile_id) {
-      return res.status(403).json({ success: false, message: 'You do not have permission to sign this contract.' });
+    if (profile.profile_id !== contract.profile_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to sign this contract.',
+      });
     }
 
-    if (contract.signed_at) {
-      return res.status(409).json({ success: false, message: 'This contract has already been signed.' });
+    // ── D2: name validation ───────────────────────────────────────────────────
+    // Acceptable: "First Last" or "First Middle Last" (when middle_name non-null)
+    // Matching: case-insensitive, internal whitespace normalised to single space.
+    const user = await User.findByPk(req.user.user_id);
+    if (!user) {
+      return res.status(403).json({ success: false, message: 'Signing user record not found.' });
     }
 
-    const signingDate = signature_timestamp
-      ? new Date(signature_timestamp).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
+    const normalise = (s) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+    const normalSig = normalise(trimmedSig);
+
+    const firstLast = normalise(`${user.first_name} ${user.last_name}`);
+    const firstMiddleLast = user.middle_name
+      ? normalise(`${user.first_name} ${user.middle_name} ${user.last_name}`)
+      : null;
+
+    const nameMatches = normalSig === firstLast ||
+      (firstMiddleLast !== null && normalSig === firstMiddleLast);
+
+    if (!nameMatches) {
+      return res.status(400).json({
+        success: false,
+        message: 'Signature does not match your registered name. Please type your full name as it appears on your account.',
+      });
+    }
+
+    // ── D1: server-controlled signing date ────────────────────────────────────
+    const now          = new Date();
+    const signingDate  = now.toISOString().slice(0, 10); // YYYY-MM-DD for DATEONLY column
 
     // Capture client IP for audit record (proxy-aware)
     const clientIp =
@@ -514,16 +584,30 @@ const signContract = async (req, res) => {
       req.socket?.remoteAddress ||
       'unknown';
 
-    await contract.update({
-      signed_at:        signingDate,
-      signature_string: signature_string.trim(),
-      updated_at:       new Date(),
-    });
+    // ── D3: atomic concurrency guard ──────────────────────────────────────────
+    // WHERE signed_at IS NULL ensures only one concurrent request can win.
+    const [rowsAffected] = await Contract.update(
+      {
+        signed_at:        signingDate,
+        signature_string: trimmedSig,
+        updated_at:       now,
+      },
+      {
+        where: { contract_id: contractId, signed_at: null },
+      },
+    );
+
+    if (rowsAffected === 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'This contract has already been signed.',
+      });
+    }
 
     await createAuditLog({
       userId:      req.user.user_id,
       actionType:  'SIGN_CONTRACT',
-      description: `Contract ${contractId} signed digitally. Signature: "${signature_string.trim()}". Client IP: ${clientIp}. Timestamp: ${signingDate}.`,
+      description: `Contract ${contractId} signed digitally. Signature: "${trimmedSig}". Client IP: ${clientIp}. Signed date: ${signingDate}.`,
       ipAddress:   clientIp,
     });
 
