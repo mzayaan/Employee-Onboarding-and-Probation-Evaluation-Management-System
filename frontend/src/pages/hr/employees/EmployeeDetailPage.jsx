@@ -376,7 +376,7 @@ function ContractSection({ profileId }) {
     contract_type:             'PROBATIONARY',
     basic_salary_mur:          '',
     start_date:                '',
-    end_date:                  '',
+    contract_end_date:         '',
     probation_clause_included: true,
     probation_duration_months: 3,
     notice_period_days:        14,
@@ -406,7 +406,11 @@ function ContractSection({ profileId }) {
         contract_type:             form.contract_type,
         basic_salary_mur:          Number(form.basic_salary_mur),
         start_date:                form.start_date || undefined,
-        end_date:                  form.end_date   || undefined,
+        // contract_end_date is only required for FIXED_TERM contracts.
+        // Sending it for other types is harmless but kept conditional for clarity.
+        contract_end_date:         form.contract_type === 'FIXED_TERM'
+                                     ? (form.contract_end_date || undefined)
+                                     : undefined,
         probation_clause_included: form.probation_clause_included,
         probation_duration_months: Number(form.probation_duration_months),
         notice_period_days:        Number(form.notice_period_days),
@@ -461,6 +465,16 @@ function ContractSection({ profileId }) {
             <p className="text-xs font-medium text-slate-500 mb-0.5">Contract Type</p>
             <p className="font-medium text-slate-800">{CONTRACT_LABELS[contract.contract_type] ?? contract.contract_type}</p>
           </div>
+          {contract.contract_type === 'FIXED_TERM' && (
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-0.5">Contract Expiry Date</p>
+            <p className="font-medium text-slate-800">
+              {contract.contract_end_date
+                ? new Date(contract.contract_end_date).toLocaleDateString('en-GB')
+                : <span className="italic text-slate-400">—</span>}
+            </p>
+          </div>
+          )}
           <div>
             <p className="text-xs font-medium text-slate-500 mb-0.5">Basic Salary (MUR)</p>
             <p className="font-medium text-slate-800">{Number(contract.basic_salary_mur).toLocaleString()}</p>
@@ -544,17 +558,20 @@ function ContractSection({ profileId }) {
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </div>
+            {form.contract_type === 'FIXED_TERM' && (
             <div>
-              <label htmlFor="contract-end-date" className="mb-1 block text-xs font-medium text-slate-600">Probation End Date</label>
+              <label htmlFor="contract-end-date" className="mb-1 block text-xs font-medium text-slate-600">Contract Expiry Date *</label>
               <input
                 id="contract-end-date"
                 type="date"
-                value={form.end_date}
-                onChange={setField('end_date')}
+                value={form.contract_end_date}
+                onChange={setField('contract_end_date')}
+                required
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
-              <p className="mt-0.5 text-xs text-slate-400">WRA 2019 s.13: max 184 days from start date.</p>
+              <p className="mt-0.5 text-xs text-slate-400">Date on which the fixed-term employment contract expires.</p>
             </div>
+            )}
             <div>
               <label htmlFor="contract-probation-months" className="mb-1 block text-xs font-medium text-slate-600">Probation Duration (months)</label>
               <input

@@ -16,6 +16,44 @@ const { Op }             = require('sequelize');
 const ALLOWED_PROBATION_MONTHS = new Set([1, 2, 3, 6, 12]);
 
 // =============================================================================
+// HELPERS — calendar-month arithmetic
+// =============================================================================
+
+/**
+ * addCalendarMonths
+ * Returns the YYYY-MM-DD string exactly `months` calendar months after
+ * `baseDateStr`.  Month-end overflow is clamped to the last day of the target
+ * month (e.g. 2026-01-31 + 1 month → 2026-02-28).
+ * Never approximates by dividing days by 30.
+ */
+function addCalendarMonths(baseDateStr, months) {
+  const [year, monthNum, day] = baseDateStr.split('-').map(Number);
+  const totalMonths  = (monthNum - 1) + months;
+  const targetYear   = year + Math.floor(totalMonths / 12);
+  const targetMonth  = totalMonths % 12; // 0-based
+  const daysInTarget = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const targetDay    = Math.min(day, daysInTarget);
+  return `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`;
+}
+
+/**
+ * deriveProbationMonths
+ * Determines which supported duration in ALLOWED_PROBATION_MONTHS (if any)
+ * maps startDateStr to endDateStr via calendar-month arithmetic.
+ * Returns the matching months value, or null when none matches (e.g. extended
+ * period whose end_date was shifted by an approved extension).
+ */
+function deriveProbationMonths(startDateStr, endDateStr) {
+  for (const months of ALLOWED_PROBATION_MONTHS) {
+    if (addCalendarMonths(startDateStr, months) === endDateStr) return months;
+  }
+  return null;
+}
+
+/** Strict YYYY-MM-DD date format check. */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// =============================================================================
 // GET /api/contracts/mine  (NEW_EMPLOYEE)
 // Returns the contract linked to the authenticated employee's profile.
 // =============================================================================
@@ -138,22 +176,47 @@ const createContract = async (req, res) => {
         }
       }
 
-      // Conflict guard: reject a duration change when scored checkpoints already exist.
-      // This prevents retroactively altering a probation timeline that has evidence.
+      // G07 Area 2 (revised): Duration conflict guard.
+      // Look up the root probation period to determine the already-configured
+      // duration.  A root period is one with parent_period_id IS NULL (the
+      // original period, before any approved extension).  CANCELLED periods are
+      // excluded because they were voided by a prior no-probation contract.
+      //
+      // If the new duration matches the existing one, the contract is allowed
+      // even when evaluations have already been submitted — the probation
+      // timeline does not change and there is no inconsistency.
+      //
+      // If the duration genuinely differs, the contract is rejected: the system
+      // does not silently reschedule periods or rebuild checkpoints, and
+      // completed evaluations cannot be retroactively invalidated.
+      //
+      // Extended periods are not confused with the original because their
+      // end_date was shifted — deriveProbationMonths will return null for them,
+      // which is treated conservatively (do not block).
       if (durMonths !== null) {
-        const scoredCount = await EvaluationCheckpoint.count({
-          include: [{
-            association: 'probationPeriod',
-            where:       { profile_id },
-            required:    true,
-          }],
-          where: { status: 'COMPLETED' },
+        const rootPeriod = await ProbationPeriod.findOne({
+          where: {
+            profile_id,
+            parent_period_id: null,
+            status: { [Op.not]: 'CANCELLED' },
+          },
+          attributes: ['period_id', 'start_date', 'end_date'],
         });
-        if (scoredCount > 0) {
-          return res.status(409).json({
-            success: false,
-            message: 'probation_duration_months cannot be changed once evaluation checkpoints have been completed.',
-          });
+
+        if (rootPeriod) {
+          const existingMonths = deriveProbationMonths(
+            rootPeriod.start_date,
+            rootPeriod.end_date
+          );
+          // existingMonths === null means the period has non-standard or extended
+          // dates — cannot reliably derive original duration, so do not block.
+          // existingMonths === durMonths means no change — allow.
+          if (existingMonths !== null && existingMonths !== durMonths) {
+            return res.status(409).json({
+              success: false,
+              message: 'probation_duration_months cannot be changed once a probation period has been established for this employee.',
+            });
+          }
         }
       }
     }
@@ -167,15 +230,41 @@ const createContract = async (req, res) => {
         });
       }
 
-      // Validate end date is after the employee's employment start date.
+      // Validate that the value is a real YYYY-MM-DD calendar date.
+      // A plain string comparison would silently accept values such as
+      // "not-a-date" or the impossible "2027-02-30" (which JavaScript's
+      // Date constructor rolls over to 2027-03-02).
+      if (!ISO_DATE_RE.test(contract_end_date)) {
+        return res.status(400).json({
+          success: false,
+          message: 'contract_end_date must be in YYYY-MM-DD format.',
+        });
+      }
+      // Append an explicit UTC offset so parsing is timezone-independent.
+      const parsedEndDate = new Date(contract_end_date + 'T00:00:00.000Z');
+      if (
+        isNaN(parsedEndDate.getTime()) ||
+        parsedEndDate.toISOString().slice(0, 10) !== contract_end_date
+      ) {
+        // The ISO roundtrip catches roll-overs like 2027-02-30 → 2027-03-02.
+        return res.status(400).json({
+          success: false,
+          message: 'contract_end_date is not a valid calendar date.',
+        });
+      }
+
+      // Validate that the expiry is strictly after the employee's start date.
       const profile = await EmployeeProfile.findByPk(profile_id, {
         attributes: ['start_date'],
       });
-      if (profile && profile.start_date && contract_end_date <= profile.start_date) {
-        return res.status(400).json({
-          success: false,
-          message: `contract_end_date (${contract_end_date}) must be after the employee's start date (${profile.start_date}).`,
-        });
+      if (profile?.start_date) {
+        const parsedStartDate = new Date(profile.start_date + 'T00:00:00.000Z');
+        if (parsedEndDate <= parsedStartDate) {
+          return res.status(400).json({
+            success: false,
+            message: `contract_end_date (${contract_end_date}) must be after the employee's start date (${profile.start_date}).`,
+          });
+        }
       }
     }
 

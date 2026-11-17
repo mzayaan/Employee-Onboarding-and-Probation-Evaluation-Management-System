@@ -129,6 +129,7 @@ jest.mock('../models', () => {
 
     ProbationPeriod: {
       findAll:  jest.fn().mockResolvedValue([{ period_id: 7 }, { period_id: 8 }]),
+      findOne:  jest.fn().mockResolvedValue(null),
       update:   jest.fn().mockResolvedValue([2]),
       findByPk: jest.fn().mockResolvedValue(null),
     },
@@ -246,6 +247,7 @@ beforeEach(() => {
   });
   m.EmployeeProfile.update.mockResolvedValue([1]);
   m.ProbationPeriod.findAll.mockResolvedValue([{ period_id: 7 }, { period_id: 8 }]);
+  m.ProbationPeriod.findOne.mockResolvedValue(null); // no root period by default → no duration conflict
   m.ProbationPeriod.update.mockResolvedValue([2]);
   m.EvaluationCheckpoint.count.mockResolvedValue(0);
   m.EvaluationCheckpoint.update.mockResolvedValue([3]);
@@ -311,8 +313,17 @@ describe('G07 Area 2 — Probation-duration consistency', () => {
     expect(body.success).toBe(true);
   });
 
-  test('TC-G07-005: duration change rejected when scored checkpoints exist → 409', async () => {
-    m.EvaluationCheckpoint.count.mockResolvedValue(1);
+  test('TC-G07-005: duration change rejected when a root period with different configuration exists → 409', async () => {
+    // A root period that was configured for 3 months:
+    //   addCalendarMonths('2026-02-01', 3) = '2026-05-01'
+    // The new contract requests 6 months — a genuine conflict → 409.
+    // The new guard uses ProbationPeriod.findOne (not EvaluationCheckpoint.count).
+    m.ProbationPeriod.findOne.mockResolvedValueOnce({
+      period_id:        5,
+      start_date:       '2026-02-01',
+      end_date:         '2026-05-01', // 3 calendar months from start
+      parent_period_id: null,
+    });
     const { req, res } = makeReqRes({
       profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
       probation_clause_included: true, probation_duration_months: 6,
@@ -322,6 +333,8 @@ describe('G07 Area 2 — Probation-duration consistency', () => {
     expect(status).toBe(409);
     expect(body.success).toBe(false);
     expect(body.message).toMatch(/cannot be changed/i);
+    // EvaluationCheckpoint.count is no longer consulted for the duration guard
+    expect(m.EvaluationCheckpoint.count).not.toHaveBeenCalled();
   });
 
   test('TC-G07-006: duration 12 months (supported) → 201 Created', async () => {
@@ -641,6 +654,153 @@ describe('G07 Guards — evaluation submission blocked on CANCELLED probation', 
     expect(body.message).toMatch(/cancelled/i);
 
     expect(m.SelfAssessment.create).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// G07 — Area 2 extended: Duration conflict semantics (Issues 2 & 1 verification)
+// =============================================================================
+describe('G07 Area 2 extended — Duration conflict semantics', () => {
+
+  test('TC-G07-023: same duration as existing root period with completed evaluations → 201 (not blocked)', async () => {
+    // The old code rejected any duration when scored checkpoints existed.
+    // The new code allows a contract whose duration matches the established
+    // configuration, even when evaluations have already been submitted.
+    m.ProbationPeriod.findOne.mockResolvedValueOnce({
+      period_id:        5,
+      start_date:       '2026-02-01',
+      end_date:         '2026-05-01', // 3 calendar months → matches new duration
+      parent_period_id: null,
+    });
+    // Some checkpoints are COMPLETED — must NOT block the matching-duration contract
+    m.EvaluationCheckpoint.count.mockResolvedValue(3);
+
+    const { req, res } = makeReqRes({
+      profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+      probation_clause_included: true, probation_duration_months: 3, // matches existing
+    });
+    await createContract(req, res);
+    const { status, body } = getResponse(res);
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    // EvaluationCheckpoint.count is no longer part of the duration conflict guard
+    expect(m.EvaluationCheckpoint.count).not.toHaveBeenCalled();
+  });
+
+  test('TC-G07-024: conflicting duration with no completed checkpoints → 409, no writes', async () => {
+    // The old code allowed a different duration when no checkpoints were scored,
+    // leaving the existing period/checkpoint records stale.  The new code rejects
+    // the conflict regardless of checkpoint state.
+    m.ProbationPeriod.findOne.mockResolvedValueOnce({
+      period_id:        5,
+      start_date:       '2026-02-01',
+      end_date:         '2026-05-01', // 3 months
+      parent_period_id: null,
+    });
+    m.EvaluationCheckpoint.count.mockResolvedValue(0); // no scored checkpoints
+
+    const { req, res } = makeReqRes({
+      profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+      probation_clause_included: true, probation_duration_months: 6, // conflicts
+    });
+    await createContract(req, res);
+    const { status, body } = getResponse(res);
+    expect(status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.message).toMatch(/cannot be changed/i);
+    // No persistence should have occurred
+    expect(m.Contract.create).not.toHaveBeenCalled();
+    expect(m.sequelize.transaction).not.toHaveBeenCalled();
+  });
+
+  test('TC-G07-025: FIXED_TERM with contract_end_date (updated frontend payload shape) → 201, field persisted', async () => {
+    // Verifies the exact field name the updated EmployeeDetailPage now sends.
+    // The previous code sent end_date; the backend expects contract_end_date.
+    const { req, res } = makeReqRes({
+      profile_id:                10,
+      contract_type:             'FIXED_TERM',
+      basic_salary_mur:          28000,
+      contract_end_date:         '2028-01-31', // correct field name
+      probation_clause_included: true,
+      probation_duration_months: 3,
+      notice_period_days:        14,
+      contract_reference:        'FT-2026-001',
+    });
+    await createContract(req, res);
+    const { status } = getResponse(res);
+    expect(status).toBe(201);
+    expect(m.Contract.create).toHaveBeenCalledWith(
+      expect.objectContaining({ contract_end_date: '2028-01-31' }),
+      expect.anything()
+    );
+  });
+});
+
+// =============================================================================
+// G07 — Area 3 extended: Real fixed-term date validation (Issue 3)
+// =============================================================================
+describe('G07 Area 3 extended — Fixed-term date validation', () => {
+
+  test('TC-G07-026: FIXED_TERM with malformed date string "not-a-date" → 400 before persistence', async () => {
+    // A plain string comparison would let "not-a-date" pass the guard because
+    // "not-a-date" > "2026-02-01" is true lexicographically.
+    const { req, res } = makeReqRes({
+      profile_id: 10, contract_type: 'FIXED_TERM', basic_salary_mur: 25000,
+      probation_clause_included: true, probation_duration_months: 3,
+      contract_end_date: 'not-a-date',
+    });
+    await createContract(req, res);
+    const { status, body } = getResponse(res);
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(m.Contract.create).not.toHaveBeenCalled();
+  });
+
+  test('TC-G07-027: FIXED_TERM with impossible calendar date "2027-02-30" → 400', async () => {
+    // JavaScript rolls "2027-02-30" forward to "2027-03-02".
+    // The ISO-roundtrip check catches this and rejects it before persistence.
+    const { req, res } = makeReqRes({
+      profile_id: 10, contract_type: 'FIXED_TERM', basic_salary_mur: 25000,
+      probation_clause_included: true, probation_duration_months: 3,
+      contract_end_date: '2027-02-30',
+    });
+    await createContract(req, res);
+    const { status, body } = getResponse(res);
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(m.Contract.create).not.toHaveBeenCalled();
+  });
+
+  test('TC-G07-028: FIXED_TERM with contract_end_date before employee start_date → 400', async () => {
+    // profile.start_date = '2026-02-01'; contract_end_date = '2025-12-01' (earlier)
+    const { req, res } = makeReqRes({
+      profile_id: 10, contract_type: 'FIXED_TERM', basic_salary_mur: 25000,
+      probation_clause_included: true, probation_duration_months: 3,
+      contract_end_date: '2025-12-01',
+    });
+    await createContract(req, res);
+    const { status, body } = getResponse(res);
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.message).toMatch(/must be after/i);
+    expect(m.Contract.create).not.toHaveBeenCalled();
+  });
+
+  test('TC-G07-029: FIXED_TERM with valid leap day "2028-02-29" → 201, date persisted', async () => {
+    // 2028 is a leap year (divisible by 4, not a century year).
+    // The ISO-roundtrip check must accept this as a valid calendar date.
+    const { req, res } = makeReqRes({
+      profile_id: 10, contract_type: 'FIXED_TERM', basic_salary_mur: 25000,
+      probation_clause_included: true, probation_duration_months: 3,
+      contract_end_date: '2028-02-29',
+    });
+    await createContract(req, res);
+    const { status } = getResponse(res);
+    expect(status).toBe(201);
+    expect(m.Contract.create).toHaveBeenCalledWith(
+      expect.objectContaining({ contract_end_date: '2028-02-29' }),
+      expect.anything()
+    );
   });
 });
 
