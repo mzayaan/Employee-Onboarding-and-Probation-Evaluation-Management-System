@@ -8,8 +8,12 @@
 // FR-04 (extended) | NFR-02, NFR-03, NFR-08 | Objective 1
 // =============================================================================
 
-const { Contract, EmployeeProfile, User } = require('../models');
-const { createAuditLog }                  = require('../utils/auditLogger');
+const { sequelize, Contract, EmployeeProfile, User, ProbationPeriod, EvaluationCheckpoint } = require('../models');
+const { createAuditLog } = require('../utils/auditLogger');
+const { Op }             = require('sequelize');
+
+// Permitted probation durations (months) — mirrors frontend CHECKPOINT_MATRIX (spec s.1.4).
+const ALLOWED_PROBATION_MONTHS = new Set([1, 2, 3, 6, 12]);
 
 // =============================================================================
 // GET /api/contracts/mine  (NEW_EMPLOYEE)
@@ -83,14 +87,14 @@ const createContract = async (req, res) => {
       contract_reference,
       contract_type,
       probation_duration_months,
-      probation_clause_included,
+      probation_clause_included: rawClause,
       basic_salary_mur,
       notice_period_days,
       cloudinary_url,
-      start_date,
-      end_date,
+      contract_end_date,
     } = req.body;
 
+    // ── Required fields ───────────────────────────────────────────────────────
     if (!profile_id || !contract_type || !basic_salary_mur) {
       return res.status(400).json({
         success: false,
@@ -98,19 +102,84 @@ const createContract = async (req, res) => {
       });
     }
 
-    // WRA 2019 s.13: probation period must not exceed 184 days
-    if (start_date && end_date && probation_clause_included !== false) {
-      const startMs = new Date(start_date).getTime();
-      const endMs   = new Date(end_date).getTime();
-      const diffDays = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24));
-      if (diffDays > 184) {
+    // ── G07 Area 1: Normalise probation_clause_included to a strict boolean ──
+    // Accept boolean false, the string 'false', or the integer 0 as "no clause".
+    const clauseIncluded = !(rawClause === false || rawClause === 'false' || rawClause === 0);
+
+    // ── G07 Area 2: Probation-duration consistency ────────────────────────────
+    // Only validate when a probation clause is included; a no-probation contract
+    // has no meaningful duration.
+    const durMonths = probation_duration_months != null
+      ? Number(probation_duration_months)
+      : null;
+
+    if (clauseIncluded) {
+      if (durMonths !== null) {
+        // Reject fractional / non-integer values explicitly
+        if (!Number.isInteger(durMonths)) {
+          return res.status(400).json({
+            success: false,
+            message: `probation_duration_months must be a whole number, received: ${probation_duration_months}.`,
+          });
+        }
+        // Reject negative values
+        if (durMonths < 0) {
+          return res.status(400).json({
+            success: false,
+            message: `probation_duration_months must not be negative, received: ${durMonths}.`,
+          });
+        }
+        // Reject values not in the agreed set
+        if (!ALLOWED_PROBATION_MONTHS.has(durMonths)) {
+          return res.status(400).json({
+            success: false,
+            message: `probation_duration_months must be one of: ${[...ALLOWED_PROBATION_MONTHS].sort((a, b) => a - b).join(', ')}. Received: ${durMonths}.`,
+          });
+        }
+      }
+
+      // Conflict guard: reject a duration change when scored checkpoints already exist.
+      // This prevents retroactively altering a probation timeline that has evidence.
+      if (durMonths !== null) {
+        const scoredCount = await EvaluationCheckpoint.count({
+          include: [{
+            association: 'probationPeriod',
+            where:       { profile_id },
+            required:    true,
+          }],
+          where: { status: 'COMPLETED' },
+        });
+        if (scoredCount > 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'probation_duration_months cannot be changed once evaluation checkpoints have been completed.',
+          });
+        }
+      }
+    }
+
+    // ── G07 Area 3: Fixed-term contract_end_date ──────────────────────────────
+    if (contract_type === 'FIXED_TERM') {
+      if (!contract_end_date) {
         return res.status(400).json({
           success: false,
-          message: `Probation period of ${diffDays} days exceeds the 184-day maximum permitted under WRA 2019 s.13.`,
+          message: 'contract_end_date is required for FIXED_TERM contracts.',
+        });
+      }
+
+      // Validate end date is after the employee's employment start date.
+      const profile = await EmployeeProfile.findByPk(profile_id, {
+        attributes: ['start_date'],
+      });
+      if (profile && profile.start_date && contract_end_date <= profile.start_date) {
+        return res.status(400).json({
+          success: false,
+          message: `contract_end_date (${contract_end_date}) must be after the employee's start date (${profile.start_date}).`,
         });
       }
     }
 
+    // ── Duplicate guard ───────────────────────────────────────────────────────
     const existing = await Contract.findOne({ where: { profile_id } });
     if (existing) {
       return res.status(409).json({
@@ -119,33 +188,76 @@ const createContract = async (req, res) => {
       });
     }
 
-    const contract = await Contract.create({
-      profile_id,
-      contract_reference:        contract_reference || null,
-      contract_type,
-      probation_duration_months: probation_duration_months ?? 3,
-      probation_clause_included: probation_clause_included !== false,
-      basic_salary_mur,
-      notice_period_days:        notice_period_days ?? 14,
-      cloudinary_url:            cloudinary_url || null,
-      created_at:                new Date(),
-    });
+    // ── G07 Area 4: Atomic transaction ───────────────────────────────────────
+    // Contract creation + profile/period/checkpoint updates all share one
+    // transaction so a mid-write failure cannot leave the DB in a partial state.
+    const contract = await sequelize.transaction(async (t) => {
+      const created = await Contract.create({
+        profile_id,
+        contract_reference:        contract_reference || null,
+        contract_type,
+        probation_duration_months: durMonths ?? 3,
+        probation_clause_included: clauseIncluded,
+        basic_salary_mur,
+        notice_period_days:        notice_period_days ?? 14,
+        cloudinary_url:            cloudinary_url || null,
+        contract_end_date:         contract_end_date || null,
+        created_at:                new Date(),
+      }, { transaction: t });
 
-    // G07-FIX: If the contract has no probation clause, the employee is permanent
-    // from day one. The enforceProbationClause middleware sets req.skipCheckpointGeneration
-    // to signal this; here we act on that flag by updating employment_status to PERMANENT
-    // so that no probation evaluation checkpoints are generated for this employee.
-    if (req.skipCheckpointGeneration) {
-      await EmployeeProfile.update(
-        { employment_status: 'PERMANENT' },
-        { where: { profile_id } }
-      );
-    }
+      // ── G07 Area 1 (continued): No-probation reconciliation ───────────────
+      // When the contract has no probation clause the employee is PERMANENT from
+      // day one (WRA 2019 s.13).  Any ACTIVE or EXTENDED probation period created
+      // at employee-registration time must be cancelled; its pending checkpoints
+      // are cancelled too.  DISMISSED is intentionally NOT used here — the employee
+      // is not being dismissed, their probation is simply voided by the contract.
+      if (!clauseIncluded) {
+        // Cancel all ACTIVE / EXTENDED probation periods for this profile
+        const periodsToCancel = await ProbationPeriod.findAll({
+          where: { profile_id, status: { [Op.in]: ['ACTIVE', 'EXTENDED'] } },
+          attributes: ['period_id'],
+          transaction: t,
+        });
+
+        if (periodsToCancel.length > 0) {
+          const periodIds = periodsToCancel.map((p) => p.period_id);
+
+          await ProbationPeriod.update(
+            { status: 'CANCELLED', updated_at: new Date() },
+            { where: { period_id: { [Op.in]: periodIds } }, transaction: t }
+          );
+
+          // Cancel any PENDING or OVERDUE checkpoints linked to those periods.
+          // COMPLETED checkpoints (and their scores) are intentionally preserved
+          // for audit and historical reporting purposes.
+          await EvaluationCheckpoint.update(
+            { status: 'CANCELLED' },
+            {
+              where: {
+                period_id: { [Op.in]: periodIds },
+                status:    { [Op.in]: ['PENDING', 'OVERDUE'] },
+              },
+              transaction: t,
+            }
+          );
+        }
+
+        // Set employment_status to PERMANENT (also set by enforceProbationClause
+        // middleware on req.body, but that only affects the body — the profile
+        // record must be updated explicitly here, inside the transaction).
+        await EmployeeProfile.update(
+          { employment_status: 'PERMANENT' },
+          { where: { profile_id }, transaction: t }
+        );
+      }
+
+      return created;
+    });
 
     await createAuditLog({
       userId:      req.user.user_id,
       actionType:  'CREATE_CONTRACT',
-      description: `Contract created for profile_id ${profile_id} by HR user ${req.user.user_id}. Probation clause included: ${probation_clause_included !== false}.`,
+      description: `Contract created for profile_id ${profile_id} by HR user ${req.user.user_id}. Probation clause included: ${clauseIncluded}. Contract type: ${contract_type}.`,
     });
 
     return res.status(201).json({ success: true, message: 'Contract created.', data: contract });

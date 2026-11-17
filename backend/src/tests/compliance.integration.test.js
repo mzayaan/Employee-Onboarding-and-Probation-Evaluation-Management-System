@@ -219,6 +219,21 @@ jest.mock('../models', () => {
       create: jest.fn().mockResolvedValue({ audit_id: 1 }),
     },
 
+    // G07: createContract now calls ProbationPeriod.findAll (to cancel ACTIVE/EXTENDED
+    // periods) and EvaluationCheckpoint.update/.count when probation_clause_included
+    // is false or when a probation_duration_months value is validated.
+    // These stubs default to "nothing to cancel / no completed checkpoints" so
+    // existing contract tests continue to work without further mock changes.
+    ProbationPeriod: {
+      findAll: jest.fn().mockResolvedValue([]),
+      update:  jest.fn().mockResolvedValue([0]),
+    },
+
+    EvaluationCheckpoint: {
+      count:  jest.fn().mockResolvedValue(0),
+      update: jest.fn().mockResolvedValue([0]),
+    },
+
     Notification: {
       create:  jest.fn().mockResolvedValue({ notification_id: 1 }),
       findAll: jest.fn().mockResolvedValue([]),
@@ -274,7 +289,11 @@ describe('POST /api/contracts — create employment contract (FR-20)', () => {
     expect(res.body.success).toBe(true);
   });
 
-  test('TC-COMP-I-002: probation exceeds 184 days → 400 WRA 2019 violation', async () => {
+  test('TC-COMP-I-002: unsupported probation_duration_months → 400 duration validation', async () => {
+    // G07 moved duration enforcement to the ALLOWED_PROBATION_MONTHS set
+    // {1, 2, 3, 6, 12}.  Any integer outside that set is rejected with 400.
+    // (The old start_date/end_date date-range check lived on the employee route,
+    // not the contract route; this test now exercises the contract-level guard.)
     const res = await request(app)
       .post('/api/contracts')
       .set('Authorization', `Bearer ${hrToken}`)
@@ -282,14 +301,13 @@ describe('POST /api/contracts — create employment contract (FR-20)', () => {
         profile_id:                10,
         contract_type:             'PROBATIONARY',
         basic_salary_mur:          25000,
-        start_date:                '2026-01-01',
-        end_date:                  '2027-06-01',   // > 184 days — WRA 2019 violation
+        probation_duration_months: 7,              // not in {1,2,3,6,12} → 400
         probation_clause_included: true,
       });
 
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
-    expect(res.body.message).toMatch(/WRA 2019/);
+    expect(res.body.message).toMatch(/probation_duration_months/);
   });
 
   test('TC-COMP-I-003: New Employee cannot create contract → 403 Forbidden', async () => {

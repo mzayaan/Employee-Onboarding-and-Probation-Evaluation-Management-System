@@ -455,6 +455,16 @@ const approveRecommendation = async (req, res) => {
       });
     }
 
+    // G07: Prevent a pending Director approval from overwriting a CANCELLED probation
+    // period.  This can happen when a no-probation contract is created for the employee
+    // after the recommendation was raised but before the Director acts on it.
+    if (rec.probationPeriod?.status === 'CANCELLED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot approve: the linked probation period has been cancelled.',
+      });
+    }
+
     // Derive the new ProbationPeriod status from recommendation_type
     const periodStatusMap = {
       CONFIRM: 'CONFIRMED',

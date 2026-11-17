@@ -33,9 +33,10 @@ const EvaluationCheckpoint = sequelize.define('EvaluationCheckpoint', {
     allowNull: false,
   },
   status: {
-    type: DataTypes.ENUM('PENDING', 'COMPLETED', 'OVERDUE'),
+    type: DataTypes.ENUM('PENDING', 'COMPLETED', 'OVERDUE', 'CANCELLED'),
     allowNull: false,
     defaultValue: 'PENDING',
+    comment: 'CANCELLED = checkpoint voided because the associated probation period was cancelled',
   },
   triggered_at: {
     type: DataTypes.DATE,

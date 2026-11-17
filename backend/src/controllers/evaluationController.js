@@ -431,6 +431,16 @@ const submitManagerEvaluation = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Manager evaluation already submitted for this checkpoint.' });
     }
 
+    // G07: Reject submission if the probation period has been cancelled (e.g. because
+    // a no-probation contract was subsequently created for this employee).
+    // Preserving COMPLETED evaluations is intentional; this guard only blocks NEW ones.
+    if (checkpoint.probationPeriod?.status === 'CANCELLED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot submit evaluation: the probation period has been cancelled.',
+      });
+    }
+
     const profile = checkpoint.probationPeriod?.employeeProfile;
     if (req.user.role === 'LINE_MANAGER' && profile?.manager_id !== req.user.user_id) {
       return res.status(403).json({ success: false, message: 'Access denied.' });
@@ -702,6 +712,14 @@ const submitSelfAssessment = async (req, res) => {
     const existing = await SelfAssessment.findOne({ where: { checkpoint_id: checkpointId } });
     if (existing) {
       return res.status(409).json({ success: false, message: 'Self-assessment already submitted for this checkpoint.' });
+    }
+
+    // G07: Reject submission if the probation period has been cancelled.
+    if (checkpoint.probationPeriod?.status === 'CANCELLED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot submit self-assessment: the probation period has been cancelled.',
+      });
     }
 
     // Load active criteria

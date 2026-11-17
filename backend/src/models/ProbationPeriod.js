@@ -27,10 +27,10 @@ const ProbationPeriod = sequelize.define('ProbationPeriod', {
     allowNull: false,
   },
   status: {
-    type: DataTypes.ENUM('ACTIVE', 'COMPLETED', 'EXTENDED', 'CONFIRMED', 'DISMISSED'),
+    type: DataTypes.ENUM('ACTIVE', 'COMPLETED', 'EXTENDED', 'CONFIRMED', 'DISMISSED', 'CANCELLED'),
     allowNull: false,
     defaultValue: 'ACTIVE',
-    comment: 'CONFIRMED = employment confirmed by Director; DISMISSED = employment terminated per WRA 2019',
+    comment: 'CONFIRMED = employment confirmed by Director; DISMISSED = employment terminated per WRA 2019; CANCELLED = probation voided because contract has no probation clause',
   },
   parent_period_id: {
     type: DataTypes.INTEGER,
