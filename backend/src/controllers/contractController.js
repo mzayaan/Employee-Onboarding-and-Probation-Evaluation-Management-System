@@ -15,6 +15,18 @@ const { Op }             = require('sequelize');
 // Permitted probation durations (months) — mirrors frontend CHECKPOINT_MATRIX (spec s.1.4).
 const ALLOWED_PROBATION_MONTHS = new Set([1, 2, 3, 6, 12]);
 
+// Checkpoint month-offset arrays for each supported duration.
+// Mirrors the CHECKPOINT_MATRIX in employeeController.js.
+// Used to identify the original probation duration from stored checkpoint day_numbers.
+// day_number = monthOffset * 30 for every checkpoint in the original schedule.
+const CHECKPOINT_MATRIX = {
+  1:  [1],
+  2:  [1, 2],
+  3:  [1, 2, 3],
+  6:  [2, 4, 6],
+  12: [3, 6, 9, 12],
+};
+
 // =============================================================================
 // HELPERS — calendar-month arithmetic
 // =============================================================================
@@ -47,6 +59,50 @@ function deriveProbationMonths(startDateStr, endDateStr) {
   for (const months of ALLOWED_PROBATION_MONTHS) {
     if (addCalendarMonths(startDateStr, months) === endDateStr) return months;
   }
+  return null;
+}
+
+/**
+ * deriveOriginalDurationFromCheckpoints
+ * Infers the original probation duration in months by matching the set of
+ * non-extension evaluation checkpoint day_numbers against CHECKPOINT_MATRIX.
+ *
+ * This is the authoritative source for the established duration because:
+ *   - Checkpoint day_numbers are set at employee registration and are never
+ *     mutated thereafter.
+ *   - approveRecommendation(EXTEND) adds a new 'Extension Review' checkpoint
+ *     without touching the original ones, so excluding that label restores the
+ *     original schedule.
+ *   - The root period's end_date IS mutated by extensions, which makes
+ *     deriveProbationMonths(start, end) unreliable after extension.
+ *
+ * Returns the matching months value, or null when no unique match is found
+ * (e.g. a custom legacy schedule, an empty checkpoint set, or multiple matches).
+ */
+async function deriveOriginalDurationFromCheckpoints(periodId) {
+  const checkpoints = await EvaluationCheckpoint.findAll({
+    where: {
+      period_id:        periodId,
+      checkpoint_label: { [Op.ne]: 'Extension Review' },
+    },
+    attributes: ['day_number'],
+  });
+
+  if (!checkpoints.length) return null;
+
+  const observedDays = new Set(checkpoints.map((c) => c.day_number));
+
+  for (const [months, offsets] of Object.entries(CHECKPOINT_MATRIX)) {
+    const expectedDays = new Set(offsets.map((o) => o * 30));
+    if (expectedDays.size !== observedDays.size) continue;
+
+    let allMatch = true;
+    for (const d of expectedDays) {
+      if (!observedDays.has(d)) { allMatch = false; break; }
+    }
+    if (allMatch) return Number(months);
+  }
+
   return null;
 }
 
@@ -151,6 +207,13 @@ const createContract = async (req, res) => {
       ? Number(probation_duration_months)
       : null;
 
+    // effectiveDurMonths is the value persisted in the Contract record and used
+    // for the conflict check.  Initialised to durMonths ?? 3 (default for a new
+    // employee with no prior probation history); overridden below when an
+    // existing root period is found and its original duration is established from
+    // checkpoint history.
+    let effectiveDurMonths = durMonths ?? 3;
+
     if (clauseIncluded) {
       if (durMonths !== null) {
         // Reject fractional / non-integer values explicitly
@@ -176,49 +239,60 @@ const createContract = async (req, res) => {
         }
       }
 
-      // G07 Area 2 (revised): Duration conflict guard.
-      // Look up the root probation period to determine the already-configured
-      // duration.  A root period is one with parent_period_id IS NULL (the
-      // original period, before any approved extension).  CANCELLED periods are
-      // excluded because they were voided by a prior no-probation contract.
+      // ── G07 Area 2 (revised): Duration conflict guard ─────────────────────
       //
-      // If the new duration matches the existing one, the contract is allowed
-      // even when evaluations have already been submitted — the probation
-      // timeline does not change and there is no inconsistency.
+      // The root period's current end_date is unreliable after an approved EXTEND
+      // recommendation mutates it in place (+90 days), so we cannot use
+      // deriveProbationMonths(start, end) to infer the original configuration.
       //
-      // If the duration genuinely differs, the contract is rejected: the system
-      // does not silently reschedule periods or rebuild checkpoints, and
-      // completed evaluations cannot be retroactively invalidated.
+      // Instead we query the original evaluation checkpoints created at
+      // registration (excluding 'Extension Review' checkpoints added by the
+      // extend workflow) and reverse-map their day_numbers to a CHECKPOINT_MATRIX
+      // entry.  The resulting months value is the authoritative established
+      // duration and is used for both the conflict check and persistence.
       //
-      // Extended periods are not confused with the original because their
-      // end_date was shifted — deriveProbationMonths will return null for them,
-      // which is treated conservatively (do not block).
-      if (durMonths !== null) {
-        const rootPeriod = await ProbationPeriod.findOne({
-          where: {
-            profile_id,
-            parent_period_id: null,
-            status: { [Op.not]: 'CANCELLED' },
-          },
-          attributes: ['period_id', 'start_date', 'end_date'],
-        });
+      // When durMonths is omitted the established duration fills that role,
+      // preventing the Contract record from silently defaulting to 3 months when
+      // a different schedule was configured.
+      //
+      // When the original duration cannot be determined (e.g. a legacy custom
+      // schedule whose day_numbers match no CHECKPOINT_MATRIX entry, or an empty
+      // checkpoint set) the request is rejected with a clear error rather than
+      // silently allowed — the system cannot safely validate without this anchor.
+      const rootPeriod = await ProbationPeriod.findOne({
+        where: {
+          profile_id,
+          parent_period_id: null,
+          status: { [Op.not]: 'CANCELLED' },
+        },
+        attributes: ['period_id'],
+      });
 
-        if (rootPeriod) {
-          const existingMonths = deriveProbationMonths(
-            rootPeriod.start_date,
-            rootPeriod.end_date
-          );
-          // existingMonths === null means the period has non-standard or extended
-          // dates — cannot reliably derive original duration, so do not block.
-          // existingMonths === durMonths means no change — allow.
-          if (existingMonths !== null && existingMonths !== durMonths) {
-            return res.status(409).json({
-              success: false,
-              message: 'probation_duration_months cannot be changed once a probation period has been established for this employee.',
-            });
-          }
+      if (rootPeriod) {
+        const establishedMonths = await deriveOriginalDurationFromCheckpoints(
+          rootPeriod.period_id
+        );
+
+        if (establishedMonths === null) {
+          return res.status(409).json({
+            success: false,
+            message: 'The original probation duration for this employee cannot be determined from the existing evaluation schedule. Please review the employee record before creating a contract.',
+          });
         }
+
+        if (durMonths !== null && durMonths !== establishedMonths) {
+          return res.status(409).json({
+            success: false,
+            message: 'probation_duration_months cannot be changed once a probation period has been established for this employee.',
+          });
+        }
+
+        // Always use the established duration — even when durMonths was supplied
+        // and matches — so the contract record reflects the actual configuration
+        // rather than the submitted value.
+        effectiveDurMonths = establishedMonths;
       }
+      // If no root period: effectiveDurMonths retains durMonths ?? 3 (new employee).
     }
 
     // ── G07 Area 3: Fixed-term contract_end_date ──────────────────────────────
@@ -285,7 +359,7 @@ const createContract = async (req, res) => {
         profile_id,
         contract_reference:        contract_reference || null,
         contract_type,
-        probation_duration_months: durMonths ?? 3,
+        probation_duration_months: effectiveDurMonths,
         probation_clause_included: clauseIncluded,
         basic_salary_mur,
         notice_period_days:        notice_period_days ?? 14,

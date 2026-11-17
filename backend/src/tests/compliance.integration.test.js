@@ -226,6 +226,7 @@ jest.mock('../models', () => {
     // existing contract tests continue to work without further mock changes.
     ProbationPeriod: {
       findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),   // G07 Defects 1&2: no root period → new employee path
       update:  jest.fn().mockResolvedValue([0]),
     },
 
