@@ -238,6 +238,10 @@ export default function EvaluationFormPage() {
 
   useEffect(() => {
     if (!checkpointId) return
+    // G09-FIX Fix 5: clear any stale eligibility error synchronously before the
+    // async fetch so a previous ineligible checkpoint does not keep the submit
+    // button disabled when the user switches to an eligible checkpoint.
+    setEligibilityError(null)
     getCheckpoint(checkpointId)
       .then((res) => {
         // res = { success, data: checkpoint, criteria }
@@ -266,6 +270,9 @@ export default function EvaluationFormPage() {
             setEligibilityError(`The probation period is already ${(periodStatus || '').toLowerCase()} — no new evaluations can be submitted.`)
           } else if (cp?.due_date && cp.due_date > todayMST) {
             setEligibilityError(`This checkpoint is not yet due. Submissions open from ${cp.due_date} (Mauritius time).`)
+          } else {
+            // G09-FIX Fix 5: checkpoint is eligible — ensure any prior error is cleared.
+            setEligibilityError(null)
           }
         }
 

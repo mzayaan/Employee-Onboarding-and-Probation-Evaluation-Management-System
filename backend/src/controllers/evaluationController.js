@@ -258,6 +258,12 @@ const getCheckpoint = async (req, res) => {
         if (snap?.weight_percent_at_scoring != null) {
           obj.weight_percent = snap.weight_percent_at_scoring;
         }
+        // G09-FIX Fix 2: also freeze the criterion name so a later rename in the
+        // System Administrator page does not change the label shown on historical
+        // evaluation records (FR-14).
+        if (snap?.name_at_scoring != null) {
+          obj.name = snap.name_at_scoring;
+        }
         return obj;
       });
     } else if (checkpoint.selfAssessment?.scores?.length > 0) {
@@ -274,6 +280,11 @@ const getCheckpoint = async (req, res) => {
         const obj = c.toJSON ? c.toJSON() : { ...c.dataValues };
         if (snap?.weight_percent_at_scoring != null) {
           obj.weight_percent = snap.weight_percent_at_scoring;
+        }
+        // G09-FIX Fix 2: freeze criterion name so renames don't affect historical
+        // evaluation records (FR-14).
+        if (snap?.name_at_scoring != null) {
+          obj.name = snap.name_at_scoring;
         }
         return obj;
       });
@@ -339,6 +350,21 @@ const getCheckpoint = async (req, res) => {
     const RESTRICTED_ROLES = ['LINE_MANAGER', 'DIRECTOR'];
     const { SENSITIVE_FIELDS } = require('./employeeController');
     const checkpointData = checkpoint.toJSON ? checkpoint.toJSON() : { ...checkpoint };
+
+    // G09-FIX Fix 2: apply name_at_scoring to the embedded score rows so callers
+    // always see the frozen name that was used at submission time — not the current
+    // (possibly renamed) criterion name (FR-14).
+    const applyFrozenName = (scoreList) => {
+      if (!Array.isArray(scoreList)) return;
+      for (const sc of scoreList) {
+        if (sc?.name_at_scoring != null && sc.criterion) {
+          sc.criterion = { ...sc.criterion, name: sc.name_at_scoring };
+        }
+      }
+    };
+    applyFrozenName(checkpointData.managerEvaluation?.scores);
+    applyFrozenName(checkpointData.selfAssessment?.scores);
+
     if (RESTRICTED_ROLES.includes(req.user.role)) {
       const ep = checkpointData.probationPeriod?.employeeProfile;
       if (ep) SENSITIVE_FIELDS.forEach((f) => delete ep[f]);
@@ -553,84 +579,32 @@ const submitManagerEvaluation = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
-    // G09-FIX D6: Criteria freezing for the MANAGER submission path.
-    // If the employee submitted their self-assessment first, load criteria from
-    // that snapshot so both submissions use the same frozen configuration.
-    // Otherwise load the current active criteria as normal.
-    const criteriaMap = {};
-    const existingSelfAssessment = await SelfAssessment.findOne({
-      where: { checkpoint_id: checkpointId },
-      include: [{
-        model: SelfAssessmentScore,
-        as:    'scores',
-        attributes: ['criterion_id', 'weight_percent_at_scoring'],
-      }],
-    });
-
-    let frozenByEmployee = false;
-    if (existingSelfAssessment?.scores?.length > 0) {
-      // G09-FIX Fix 4: Only use the snapshot for freezing when ALL weight snapshots
-      // are present. A NULL weight_percent_at_scoring means the self-assessment was
-      // submitted before the G09 weight-snapshot fix was deployed — using an incomplete
-      // snapshot would silently score the manager's submission with the wrong weights.
-      const hasNullWeight = existingSelfAssessment.scores.some(
-        (s) => s.weight_percent_at_scoring == null
-      );
-      if (hasNullWeight) {
-        console.warn(
-          `[submitManagerEvaluation] Checkpoint ${checkpointId}: employee's self-assessment ` +
-          'snapshot has NULL weight_percent_at_scoring (pre-G09 row). ' +
-          'Skipping freeze; loading current active criteria instead.'
-        );
-      } else {
-        // Employee submitted first — build criteriaMap from their snapshot
-        frozenByEmployee = true;
-        const frozenIds = existingSelfAssessment.scores.map((s) => s.criterion_id);
-        const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
-        for (const c of frozenCriteria) {
-          const snap = existingSelfAssessment.scores.find((s) => s.criterion_id === c.criterion_id);
-          criteriaMap[c.criterion_id] = {
-            ...c.toJSON(),
-            weight_percent: Number.parseFloat(snap.weight_percent_at_scoring),
-          };
-        }
-      }
-    }
-    if (!frozenByEmployee) {
-      // No prior submission — load current active criteria
-      const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
-      for (const c of allCriteria) {
-        criteriaMap[c.criterion_id] = c;
-      }
-
-      // FR-10: Active criteria weights must sum to exactly 100% before any
-      // evaluation can be submitted — otherwise scores are not comparable.
-      const totalCriteriaWeight = allCriteria.reduce(
-        (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
-      );
-      if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
-        return res.status(422).json({
-          success: false,
-          message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
-        });
-      }
-    }
-
-    // G09-FIX Fix 5: Reject non-integer, non-numeric, and duplicate criterion_ids
-    // before the criteriaMap lookup so that crafted payloads cannot produce NaN
-    // contributions or inflate the total weighted score.
+    // G09-FIX Fix 5 (enhanced): validate score array shape before the transaction
+    // so obvious format errors fail fast without acquiring a database lock.
+    // Semantic validation (valid criterion_id, complete coverage) and score building
+    // happen inside the transaction after criteria are loaded atomically (Fix 1).
     {
       const seenCriterionIds = new Set();
       for (const s of scores) {
-        const id     = Number.parseInt(s.criterion_id, 10);
-        const rawNum = Number(s.raw_score);
-        if (!Number.isFinite(id) || isNaN(id) || id <= 0) {
+        if (s == null) {
+          return res.status(400).json({ success: false, message: 'Score entries must not be null.' });
+        }
+        if (typeof s.criterion_id === 'boolean' || typeof s.raw_score === 'boolean') {
+          return res.status(400).json({ success: false, message: 'criterion_id and raw_score must be numbers, not booleans.' });
+        }
+        const idStr = String(s.criterion_id ?? '').trim();
+        if (!/^\d+$/.test(idStr)) {
+          return res.status(400).json({ success: false, message: 'criterion_id must be a positive integer.' });
+        }
+        const id = Number.parseInt(idStr, 10);
+        if (id <= 0) {
           return res.status(400).json({ success: false, message: 'criterion_id must be a positive integer.' });
         }
         if (seenCriterionIds.has(id)) {
           return res.status(400).json({ success: false, message: `Duplicate criterion_id ${id} in submission.` });
         }
         seenCriterionIds.add(id);
+        const rawNum = Number(s.raw_score);
         if (!Number.isFinite(rawNum) || !Number.isInteger(rawNum)) {
           return res.status(400).json({ success: false, message: `raw_score must be a whole number between 1 and 5. Received: ${s.raw_score}` });
         }
@@ -640,58 +614,25 @@ const submitManagerEvaluation = async (req, res) => {
       }
     }
 
-    // Validate all submitted scores reference criteria in the (frozen or active) set
-    for (const s of scores) {
-      if (!criteriaMap[s.criterion_id]) {
-        const ctx = frozenByEmployee ? 'frozen criteria for this checkpoint' : 'active criteria';
-        return res.status(400).json({ success: false, message: `Invalid criterion_id: ${s.criterion_id}. Must match the ${ctx}.` });
-      }
-      if (s.raw_score < 1 || s.raw_score > 5) {
-        return res.status(400).json({ success: false, message: 'Each score must be between 1 and 5.' });
-      }
-    }
+    // Semantic validation (criterion IDs, completeness), score building, and
+    // totalWeighted calculation happen inside the transaction after criteria are
+    // loaded atomically under the checkpoint row lock (G09-FIX Fix 1).
+    let totalWeighted;
 
-    // Ensure ALL criteria in the (frozen or active) set are covered — partial submissions are rejected (FR-10)
-    const submittedCriteriaIds = new Set(scores.map((s) => String(s.criterion_id)));
-    const missingCriteriaIds   = Object.keys(criteriaMap).filter((id) => !submittedCriteriaIds.has(id));
-    if (missingCriteriaIds.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} criteria. Missing criterion IDs: ${missingCriteriaIds.join(', ')}.`,
-      });
-    }
-
-    // Calculate per-criterion contributions and total weighted score
-    let totalWeighted = 0;
-    const scoreRows = scores.map((s) => {
-      const weightAtScoring = criteriaMap[s.criterion_id].weight_percent;
-      const contribution    = calcContribution(s.raw_score, weightAtScoring);
-      totalWeighted += contribution;
-      return {
-        criterion_id:              s.criterion_id,
-        raw_score:                 s.raw_score,
-        // G09-FIX: snapshot the weight used so historical reports remain reproducible
-        // even if criteria weights are reconfigured after this evaluation is submitted.
-        weight_percent_at_scoring: weightAtScoring,
-        // G09-FIX Fix 3: snapshot the criterion name at submission time so that a
-        // later rename in the System Administrator configuration page does not change
-        // the label shown on historical evaluation records and PDF reports (FR-14).
-        name_at_scoring:           criteriaMap[s.criterion_id].name ?? null,
-        weighted_contribution:     contribution,
-      };
-    });
-    totalWeighted = Number.parseFloat(totalWeighted.toFixed(2));
-
-    // Persist in a transaction
+    // G09-FIX Fix 1: Criteria loading, score building, and period-status recheck
+    // all happen INSIDE the transaction after the row lock so two concurrent
+    // submissions always see a consistent criteria configuration (FR-14).
     await sequelize.transaction(async (t) => {
-      // G09-FIX Fix 1: Re-acquire the checkpoint row under a pessimistic lock so
-      // that two concurrent requests for the same checkpointId cannot both pass the
-      // duplicate check above and both proceed to create duplicate evaluation rows.
-      // All eligibility checks performed above act as a fast-path; this is the
-      // authoritative atomic guard.
+      // Lock the checkpoint row; also fetch parent period status so both can be
+      // rechecked atomically without a second round-trip.
       const lockedCp = await EvaluationCheckpoint.findByPk(checkpointId, {
-        lock: t.LOCK.UPDATE,
+        lock:        t.LOCK.UPDATE,
         transaction: t,
+        include: [{
+          model:      ProbationPeriod,
+          as:         'probationPeriod',
+          attributes: ['period_id', 'status'],
+        }],
       });
       if (!lockedCp) {
         throw new EligibilityError(404, { success: false, message: 'Checkpoint not found.' });
@@ -709,11 +650,117 @@ const submitManagerEvaluation = async (req, res) => {
           message: 'Cannot submit evaluation: this evaluation checkpoint has been cancelled.',
         });
       }
+      // G09-FIX Fix 1 (period): recheck parent period status inside the lock so
+      // a concurrent cancellation or finalisation is detected here.
+      const lockedPeriodStatus = lockedCp.probationPeriod?.status;
+      if (lockedPeriodStatus === 'CANCELLED') {
+        throw new EligibilityError(409, {
+          success: false,
+          message: 'Cannot submit evaluation: the probation period has been cancelled.',
+        });
+      }
+      if (TERMINAL_PERIOD_STATUSES.includes(lockedPeriodStatus)) {
+        throw new EligibilityError(409, {
+          success: false,
+          message: `Cannot submit evaluation: the probation period has been ${lockedPeriodStatus?.toLowerCase() ?? 'finalised'}.`,
+        });
+      }
+
+      // G09-FIX Fix 1 (criteria): load criteria INSIDE the transaction so the
+      // frozen set is consistent with the state at the time the lock was acquired.
+      // G09-FIX Fix 3 (NULL weight): when the first submitter's snapshot has NULL
+      // weights (pre-G09 row), still use those criterion IDs but fetch their current
+      // weights — do NOT fall back to all active criteria (which may have changed).
+      const txCriteriaMap = {};
+      const txSelfSnap = await SelfAssessment.findOne({
+        where: { checkpoint_id: checkpointId },
+        include: [{
+          model:      SelfAssessmentScore,
+          as:         'scores',
+          attributes: ['criterion_id', 'weight_percent_at_scoring'],
+        }],
+        transaction: t,
+      });
+      let txFrozenByEmployee = false;
+      if (txSelfSnap?.scores?.length > 0) {
+        txFrozenByEmployee = true;
+        const hasNullWeight  = txSelfSnap.scores.some((s) => s.weight_percent_at_scoring == null);
+        const frozenIds      = txSelfSnap.scores.map((s) => s.criterion_id);
+        const frozenCriteria = await EvaluationCriterion.findAll({
+          where: { criterion_id: frozenIds },
+          transaction: t,
+        });
+        for (const c of frozenCriteria) {
+          const base = c.toJSON ? c.toJSON() : { ...c.dataValues };
+          if (!hasNullWeight) {
+            const snap = txSelfSnap.scores.find((s) => s.criterion_id === c.criterion_id);
+            base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
+          }
+          // hasNullWeight case: use the current weight_percent from the criterion row
+          txCriteriaMap[c.criterion_id] = base;
+        }
+      }
+      if (!txFrozenByEmployee) {
+        const allCriteria = await EvaluationCriterion.findAll({
+          where:       { is_active: true },
+          transaction: t,
+        });
+        for (const c of allCriteria) {
+          txCriteriaMap[c.criterion_id] = c;
+        }
+        const totalCriteriaWeight = allCriteria.reduce(
+          (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
+        );
+        if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
+          throw new EligibilityError(422, {
+            success: false,
+            message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+          });
+        }
+      }
+
+      // Semantic validation: scores must reference the (frozen or active) criteria set
+      for (const s of scores) {
+        if (!txCriteriaMap[s.criterion_id]) {
+          const ctx = txFrozenByEmployee ? 'frozen criteria for this checkpoint' : 'active criteria';
+          throw new EligibilityError(400, {
+            success: false,
+            message: `Invalid criterion_id: ${s.criterion_id}. Must match the ${ctx}.`,
+          });
+        }
+        if (s.raw_score < 1 || s.raw_score > 5) {
+          throw new EligibilityError(400, { success: false, message: 'Each score must be between 1 and 5.' });
+        }
+      }
+      const submittedCriterionIds = new Set(scores.map((s) => String(s.criterion_id)));
+      const missingCriterionIds   = Object.keys(txCriteriaMap).filter((id) => !submittedCriterionIds.has(id));
+      if (missingCriterionIds.length > 0) {
+        throw new EligibilityError(400, {
+          success: false,
+          message: `Scores must be provided for all ${Object.keys(txCriteriaMap).length} criteria. Missing criterion IDs: ${missingCriterionIds.join(', ')}.`,
+        });
+      }
+
+      // Build score rows and compute totalWeighted (inside transaction for consistency)
+      let _totalWeighted = 0;
+      const txScoreRows = scores.map((s) => {
+        const weightAtScoring = txCriteriaMap[s.criterion_id].weight_percent;
+        const contribution    = calcContribution(s.raw_score, weightAtScoring);
+        _totalWeighted += contribution;
+        return {
+          criterion_id:              s.criterion_id,
+          raw_score:                 s.raw_score,
+          weight_percent_at_scoring: weightAtScoring,
+          name_at_scoring:           txCriteriaMap[s.criterion_id].name ?? null,
+          weighted_contribution:     contribution,
+        };
+      });
+      totalWeighted = Number.parseFloat(_totalWeighted.toFixed(2));
 
       // Create manager evaluation record
       const evaluation = await ManagerEvaluation.create({
-        checkpoint_id:          checkpointId,
-        evaluated_by:           req.user.user_id,
+        checkpoint_id:           checkpointId,
+        evaluated_by:            req.user.user_id,
         attendance_days_present: Number(attendance_days_present),
         attendance_days_absent:  Number(attendance_days_absent),
         late_arrivals:           Number(late_arrivals),
@@ -723,7 +770,7 @@ const submitManagerEvaluation = async (req, res) => {
 
       // Create individual score rows
       await EvaluationScore.bulkCreate(
-        scoreRows.map((r) => ({ ...r, eval_id: evaluation.eval_id })),
+        txScoreRows.map((r) => ({ ...r, eval_id: evaluation.eval_id })),
         { transaction: t }
       );
 
@@ -959,81 +1006,32 @@ const submitSelfAssessment = async (req, res) => {
       });
     }
 
-    // G09-FIX D5: Criteria freezing for the EMPLOYEE self-assessment path.
-    // If the manager submitted their evaluation first, load criteria from that
-    // snapshot so both submissions use the same frozen configuration (FR-14).
-    // Otherwise load the current active criteria as normal.
-    const criteriaMap = {};
-    const existingManagerForFreeze = await ManagerEvaluation.findOne({
-      where: { checkpoint_id: checkpointId },
-      include: [{
-        model: EvaluationScore,
-        as:    'scores',
-        attributes: ['criterion_id', 'weight_percent_at_scoring'],
-      }],
-    });
-
-    let frozenByManager = false;
-    if (existingManagerForFreeze?.scores?.length > 0) {
-      // G09-FIX Fix 4: Only use the snapshot for freezing when ALL weight snapshots
-      // are present. A NULL weight_percent_at_scoring means the manager evaluation was
-      // submitted before the G09 weight-snapshot fix was deployed — using an incomplete
-      // snapshot would silently score the employee's submission with the wrong weights.
-      const hasNullWeight = existingManagerForFreeze.scores.some(
-        (s) => s.weight_percent_at_scoring == null
-      );
-      if (hasNullWeight) {
-        console.warn(
-          `[submitSelfAssessment] Checkpoint ${checkpointId}: manager's evaluation snapshot ` +
-          'has NULL weight_percent_at_scoring (pre-G09 row). ' +
-          'Skipping freeze; loading current active criteria instead.'
-        );
-      } else {
-        // Manager submitted first — build criteriaMap from their snapshot
-        frozenByManager = true;
-        const frozenIds = existingManagerForFreeze.scores.map((s) => s.criterion_id);
-        const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
-        for (const c of frozenCriteria) {
-          const snap = existingManagerForFreeze.scores.find((s) => s.criterion_id === c.criterion_id);
-          criteriaMap[c.criterion_id] = {
-            ...c.toJSON(),
-            weight_percent: Number.parseFloat(snap.weight_percent_at_scoring),
-          };
-        }
-      }
-    }
-    if (!frozenByManager) {
-      // No prior submission — load current active criteria
-      const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
-      for (const c of allCriteria) {
-        criteriaMap[c.criterion_id] = c;
-      }
-
-      // BUG-12 fix: Same weight-total validation as submitManagerEvaluation.
-      const totalCriteriaWeight = allCriteria.reduce(
-        (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
-      );
-      if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
-        return res.status(422).json({
-          success: false,
-          message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
-        });
-      }
-    }
-
-    // G09-FIX Fix 5: Reject non-integer, non-numeric, and duplicate criterion_ids.
+    // G09-FIX Fix 5 (enhanced): validate score array shape before the transaction
+    // so obvious format errors fail fast without acquiring a database lock.
+    // Semantic validation, score building, and totalSelfScore happen inside the
+    // transaction after criteria are loaded atomically (Fix 1).
     {
       const seenCriterionIds = new Set();
       for (const s of scores) {
-        const id     = Number.parseInt(s.criterion_id, 10);
-        const rawNum = Number(s.raw_score);
-        if (!Number.isFinite(id) || isNaN(id) || id <= 0) {
+        if (s == null) {
+          return res.status(400).json({ success: false, message: 'Score entries must not be null.' });
+        }
+        if (typeof s.criterion_id === 'boolean' || typeof s.raw_score === 'boolean') {
+          return res.status(400).json({ success: false, message: 'criterion_id and raw_score must be numbers, not booleans.' });
+        }
+        const idStr = String(s.criterion_id ?? '').trim();
+        if (!/^\d+$/.test(idStr)) {
+          return res.status(400).json({ success: false, message: 'criterion_id must be a positive integer.' });
+        }
+        const id = Number.parseInt(idStr, 10);
+        if (id <= 0) {
           return res.status(400).json({ success: false, message: 'criterion_id must be a positive integer.' });
         }
         if (seenCriterionIds.has(id)) {
           return res.status(400).json({ success: false, message: `Duplicate criterion_id ${id} in submission.` });
         }
         seenCriterionIds.add(id);
+        const rawNum = Number(s.raw_score);
         if (!Number.isFinite(rawNum) || !Number.isInteger(rawNum)) {
           return res.status(400).json({ success: false, message: `raw_score must be a whole number between 1 and 5. Received: ${s.raw_score}` });
         }
@@ -1042,44 +1040,9 @@ const submitSelfAssessment = async (req, res) => {
       }
     }
 
-    // Validate scores against the (frozen or active) criteria set
-    for (const s of scores) {
-      if (!criteriaMap[s.criterion_id]) {
-        const ctx = frozenByManager ? 'frozen criteria for this checkpoint' : 'active criteria';
-        return res.status(400).json({ success: false, message: `Invalid criterion_id: ${s.criterion_id}. Must match the ${ctx}.` });
-      }
-      if (s.raw_score < 1 || s.raw_score > 5) {
-        return res.status(400).json({ success: false, message: 'Each score must be between 1 and 5.' });
-      }
-    }
-
-    // Ensure ALL criteria are covered — partial submissions are rejected (FR-10)
-    const submittedSelfCriteriaIds = new Set(scores.map((s) => String(s.criterion_id)));
-    const missingSelfCriteriaIds   = Object.keys(criteriaMap).filter((id) => !submittedSelfCriteriaIds.has(id));
-    if (missingSelfCriteriaIds.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} criteria. Missing criterion IDs: ${missingSelfCriteriaIds.join(', ')}.`,
-      });
-    }
-
-    // Calculate weighted self-score
-    let totalSelfScore = 0;
-    const scoreRows = scores.map((s) => {
-      const weightAtScoring = criteriaMap[s.criterion_id].weight_percent;
-      const contribution    = calcContribution(s.raw_score, weightAtScoring);
-      totalSelfScore += contribution;
-      // G09-FIX: snapshot the weight and name used at the time of submission.
-      return {
-        criterion_id:              s.criterion_id,
-        raw_score:                 s.raw_score,
-        weight_percent_at_scoring: weightAtScoring,
-        // G09-FIX Fix 3: snapshot criterion name so renames don't affect historical records.
-        name_at_scoring:           criteriaMap[s.criterion_id].name ?? null,
-        weighted_contribution:     contribution,
-      };
-    });
-    totalSelfScore = Number.parseFloat(totalSelfScore.toFixed(2));
+    // Semantic validation, score building, and totalSelfScore calculation happen
+    // inside the transaction after criteria are loaded atomically (G09-FIX Fix 1).
+    let totalSelfScore;
 
     // NFR-03 / FR-15: a line manager must be assigned so the final recommendation
     // can be attributed to the correct user.  Reject before the transaction so
@@ -1091,11 +1054,18 @@ const submitSelfAssessment = async (req, res) => {
       });
     }
 
+    // G09-FIX Fix 1: Criteria loading, score building, and period-status recheck
+    // all happen INSIDE the transaction after the row lock (FR-14).
     await sequelize.transaction(async (t) => {
-      // G09-FIX Fix 1: Atomic duplicate guard under a row-level lock.
+      // Lock the checkpoint row; also fetch parent period status atomically.
       const lockedCpSelf = await EvaluationCheckpoint.findByPk(checkpointId, {
-        lock: t.LOCK.UPDATE,
+        lock:        t.LOCK.UPDATE,
         transaction: t,
+        include: [{
+          model:      ProbationPeriod,
+          as:         'probationPeriod',
+          attributes: ['period_id', 'status'],
+        }],
       });
       if (!lockedCpSelf) {
         throw new EligibilityError(404, { success: false, message: 'Checkpoint not found.' });
@@ -1113,6 +1083,109 @@ const submitSelfAssessment = async (req, res) => {
           message: 'Cannot submit self-assessment: this evaluation checkpoint has been cancelled.',
         });
       }
+      // G09-FIX Fix 1 (period): recheck parent period status inside the lock.
+      const lockedSelfPeriodStatus = lockedCpSelf.probationPeriod?.status;
+      if (lockedSelfPeriodStatus === 'CANCELLED') {
+        throw new EligibilityError(409, {
+          success: false,
+          message: 'Cannot submit self-assessment: the probation period has been cancelled.',
+        });
+      }
+      if (TERMINAL_PERIOD_STATUSES.includes(lockedSelfPeriodStatus)) {
+        throw new EligibilityError(409, {
+          success: false,
+          message: `Cannot submit self-assessment: the probation period has been ${lockedSelfPeriodStatus?.toLowerCase() ?? 'finalised'}.`,
+        });
+      }
+
+      // G09-FIX Fix 1 (criteria): load criteria INSIDE the transaction.
+      // G09-FIX Fix 3 (NULL weight): when the first submitter's snapshot has NULL
+      // weights, still use those criterion IDs with current weights.
+      const txCriteriaMapSelf = {};
+      const txMgrSnap = await ManagerEvaluation.findOne({
+        where: { checkpoint_id: checkpointId },
+        include: [{
+          model:      EvaluationScore,
+          as:         'scores',
+          attributes: ['criterion_id', 'weight_percent_at_scoring'],
+        }],
+        transaction: t,
+      });
+      let txFrozenByManager = false;
+      if (txMgrSnap?.scores?.length > 0) {
+        txFrozenByManager = true;
+        const hasNullWeight  = txMgrSnap.scores.some((s) => s.weight_percent_at_scoring == null);
+        const frozenIds      = txMgrSnap.scores.map((s) => s.criterion_id);
+        const frozenCriteria = await EvaluationCriterion.findAll({
+          where: { criterion_id: frozenIds },
+          transaction: t,
+        });
+        for (const c of frozenCriteria) {
+          const base = c.toJSON ? c.toJSON() : { ...c.dataValues };
+          if (!hasNullWeight) {
+            const snap = txMgrSnap.scores.find((s) => s.criterion_id === c.criterion_id);
+            base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
+          }
+          // hasNullWeight case: use current weight_percent from the criterion row
+          txCriteriaMapSelf[c.criterion_id] = base;
+        }
+      }
+      if (!txFrozenByManager) {
+        const allCriteria = await EvaluationCriterion.findAll({
+          where:       { is_active: true },
+          transaction: t,
+        });
+        for (const c of allCriteria) {
+          txCriteriaMapSelf[c.criterion_id] = c;
+        }
+        const totalCriteriaWeight = allCriteria.reduce(
+          (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
+        );
+        if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
+          throw new EligibilityError(422, {
+            success: false,
+            message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+          });
+        }
+      }
+
+      // Semantic validation
+      for (const s of scores) {
+        if (!txCriteriaMapSelf[s.criterion_id]) {
+          const ctx = txFrozenByManager ? 'frozen criteria for this checkpoint' : 'active criteria';
+          throw new EligibilityError(400, {
+            success: false,
+            message: `Invalid criterion_id: ${s.criterion_id}. Must match the ${ctx}.`,
+          });
+        }
+        if (s.raw_score < 1 || s.raw_score > 5) {
+          throw new EligibilityError(400, { success: false, message: 'Each score must be between 1 and 5.' });
+        }
+      }
+      const submittedSelfCriterionIds = new Set(scores.map((s) => String(s.criterion_id)));
+      const missingSelfCriterionIds   = Object.keys(txCriteriaMapSelf).filter((id) => !submittedSelfCriterionIds.has(id));
+      if (missingSelfCriterionIds.length > 0) {
+        throw new EligibilityError(400, {
+          success: false,
+          message: `Scores must be provided for all ${Object.keys(txCriteriaMapSelf).length} criteria. Missing criterion IDs: ${missingSelfCriterionIds.join(', ')}.`,
+        });
+      }
+
+      // Build score rows and compute totalSelfScore (inside transaction for consistency)
+      let _totalSelfScore = 0;
+      const txSelfScoreRows = scores.map((s) => {
+        const weightAtScoring = txCriteriaMapSelf[s.criterion_id].weight_percent;
+        const contribution    = calcContribution(s.raw_score, weightAtScoring);
+        _totalSelfScore += contribution;
+        return {
+          criterion_id:              s.criterion_id,
+          raw_score:                 s.raw_score,
+          weight_percent_at_scoring: weightAtScoring,
+          name_at_scoring:           txCriteriaMapSelf[s.criterion_id].name ?? null,
+          weighted_contribution:     contribution,
+        };
+      });
+      totalSelfScore = Number.parseFloat(_totalSelfScore.toFixed(2));
 
       const assessment = await SelfAssessment.create({
         checkpoint_id:                 checkpointId,
@@ -1132,7 +1205,7 @@ const submitSelfAssessment = async (req, res) => {
       }, { transaction: t });
 
       await SelfAssessmentScore.bulkCreate(
-        scoreRows.map((r) => ({ ...r, assessment_id: assessment.assessment_id })),
+        txSelfScoreRows.map((r) => ({ ...r, assessment_id: assessment.assessment_id })),
         { transaction: t }
       );
 

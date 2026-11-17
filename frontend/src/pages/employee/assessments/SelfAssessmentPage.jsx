@@ -178,6 +178,9 @@ export default function SelfAssessmentPage() {
     setScores({})
     setNotes('')
     setError(null)
+    // G09-FIX Fix 5: clear stale eligibility error synchronously before the
+    // async fetch so the submit button is not locked when switching checkpoints.
+    setEligibilityError(null)
     getCheckpoint(selectedCheckpoint)
       .then((res) => {
         // res = { success, data: checkpoint, criteria }

@@ -667,9 +667,14 @@ describe('Fix 3 — name_at_scoring saved in EvaluationScore rows at submission 
 // against undefined weights.
 // =============================================================================
 
-describe('Fix 4 — NULL weight guard: freeze skipped when snapshot has NULL weights', () => {
-  test('TC-G09-F4-MGR: employee scores with NULL weights → freeze skipped → current active criteria used', async () => {
-    // Employee self-assessment has scores with NULL weight snapshots (pre-G09 rows)
+// G09-FIX Fix 3 (corrected): when the first submitter's snapshot has NULL
+// weight_percent_at_scoring (pre-G09 rows), the system must STILL use the
+// criterion IDs from the snapshot — it fetches those criteria with their
+// CURRENT weights, not fall back to all active criteria.  This preserves
+// historical consistency: both submitters always cover the same criterion set.
+describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current weights', () => {
+  test('TC-G09-F4-MGR: employee snapshot has NULL weights → manager must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
+    // Employee self-assessment has criterion_id=1 with NULL weight (pre-G09 row)
     const nullWeightScores = [{ criterion_id: 1, weight_percent_at_scoring: null }];
     const selfAssessmentMock = { assessment_id: 99, scores: nullWeightScores };
 
@@ -678,22 +683,43 @@ describe('Fix 4 — NULL weight guard: freeze skipped when snapshot has NULL wei
       .mockResolvedValueOnce(cp)
       .mockResolvedValueOnce(cp);
 
-    models.ManagerEvaluation.findOne.mockResolvedValue(null); // no prior manager eval
-    models.SelfAssessment.findOne.mockResolvedValue(selfAssessmentMock); // employee went first
-    // Current active criteria: criterion_id=2 (different from the snapshot criterion_id=1)
-    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(2, 100)]);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne.mockResolvedValue(selfAssessmentMock);
+    // findAll called with { where: { criterion_id: [1] } } returns criterion 1 with current weight
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
 
-    // Manager submits for criterion_id=2 (current active, not the NULL-weight snapshot)
-    const req = managerReq('1', { scores: [{ criterion_id: 2, raw_score: 4 }] });
-    const res = mockRes();
-    await submitManagerEvaluation(req, res);
+    // Manager submits for criterion_id=2 — not in the snapshot — must be REJECTED
+    const reqBad = managerReq('1', { scores: [{ criterion_id: 2, raw_score: 4 }] });
+    const resBad = mockRes();
+    await submitManagerEvaluation(reqBad, resBad);
+    expect(resBad.status).toHaveBeenCalledWith(400);
 
-    // Freeze was skipped → current active criteria used → criterion 2 is accepted → 201
-    expect(res.status).toHaveBeenCalledWith(201);
+    // Reset mocks and confirm criterion_id=1 is accepted
+    jest.clearAllMocks();
+    const cp2 = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp2)
+      .mockResolvedValueOnce(cp2);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne.mockResolvedValue(selfAssessmentMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
+    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock) // freeze check inside txn
+      .mockResolvedValueOnce({ assessment_id: 99 }); // selfAssessmentDone check
+    models.EvaluationCheckpoint.update.mockResolvedValue([1]);
+    models.AuditLog.create.mockResolvedValue({});
+    models.Notification.create.mockResolvedValue({});
+
+    const reqGood = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
+    const resGood = mockRes();
+    await submitManagerEvaluation(reqGood, resGood);
+    expect(resGood.status).toHaveBeenCalledWith(201);
   });
 
-  test('TC-G09-F4-EMP: manager scores with NULL weights → freeze skipped → current active criteria used', async () => {
-    // Manager evaluation has scores with NULL weight snapshots (pre-G09 rows)
+  test('TC-G09-F4-EMP: manager snapshot has NULL weights → employee must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
+    // Manager evaluation has criterion_id=1 with NULL weight (pre-G09 row)
     const nullWeightScores = [{ criterion_id: 1, weight_percent_at_scoring: null }];
     const managerEvalMock = { eval_id: 50, scores: nullWeightScores };
 
@@ -702,18 +728,37 @@ describe('Fix 4 — NULL weight guard: freeze skipped when snapshot has NULL wei
       .mockResolvedValueOnce(cp)
       .mockResolvedValueOnce(cp);
 
-    models.SelfAssessment.findOne.mockResolvedValue(null); // no prior self-assessment
-    models.ManagerEvaluation.findOne.mockResolvedValue(managerEvalMock); // manager went first with NULL weights
-    // Current active criteria: criterion_id=2
-    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(2, 100)]);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne.mockResolvedValue(managerEvalMock);
+    // findAll called with { where: { criterion_id: [1] } } returns criterion 1 with current weight
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
 
-    // Employee submits for criterion_id=2 (current active, not the NULL-weight snapshot)
-    const req = employeeReq('1', { scores: [{ criterion_id: 2, raw_score: 3 }] });
-    const res = mockRes();
-    await submitSelfAssessment(req, res);
+    // Employee submits for criterion_id=2 — not in the snapshot — must be REJECTED
+    const reqBad = employeeReq('1', { scores: [{ criterion_id: 2, raw_score: 3 }] });
+    const resBad = mockRes();
+    await submitSelfAssessment(reqBad, resBad);
+    expect(resBad.status).toHaveBeenCalledWith(400);
 
-    // Freeze was skipped → current active criteria used → criterion 2 is accepted → 201
-    expect(res.status).toHaveBeenCalledWith(201);
+    // Reset mocks and confirm criterion_id=1 is accepted
+    jest.clearAllMocks();
+    const cp2 = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp2)
+      .mockResolvedValueOnce(cp2);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne.mockResolvedValue(managerEvalMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+    models.SelfAssessment.create.mockResolvedValue({ assessment_id: 20 });
+    models.SelfAssessmentScore.bulkCreate.mockResolvedValue([]);
+    models.ManagerEvaluation.findOne.mockResolvedValueOnce(managerEvalMock); // managerDone check
+    models.EvaluationCheckpoint.update.mockResolvedValue([1]);
+    models.AuditLog.create.mockResolvedValue({});
+    models.Notification.create.mockResolvedValue({});
+
+    const reqGood = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 3 }] });
+    const resGood = mockRes();
+    await submitSelfAssessment(reqGood, resGood);
+    expect(resGood.status).toHaveBeenCalledWith(201);
   });
 });
 
