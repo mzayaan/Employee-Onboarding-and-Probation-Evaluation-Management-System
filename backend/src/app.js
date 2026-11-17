@@ -17,6 +17,12 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
+// Trust the first proxy hop so req.ip resolves to the real client IP rather than
+// the proxy's address (G06-D7: prevents X-Forwarded-For header forgery).
+// Set to 1 for a single reverse proxy (Railway/Vercel edge); adjust for deeper
+// proxy chains in the deployment environment.
+app.set('trust proxy', 1);
+
 // =============================================================================
 // SECURITY MIDDLEWARE
 // =============================================================================

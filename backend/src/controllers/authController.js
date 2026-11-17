@@ -13,9 +13,11 @@ const { createAuditLog }           = require('../utils/auditLogger');
 const { sendPasswordResetEmail }   = require('../utils/mailer');
 const { validatePasswordStrength } = require('../utils/passwordValidator');
 
-// Helper: extract real IP from request (handles reverse proxies)
-const getIp = (req) =>
-  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+// Helper: extract real IP from request (handles reverse proxies).
+// Relies on app.set('trust proxy', 1) in app.js — Express derives req.ip from
+// X-Forwarded-For safely, ignoring any extra proxy hops beyond the trusted count
+// (G06-D7: prevents clients from forging the IP via a crafted header).
+const getIp = (req) => req.ip || req.socket?.remoteAddress || 'unknown';
 
 // =============================================================================
 // POST /api/auth/login
@@ -83,6 +85,7 @@ const login = async (req, res) => {
         email:         user.email,
         role:          user.role,
         first_name:    user.first_name,
+        middle_name:   user.middle_name ?? null,
         last_name:     user.last_name,
         token_version: user.token_version ?? 0,
       },
@@ -106,11 +109,12 @@ const login = async (req, res) => {
       message: 'Login successful.',
       token,
       user: {
-        user_id:    user.user_id,
-        email:      user.email,
-        role:       user.role,
-        first_name: user.first_name,
-        last_name:  user.last_name,
+        user_id:     user.user_id,
+        email:       user.email,
+        role:        user.role,
+        first_name:  user.first_name,
+        middle_name: user.middle_name ?? null,
+        last_name:   user.last_name,
       },
     });
   } catch (error) {
@@ -159,7 +163,7 @@ const getMe = async (req, res) => {
   try {
     const user = await User.findOne({
       where: { user_id: req.user.user_id },
-      attributes: ['user_id', 'email', 'role', 'first_name', 'last_name', 'last_login_at', 'created_at'],
+      attributes: ['user_id', 'email', 'role', 'first_name', 'middle_name', 'last_name', 'last_login_at', 'created_at'],
     });
 
     if (!user) {

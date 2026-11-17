@@ -578,17 +578,17 @@ const signContract = async (req, res) => {
     const now          = new Date();
     const signingDate  = now.toISOString().slice(0, 10); // YYYY-MM-DD for DATEONLY column
 
-    // Capture client IP for audit record (proxy-aware)
-    const clientIp =
-      req.headers['x-forwarded-for']?.split(',')[0].trim() ||
-      req.socket?.remoteAddress ||
-      'unknown';
+    // Capture client IP for audit record.
+    // Uses req.ip which Express derives safely from X-Forwarded-For when
+    // app.set('trust proxy', 1) is configured — prevents header forgery (G06-D7).
+    const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
 
     // ── D3: atomic concurrency guard ──────────────────────────────────────────
     // WHERE signed_at IS NULL ensures only one concurrent request can win.
     const [rowsAffected] = await Contract.update(
       {
         signed_at:        signingDate,
+        signed_at_ts:     now,       // precise UTC instant — requires signed_at_ts migration
         signature_string: trimmedSig,
         updated_at:       now,
       },

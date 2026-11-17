@@ -63,7 +63,12 @@ const Contract = sequelize.define('Contract', {
   signed_at: {
     type: DataTypes.DATEONLY,
     allowNull: true,
-    comment: 'Date the employee signed the contract — null until signed.',
+    comment: 'Calendar date the employee signed the contract — null until signed.',
+  },
+  signed_at_ts: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: 'Precise UTC datetime of digital signing (G06). NULL until signed. Requires 20261117_g06_add_signed_at_ts_to_contracts.sql migration to be applied first.',
   },
   signature_string: {
     type: DataTypes.STRING(500),

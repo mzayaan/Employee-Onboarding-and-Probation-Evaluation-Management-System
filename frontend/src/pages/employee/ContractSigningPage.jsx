@@ -106,10 +106,16 @@ export default function ContractSigningPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
-      await signContract(contract.contract_id, {
+      const response = await signContract(contract.contract_id, {
         signature_string: signatureInput.trim(),
         // signature_timestamp removed (G06-D1): backend always uses server time
       })
+      // Update contract state with the server-confirmed signed_at so the success
+      // banner shows the correct date immediately — without this the stale
+      // unsigned contract object is used until the page reloads (G06-D8).
+      if (response?.data?.signed_at) {
+        setContract((prev) => ({ ...prev, signed_at: response.data.signed_at }))
+      }
       setSigned(true)
     } catch (err) {
       setSubmitError(

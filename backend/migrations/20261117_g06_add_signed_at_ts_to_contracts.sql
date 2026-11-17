@@ -29,13 +29,22 @@ ALTER TABLE contracts
             'Complements signed_at (DATEONLY) which stores only the calendar date.'
   AFTER signed_at;
 
--- Step 2: Back-fill from updated_at for any rows already signed
---   updated_at is set to NOW() atomically in the same Contract.update() call
---   that sets signed_at, so it is the best available proxy for existing rows.
-UPDATE contracts
-  SET signed_at_ts = updated_at
-WHERE signed_at IS NOT NULL
-  AND signed_at_ts IS NULL;
+-- Step 2: Historical rows with signed_at already set are left with signed_at_ts = NULL.
+--
+--   Rationale (G06-D6 correction): updated_at on a pre-existing signed row reflects the
+--   LAST time that row was touched, not necessarily the original signing instant.
+--   Backfilling it as the signing time would introduce a silent inaccuracy for every
+--   row that was subsequently updated (e.g. corrected salary, HR edits).
+--
+--   The precise signing instant for future signings is captured in signed_at_ts by the
+--   Contract.update() payload in contractController.js.  Historical rows where the
+--   precise instant is unknown are intentionally left NULL — no data is better than
+--   silently wrong data.
+--
+--   The calendar-date approximation (signed_at) and the audit_logs entry for
+--   SIGN_CONTRACT remain available for any rows signed before this migration was applied.
+--
+-- (No UPDATE statement needed — NULL is already the column default.)
 
 -- Rollback (run manually if needed):
 --   ALTER TABLE contracts DROP COLUMN signed_at_ts;

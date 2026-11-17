@@ -695,9 +695,12 @@ describe('signContract — audit log (FR-18)', () => {
     );
   });
 
-  test('TC-G06-45: audit log uses x-forwarded-for IP when present', async () => {
+  test('TC-G06-45: audit log uses req.ip (trust-proxy-resolved IP) not raw header', async () => {
+    // After G06-D7 fix, the controller reads req.ip (derived by Express from
+    // X-Forwarded-For when trust proxy is configured) rather than the raw header.
+    // Setting req.ip directly in the test simulates what Express would have resolved.
     const { req, res } = makeReqRes({ signature_string: 'Alice Smith' });
-    req.headers['x-forwarded-for'] = '10.0.0.5, 203.0.113.1';
+    req.ip = '10.0.0.5';
     await signContract(req, res);
     expect(createAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ ipAddress: '10.0.0.5' }),
