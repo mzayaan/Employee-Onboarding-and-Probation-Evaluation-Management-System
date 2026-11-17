@@ -870,18 +870,25 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
   test('TC-G07-030: original 3-month duration accepted after Director extension workflow', async () => {
     // Root period start='2026-09-01'.
     // Originally: end_date='2026-12-01' (3 months).  After EXTEND: '2027-03-01' (+90 days).
-    // deriveProbationMonths('2026-09-01', '2027-03-01') incorrectly returns 6.
-    // Checkpoint-based lookup returns 3 → the 3-month contract must be accepted.
+    // deriveProbationMonths('2026-09-01', '2027-03-01') would return 6 — wrong.
+    // The checkpoint-based guard:
+    //   1. Sees an 'Extension Review' checkpoint → hasExtension = true.
+    //   2. Skips the date cross-check (end_date is intentionally mutated).
+    //   3. Reverse-maps original day_numbers [30,60,90] → 3 months.
+    // The 3-month contract must be accepted.
     m.ProbationPeriod.findOne.mockResolvedValueOnce({
       period_id:        5,
       start_date:       '2026-09-01',
       end_date:         '2027-03-01',   // ← end_date mutated by EXTEND (+90 days)
       parent_period_id: null,
     });
-    // EvaluationCheckpoint.findAll excludes 'Extension Review' — the original
-    // 3-month day_numbers are still present.
+    // ALL checkpoints are returned; the Extension Review entry proves the
+    // end_date mutation is intentional so the date cross-check is skipped.
     m.EvaluationCheckpoint.findAll.mockResolvedValueOnce([
-      { day_number: 30 }, { day_number: 60 }, { day_number: 90 },
+      { day_number: 30,  checkpoint_label: null },
+      { day_number: 60,  checkpoint_label: null },
+      { day_number: 90,  checkpoint_label: null },
+      { day_number: 180, checkpoint_label: 'Extension Review' },
     ]);
 
     const { req, res } = makeReqRes({
@@ -901,7 +908,10 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
   test('TC-G07-031: conflicting 6-month duration rejected after Director extension (original was 3 months)', async () => {
     // Same extension scenario as TC-G07-030.  The old guard would read the
     // mutated end_date, derive 6 months, and incorrectly allow 6 → 201.
-    // The checkpoint-based guard establishes 3 months → 6 is a conflict → 409.
+    // The checkpoint-based guard:
+    //   1. Sees Extension Review → skips date cross-check.
+    //   2. Derives 3 months from original checkpoints.
+    //   3. Rejects 6 (conflict) → 409.
     m.ProbationPeriod.findOne.mockResolvedValueOnce({
       period_id:        5,
       start_date:       '2026-09-01',
@@ -909,7 +919,10 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
       parent_period_id: null,
     });
     m.EvaluationCheckpoint.findAll.mockResolvedValueOnce([
-      { day_number: 30 }, { day_number: 60 }, { day_number: 90 },
+      { day_number: 30,  checkpoint_label: null },
+      { day_number: 60,  checkpoint_label: null },
+      { day_number: 90,  checkpoint_label: null },
+      { day_number: 180, checkpoint_label: 'Extension Review' },
     ]);
 
     const { req, res } = makeReqRes({
@@ -924,12 +937,15 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
     expect(m.Contract.create).not.toHaveBeenCalled();
   });
 
-  test('TC-G07-032: conflicting duration rejected when extended end_date would not map to any supported calendar-month boundary', async () => {
+  test('TC-G07-032: conflicting duration rejected when extended end_date does not align to any calendar-month boundary', async () => {
     // start='2026-02-01'.  Original 3-month end='2026-05-01'.
     // After EXTEND (+90 days from May 1): end_date='2026-07-30'.
-    // deriveProbationMonths('2026-02-01', '2026-07-30') returns null (no match)
-    // — old code treated null as "do not block" → 12-month contract allowed (wrong).
-    // Checkpoint-based lookup returns 3 → 12 is a conflict → 409.
+    // deriveProbationMonths('2026-02-01', '2026-07-30') returns null (no match).
+    // The old guard treated null as "do not block" → 12-month contract allowed (wrong).
+    // The new guard:
+    //   1. Sees Extension Review → skips the date cross-check.
+    //   2. Derives 3 months from original checkpoints.
+    //   3. Rejects 12 (conflict) → 409.
     m.ProbationPeriod.findOne.mockResolvedValueOnce({
       period_id:        5,
       start_date:       '2026-02-01',
@@ -937,7 +953,10 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
       parent_period_id: null,
     });
     m.EvaluationCheckpoint.findAll.mockResolvedValueOnce([
-      { day_number: 30 }, { day_number: 60 }, { day_number: 90 },
+      { day_number: 30,  checkpoint_label: null },
+      { day_number: 60,  checkpoint_label: null },
+      { day_number: 90,  checkpoint_label: null },
+      { day_number: 180, checkpoint_label: 'Extension Review' },
     ]);
 
     const { req, res } = makeReqRes({
@@ -1043,5 +1062,89 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
     // Message must clearly state the ambiguity (distinct from the conflict message)
     expect(body.message).toMatch(/cannot be determined|original probation duration/i);
     expect(m.Contract.create).not.toHaveBeenCalled();
+  });
+
+  // ── Inconsistent configuration (Codex review finding) ────────────────────
+  // An employee can be created with an explicit end date that diverges from
+  // the checkpoint schedule assigned at registration.  The date cross-check
+  // catches this: D_dates ≠ D_checkpoints → 409, no contract written.
+
+  test('TC-G07-036: 6-month period (by dates) with 3-month checkpoint schedule and no extension → 409 for all durations', async () => {
+    // Reviewed scenario: employee registered Feb 1 → Aug 1 2027 (6 months) but
+    // assigned the [30, 60, 90] checkpoint schedule (3-month pattern).
+    // No Extension Review checkpoint exists.
+    // D_checkpoints = 3 (from [30,60,90]); D_dates = 6 (Feb→Aug).
+    // 3 ≠ 6 → deriveOriginalDurationFromCheckpoints returns null → 409.
+    // The old code would read deriveProbationMonths(start, end) = 6 and
+    // allowed a 6-month contract, or skipped the guard entirely for omitted
+    // duration, silently creating a 3-month record.
+    const basePeriod = {
+      period_id:        9,
+      start_date:       '2027-02-01',
+      end_date:         '2027-08-01',   // 6 calendar months
+      parent_period_id: null,
+    };
+    const inconsistentCheckpoints = [
+      { day_number: 30, checkpoint_label: null },
+      { day_number: 60, checkpoint_label: null },
+      { day_number: 90, checkpoint_label: null },
+      // ← 3-month schedule; no Extension Review → cross-check applies
+    ];
+
+    // Sub-case A: explicit 6-month duration (matches dates but not checkpoints)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(inconsistentCheckpoints);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 6,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    // Reset mocks between sub-cases
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case B: omitted duration (must NOT silently default to 3 months)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(inconsistentCheckpoints);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true,
+        // probation_duration_months intentionally omitted
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    // Reset mocks between sub-cases
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case C: explicit 3-month duration (matches checkpoints but not dates)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(inconsistentCheckpoints);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 3,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
   });
 });

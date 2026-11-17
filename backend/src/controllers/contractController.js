@@ -64,34 +64,50 @@ function deriveProbationMonths(startDateStr, endDateStr) {
 
 /**
  * deriveOriginalDurationFromCheckpoints
- * Infers the original probation duration in months by matching the set of
- * non-extension evaluation checkpoint day_numbers against CHECKPOINT_MATRIX.
+ * Infers the original probation duration in months by:
+ *   1. Fetching ALL evaluation checkpoints for the period.
+ *   2. Separating Extension Review checkpoints (added by the extend workflow)
+ *      from the original ones (created at registration).
+ *   3. Reverse-mapping the original day_numbers to a CHECKPOINT_MATRIX entry.
+ *   4. Cross-checking against the period's start/end dates when no extension
+ *      has occurred — a mismatch signals that the checkpoint schedule and the
+ *      period dates are inconsistent (e.g. an employee was created with an
+ *      explicit end date that does not match the calendar-month offset implied
+ *      by the assigned checkpoint schedule).  In that case we cannot safely
+ *      resolve the established duration and return null.
  *
- * This is the authoritative source for the established duration because:
- *   - Checkpoint day_numbers are set at employee registration and are never
- *     mutated thereafter.
- *   - approveRecommendation(EXTEND) adds a new 'Extension Review' checkpoint
- *     without touching the original ones, so excluding that label restores the
- *     original schedule.
- *   - The root period's end_date IS mutated by extensions, which makes
- *     deriveProbationMonths(start, end) unreliable after extension.
+ * When an Extension Review checkpoint IS present, step 4 is skipped: the root
+ * period's end_date has been mutated by approveRecommendation(EXTEND) and will
+ * not align to the original calendar-month boundary.
  *
- * Returns the matching months value, or null when no unique match is found
- * (e.g. a custom legacy schedule, an empty checkpoint set, or multiple matches).
+ * Returns the matching months value, or null when the duration cannot be
+ * determined (empty set, no CHECKPOINT_MATRIX match, or inconsistent data).
+ *
+ * @param {number} periodId     - The root period's primary key.
+ * @param {string} startDateStr - The period's start_date ('YYYY-MM-DD').
+ * @param {string} endDateStr   - The period's current end_date ('YYYY-MM-DD').
  */
-async function deriveOriginalDurationFromCheckpoints(periodId) {
-  const checkpoints = await EvaluationCheckpoint.findAll({
-    where: {
-      period_id:        periodId,
-      checkpoint_label: { [Op.ne]: 'Extension Review' },
-    },
-    attributes: ['day_number'],
+async function deriveOriginalDurationFromCheckpoints(periodId, startDateStr, endDateStr) {
+  // Fetch ALL checkpoints so we can detect whether an extension has occurred.
+  const allCheckpoints = await EvaluationCheckpoint.findAll({
+    where:      { period_id: periodId },
+    attributes: ['day_number', 'checkpoint_label'],
   });
 
-  if (!checkpoints.length) return null;
+  if (!allCheckpoints.length) return null;
 
-  const observedDays = new Set(checkpoints.map((c) => c.day_number));
+  const hasExtension = allCheckpoints.some(
+    (c) => c.checkpoint_label === 'Extension Review'
+  );
+  const originals = allCheckpoints.filter(
+    (c) => c.checkpoint_label !== 'Extension Review'
+  );
 
+  if (!originals.length) return null;
+
+  const observedDays = new Set(originals.map((c) => c.day_number));
+
+  let matchedMonths = null;
   for (const [months, offsets] of Object.entries(CHECKPOINT_MATRIX)) {
     const expectedDays = new Set(offsets.map((o) => o * 30));
     if (expectedDays.size !== observedDays.size) continue;
@@ -100,10 +116,23 @@ async function deriveOriginalDurationFromCheckpoints(periodId) {
     for (const d of expectedDays) {
       if (!observedDays.has(d)) { allMatch = false; break; }
     }
-    if (allMatch) return Number(months);
+    if (allMatch) { matchedMonths = Number(months); break; }
   }
 
-  return null;
+  if (matchedMonths === null) return null;
+
+  // ── Date cross-check (only when the period has never been extended) ───────
+  // Without an extension, the root period's end_date must align exactly with the
+  // checkpoint-derived duration.  If it does not (e.g. the employee was created
+  // with an explicit end date that diverges from the standard calendar-month
+  // boundary implied by the checkpoint schedule), the data is inconsistent and
+  // we cannot safely resolve the established duration.
+  if (!hasExtension) {
+    const D_dates = deriveProbationMonths(startDateStr, endDateStr);
+    if (D_dates !== matchedMonths) return null;
+  }
+
+  return matchedMonths;
 }
 
 /** Strict YYYY-MM-DD date format check. */
@@ -265,12 +294,14 @@ const createContract = async (req, res) => {
           parent_period_id: null,
           status: { [Op.not]: 'CANCELLED' },
         },
-        attributes: ['period_id'],
+        attributes: ['period_id', 'start_date', 'end_date'],
       });
 
       if (rootPeriod) {
         const establishedMonths = await deriveOriginalDurationFromCheckpoints(
-          rootPeriod.period_id
+          rootPeriod.period_id,
+          rootPeriod.start_date,
+          rootPeriod.end_date
         );
 
         if (establishedMonths === null) {
