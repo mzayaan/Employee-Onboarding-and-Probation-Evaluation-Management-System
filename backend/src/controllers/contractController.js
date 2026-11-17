@@ -105,6 +105,17 @@ async function deriveOriginalDurationFromCheckpoints(periodId, startDateStr, end
 
   if (!originals.length) return null;
 
+  // ── Legacy label guard ──────────────────────────────────────────────────
+  // The legacy day-offset path in createEmployee assigns labels of the form
+  // "Day-N Review" (e.g. "Day-30 Review") and defaults to {30, 60, 90}
+  // regardless of the actual probation length.  These day_numbers match
+  // CHECKPOINT_MATRIX[3] even for a 6-month period, so they cannot be used
+  // to establish the original duration.  Reject them whether or not an
+  // Extension Review checkpoint is present: extending a legacy-scheduled
+  // period does not make the original duration knowable from checkpoints alone.
+  const LEGACY_DAY_LABEL_RE = /^Day-\d+ Review$/;
+  if (originals.some((c) => LEGACY_DAY_LABEL_RE.test(c.checkpoint_label))) return null;
+
   const observedDays = new Set(originals.map((c) => c.day_number));
 
   let matchedMonths = null;

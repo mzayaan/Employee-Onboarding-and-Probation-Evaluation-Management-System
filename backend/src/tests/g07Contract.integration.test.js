@@ -1148,3 +1148,489 @@ describe('G07 Defects 1 & 2 — Checkpoint-based original-duration resolution', 
     }
   });
 });
+
+// =============================================================================
+// G07 — Legacy-plus-extension defect
+// TC-G07-037 through TC-G07-042
+//
+// Policy: When any original checkpoint carries a "Day-N Review" label, the
+// checkpoint schedule was produced by the legacy day-offset path in
+// createEmployee and its day_numbers do NOT prove the original probation
+// duration.  deriveOriginalDurationFromCheckpoints must return null, causing
+// createContract to respond 409 regardless of extension state.
+//
+// TC-G07-037/038/039 demonstrate the failing cases on e130e38:
+//   - TC-G07-037 (no extension):   cross-check catches mismatch → 409 (passes
+//     on old code for a different reason; still passes after fix).
+//   - TC-G07-038 (one extension):  hasExtension=true skips cross-check →
+//     matchedMonths=3 → explicit-3 and omitted-duration return 201 (WRONG on
+//     e130e38); after fix hasLegacyLabels=true → null → 409.
+//   - TC-G07-039 (two extensions): same wrong behaviour as TC-G07-038 on
+//     e130e38; fixed identically.
+//
+// TC-G07-040/041/042 confirm that calendar-matrix periods (Month-N labels)
+// are unaffected by the guard and behave correctly both before and after the
+// fix.
+// =============================================================================
+
+describe('G07 — Legacy Day-X labels: ambiguity survives extension (TC-G07-037 to TC-G07-042)', () => {
+  // ── TC-G07-037 ─────────────────────────────────────────────────────────
+  // 6-month period (Day-X labels), NO extension → 409 for all three inputs.
+  // On e130e38: cross-check catches D_checkpoints(3) ≠ D_dates(6) → null → 409.
+  // After fix:  hasLegacyLabels=true → null → 409 (same outcome, different path).
+  test('TC-G07-037: legacy Day-X labels, no extension → 409 for explicit-3, omitted, explicit-6', async () => {
+    const basePeriod = {
+      period_id:        10,
+      start_date:       '2027-02-01',
+      end_date:         '2027-08-01',   // 6 calendar months
+      parent_period_id: null,
+    };
+    const legacyCheckpoints = [
+      { day_number: 30, checkpoint_label: 'Day-30 Review' },
+      { day_number: 60, checkpoint_label: 'Day-60 Review' },
+      { day_number: 90, checkpoint_label: 'Day-90 Review' },
+    ];
+
+    // Sub-case A: explicit 3-month
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyCheckpoints);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 3,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case B: omitted duration
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyCheckpoints);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case C: explicit 6-month
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyCheckpoints);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 6,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+  });
+
+  // ── TC-G07-038 ─────────────────────────────────────────────────────────
+  // 6-month period (Day-X labels), ONE extension → still 409 for all inputs.
+  // On e130e38: hasExtension=true skips cross-check; matchedMonths=3 (from
+  //   {30,60,90}); explicit-3 → 201 (WRONG); omitted → 201 (WRONG); 6 → 409.
+  //   Sub-cases A and B therefore FAIL on e130e38.
+  // After fix: hasLegacyLabels=true → null → 409 for all three.
+  test('TC-G07-038: legacy Day-X labels, one extension → 409 for explicit-3, omitted, explicit-6', async () => {
+    const basePeriod = {
+      period_id:        10,
+      start_date:       '2027-02-01',
+      end_date:         '2027-10-30',   // end_date mutated +90 days after EXTEND
+      parent_period_id: null,
+    };
+    const legacyPlusExtension = [
+      { day_number:  30, checkpoint_label: 'Day-30 Review' },
+      { day_number:  60, checkpoint_label: 'Day-60 Review' },
+      { day_number:  90, checkpoint_label: 'Day-90 Review' },
+      { day_number: 180, checkpoint_label: 'Extension Review' },
+    ];
+
+    // Sub-case A: explicit 3-month
+    // FAILS on e130e38: returns 201 (incorrectly accepts 3 months)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 3,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case B: omitted duration
+    // FAILS on e130e38: returns 201 and silently persists 3 months
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case C: explicit 6-month (passes on both versions, different reason)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 6,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+  });
+
+  // ── TC-G07-039 ─────────────────────────────────────────────────────────
+  // 6-month period (Day-X labels), TWO extensions → still 409 for all inputs.
+  // Same wrong behaviour on e130e38 as TC-G07-038 (sub-cases A and B FAIL).
+  test('TC-G07-039: legacy Day-X labels, two extensions → 409 for explicit-3, omitted, explicit-6', async () => {
+    const basePeriod = {
+      period_id:        10,
+      start_date:       '2027-02-01',
+      end_date:         '2028-01-28',   // end_date mutated twice (+180 days total)
+      parent_period_id: null,
+    };
+    const legacyPlusTwoExtensions = [
+      { day_number:  30, checkpoint_label: 'Day-30 Review' },
+      { day_number:  60, checkpoint_label: 'Day-60 Review' },
+      { day_number:  90, checkpoint_label: 'Day-90 Review' },
+      { day_number: 180, checkpoint_label: 'Extension Review' },
+      { day_number: 270, checkpoint_label: 'Extension Review' },
+    ];
+
+    // Sub-case A: explicit 3-month — FAILS on e130e38 (returns 201)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyPlusTwoExtensions);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 3,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case B: omitted duration — FAILS on e130e38 (returns 201, persists 3 months)
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyPlusTwoExtensions);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case C: explicit 6-month
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(legacyPlusTwoExtensions);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 10, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 6,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be determined|original probation duration/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+  });
+
+  // ── TC-G07-040 ─────────────────────────────────────────────────────────
+  // Calendar-matrix 3-month period, one extension → guard does NOT fire.
+  // "Month N Review" labels are not matched by LEGACY_DAY_LABEL_RE.
+  // Passes on both e130e38 and after the fix.
+  test('TC-G07-040: calendar-matrix 3-month, one extension → 3-month accepted, 6-month rejected', async () => {
+    const basePeriod = {
+      period_id:        11,
+      start_date:       '2026-02-01',
+      end_date:         '2026-07-30',   // end_date mutated +90 days after EXTEND
+      parent_period_id: null,
+    };
+    const matrixPlusExtension = [
+      { day_number:  30, checkpoint_label: 'Month 1 Review' },
+      { day_number:  60, checkpoint_label: 'Month 2 Review' },
+      { day_number:  90, checkpoint_label: 'Month 3 Final Checkpoint' },
+      { day_number: 180, checkpoint_label: 'Extension Review' },
+    ];
+
+    // Sub-case A: explicit 3-month (matches established duration) → 201
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(matrixPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 11, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 3,
+      });
+      await createContract(req, res);
+      const { status } = getResponse(res);
+      expect(status).toBe(201);
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case B: explicit 6-month (conflicts) → 409
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(matrixPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 11, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 6,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be changed|probation_duration_months/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case C: omitted duration (defaults to established 3 months) → 201,
+    // and Contract.create must be called with probation_duration_months: 3
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(matrixPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 11, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true,
+      });
+      await createContract(req, res);
+      const { status } = getResponse(res);
+      expect(status).toBe(201);
+      expect(m.Contract.create).toHaveBeenCalledWith(
+        expect.objectContaining({ probation_duration_months: 3 }),
+        expect.anything(),
+      );
+    }
+  });
+
+  // ── TC-G07-041 ─────────────────────────────────────────────────────────
+  // Calendar-matrix 6-month period, one extension → guard does NOT fire.
+  // Passes on both e130e38 and after the fix.
+  test('TC-G07-041: calendar-matrix 6-month, one extension → 6-month accepted, 3-month rejected', async () => {
+    const basePeriod = {
+      period_id:        12,
+      start_date:       '2026-02-01',
+      end_date:         '2026-11-28',   // end_date mutated +90 days after EXTEND
+      parent_period_id: null,
+    };
+    const matrixPlusExtension = [
+      { day_number:  60, checkpoint_label: 'Month 2 Review' },
+      { day_number: 120, checkpoint_label: 'Month 4 Review' },
+      { day_number: 180, checkpoint_label: 'Month 6 Final Checkpoint' },
+      { day_number: 270, checkpoint_label: 'Extension Review' },
+    ];
+
+    // Sub-case A: explicit 6-month (matches established duration) → 201
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(matrixPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 12, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 6,
+      });
+      await createContract(req, res);
+      const { status } = getResponse(res);
+      expect(status).toBe(201);
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case B: explicit 3-month (conflicts) → 409
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(matrixPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 12, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true, probation_duration_months: 3,
+      });
+      await createContract(req, res);
+      const { status, body } = getResponse(res);
+      expect(status).toBe(409);
+      expect(body.message).toMatch(/cannot be changed|probation_duration_months/i);
+      expect(m.Contract.create).not.toHaveBeenCalled();
+    }
+
+    jest.clearAllMocks();
+    m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+    m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+    // Sub-case C: omitted duration (defaults to established 6 months) → 201,
+    // Contract.create called with probation_duration_months: 6
+    m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+    m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(matrixPlusExtension);
+    {
+      const { req, res } = makeReqRes({
+        profile_id: 12, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+        probation_clause_included: true,
+      });
+      await createContract(req, res);
+      const { status } = getResponse(res);
+      expect(status).toBe(201);
+      expect(m.Contract.create).toHaveBeenCalledWith(
+        expect.objectContaining({ probation_duration_months: 6 }),
+        expect.anything(),
+      );
+    }
+  });
+
+  // ── TC-G07-042 ─────────────────────────────────────────────────────────
+  // Calendar-matrix {1, 2, 12}-month periods, one extension each → guard
+  // does NOT fire; matching duration accepted, conflicting rejected.
+  // Passes on both e130e38 and after the fix.
+  test('TC-G07-042: calendar-matrix 1/2/12-month with extension → unchanged accepted, conflicting rejected', async () => {
+    const cases = [
+      {
+        label:      '1-month',
+        period_id:  13,
+        start_date: '2026-03-01',
+        end_date:   '2026-07-30',   // mutated +90 days
+        checkpoints: [
+          { day_number:  30, checkpoint_label: 'Month 1 Final Checkpoint' },
+          { day_number: 120, checkpoint_label: 'Extension Review' },
+        ],
+        establishedMonths: 1,
+        conflictingMonths: 3,
+      },
+      {
+        label:      '2-month',
+        period_id:  14,
+        start_date: '2026-03-01',
+        end_date:   '2026-08-28',   // mutated +90 days
+        checkpoints: [
+          { day_number:  30, checkpoint_label: 'Month 1 Review' },
+          { day_number:  60, checkpoint_label: 'Month 2 Final Checkpoint' },
+          { day_number: 150, checkpoint_label: 'Extension Review' },
+        ],
+        establishedMonths: 2,
+        conflictingMonths: 6,
+      },
+      {
+        label:      '12-month',
+        period_id:  15,
+        start_date: '2025-01-01',
+        end_date:   '2026-07-02',   // mutated +90 days
+        checkpoints: [
+          { day_number:  90, checkpoint_label: 'Month 3 Review' },
+          { day_number: 180, checkpoint_label: 'Month 6 Review' },
+          { day_number: 270, checkpoint_label: 'Month 9 Review' },
+          { day_number: 360, checkpoint_label: 'Month 12 Final Checkpoint' },
+          { day_number: 450, checkpoint_label: 'Extension Review' },
+        ],
+        establishedMonths: 12,
+        conflictingMonths: 6,
+      },
+    ];
+
+    for (const c of cases) {
+      const basePeriod = {
+        period_id:        c.period_id,
+        start_date:       c.start_date,
+        end_date:         c.end_date,
+        parent_period_id: null,
+      };
+
+      // Matching duration → 201
+      m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+      m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(c.checkpoints);
+      {
+        const { req, res } = makeReqRes({
+          profile_id: c.period_id, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+          probation_clause_included: true,
+          probation_duration_months: c.establishedMonths,
+        });
+        await createContract(req, res);
+        const { status } = getResponse(res);
+        expect(status).toBe(201);
+      }
+
+      jest.clearAllMocks();
+      m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+      m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+
+      // Conflicting duration → 409
+      m.ProbationPeriod.findOne.mockResolvedValueOnce(basePeriod);
+      m.EvaluationCheckpoint.findAll.mockResolvedValueOnce(c.checkpoints);
+      {
+        const { req, res } = makeReqRes({
+          profile_id: c.period_id, contract_type: 'PROBATIONARY', basic_salary_mur: 25000,
+          probation_clause_included: true,
+          probation_duration_months: c.conflictingMonths,
+        });
+        await createContract(req, res);
+        const { status, body } = getResponse(res);
+        expect(status).toBe(409);
+        expect(body.message).toMatch(/cannot be changed|probation_duration_months/i);
+        expect(m.Contract.create).not.toHaveBeenCalled();
+      }
+
+      jest.clearAllMocks();
+      m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+      m.Contract.create.mockResolvedValue({ contract_id: 1, toJSON: jest.fn().mockReturnThis() });
+    }
+  });
+});
