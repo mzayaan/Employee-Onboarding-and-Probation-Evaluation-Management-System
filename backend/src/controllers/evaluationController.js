@@ -437,6 +437,17 @@ const getMyTeam = async (req, res) => {
   }
 };
 
+// G09-FIX Fix 1: Custom error class for eligibility failures that occur INSIDE
+// sequelize.transaction().  Throwing this exits the transaction cleanly and is
+// caught in the outer try/catch to return the correct HTTP status rather than 500.
+class EligibilityError extends Error {
+  constructor(status, body) {
+    super(body.message);
+    this.status = status;
+    this.body   = body;
+  }
+}
+
 // =============================================================================
 // POST /api/evaluations/checkpoint/:checkpointId/manager
 // Line Manager (or HR Admin) submits a manager evaluation.
@@ -558,18 +569,34 @@ const submitManagerEvaluation = async (req, res) => {
 
     let frozenByEmployee = false;
     if (existingSelfAssessment?.scores?.length > 0) {
-      // Employee submitted first — build criteriaMap from their snapshot
-      frozenByEmployee = true;
-      const frozenIds = existingSelfAssessment.scores.map((s) => s.criterion_id);
-      const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
-      for (const c of frozenCriteria) {
-        const snap = existingSelfAssessment.scores.find((s) => s.criterion_id === c.criterion_id);
-        criteriaMap[c.criterion_id] = {
-          ...c.toJSON(),
-          weight_percent: snap?.weight_percent_at_scoring ?? c.weight_percent,
-        };
+      // G09-FIX Fix 4: Only use the snapshot for freezing when ALL weight snapshots
+      // are present. A NULL weight_percent_at_scoring means the self-assessment was
+      // submitted before the G09 weight-snapshot fix was deployed — using an incomplete
+      // snapshot would silently score the manager's submission with the wrong weights.
+      const hasNullWeight = existingSelfAssessment.scores.some(
+        (s) => s.weight_percent_at_scoring == null
+      );
+      if (hasNullWeight) {
+        console.warn(
+          `[submitManagerEvaluation] Checkpoint ${checkpointId}: employee's self-assessment ` +
+          'snapshot has NULL weight_percent_at_scoring (pre-G09 row). ' +
+          'Skipping freeze; loading current active criteria instead.'
+        );
+      } else {
+        // Employee submitted first — build criteriaMap from their snapshot
+        frozenByEmployee = true;
+        const frozenIds = existingSelfAssessment.scores.map((s) => s.criterion_id);
+        const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
+        for (const c of frozenCriteria) {
+          const snap = existingSelfAssessment.scores.find((s) => s.criterion_id === c.criterion_id);
+          criteriaMap[c.criterion_id] = {
+            ...c.toJSON(),
+            weight_percent: Number.parseFloat(snap.weight_percent_at_scoring),
+          };
+        }
       }
-    } else {
+    }
+    if (!frozenByEmployee) {
       // No prior submission — load current active criteria
       const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
       for (const c of allCriteria) {
@@ -586,6 +613,30 @@ const submitManagerEvaluation = async (req, res) => {
           success: false,
           message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
         });
+      }
+    }
+
+    // G09-FIX Fix 5: Reject non-integer, non-numeric, and duplicate criterion_ids
+    // before the criteriaMap lookup so that crafted payloads cannot produce NaN
+    // contributions or inflate the total weighted score.
+    {
+      const seenCriterionIds = new Set();
+      for (const s of scores) {
+        const id     = Number.parseInt(s.criterion_id, 10);
+        const rawNum = Number(s.raw_score);
+        if (!Number.isFinite(id) || isNaN(id) || id <= 0) {
+          return res.status(400).json({ success: false, message: 'criterion_id must be a positive integer.' });
+        }
+        if (seenCriterionIds.has(id)) {
+          return res.status(400).json({ success: false, message: `Duplicate criterion_id ${id} in submission.` });
+        }
+        seenCriterionIds.add(id);
+        if (!Number.isFinite(rawNum) || !Number.isInteger(rawNum)) {
+          return res.status(400).json({ success: false, message: `raw_score must be a whole number between 1 and 5. Received: ${s.raw_score}` });
+        }
+        // Normalise to native number types for downstream arithmetic
+        s.criterion_id = id;
+        s.raw_score    = rawNum;
       }
     }
 
@@ -622,6 +673,10 @@ const submitManagerEvaluation = async (req, res) => {
         // G09-FIX: snapshot the weight used so historical reports remain reproducible
         // even if criteria weights are reconfigured after this evaluation is submitted.
         weight_percent_at_scoring: weightAtScoring,
+        // G09-FIX Fix 3: snapshot the criterion name at submission time so that a
+        // later rename in the System Administrator configuration page does not change
+        // the label shown on historical evaluation records and PDF reports (FR-14).
+        name_at_scoring:           criteriaMap[s.criterion_id].name ?? null,
         weighted_contribution:     contribution,
       };
     });
@@ -629,6 +684,32 @@ const submitManagerEvaluation = async (req, res) => {
 
     // Persist in a transaction
     await sequelize.transaction(async (t) => {
+      // G09-FIX Fix 1: Re-acquire the checkpoint row under a pessimistic lock so
+      // that two concurrent requests for the same checkpointId cannot both pass the
+      // duplicate check above and both proceed to create duplicate evaluation rows.
+      // All eligibility checks performed above act as a fast-path; this is the
+      // authoritative atomic guard.
+      const lockedCp = await EvaluationCheckpoint.findByPk(checkpointId, {
+        lock: t.LOCK.UPDATE,
+        transaction: t,
+      });
+      if (!lockedCp) {
+        throw new EligibilityError(404, { success: false, message: 'Checkpoint not found.' });
+      }
+      const atomicDuplicateMgr = await ManagerEvaluation.findOne({
+        where: { checkpoint_id: checkpointId },
+        transaction: t,
+      });
+      if (atomicDuplicateMgr) {
+        throw new EligibilityError(409, { success: false, message: 'Manager evaluation already submitted for this checkpoint.' });
+      }
+      if (lockedCp.status === 'CANCELLED') {
+        throw new EligibilityError(409, {
+          success: false,
+          message: 'Cannot submit evaluation: this evaluation checkpoint has been cancelled.',
+        });
+      }
+
       // Create manager evaluation record
       const evaluation = await ManagerEvaluation.create({
         checkpoint_id:          checkpointId,
@@ -764,6 +845,11 @@ const submitManagerEvaluation = async (req, res) => {
       data:    { checkpoint_id: checkpointId, weighted_score: totalWeighted },
     });
   } catch (error) {
+    // G09-FIX Fix 1: EligibilityError is thrown inside the transaction to signal a
+    // business-logic rejection; return its HTTP status rather than a generic 500.
+    if (error instanceof EligibilityError) {
+      return res.status(error.status).json(error.body);
+    }
     console.error('[evaluationController.submitManagerEvaluation]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to submit evaluation.' });
   }
@@ -889,18 +975,34 @@ const submitSelfAssessment = async (req, res) => {
 
     let frozenByManager = false;
     if (existingManagerForFreeze?.scores?.length > 0) {
-      // Manager submitted first — build criteriaMap from their snapshot
-      frozenByManager = true;
-      const frozenIds = existingManagerForFreeze.scores.map((s) => s.criterion_id);
-      const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
-      for (const c of frozenCriteria) {
-        const snap = existingManagerForFreeze.scores.find((s) => s.criterion_id === c.criterion_id);
-        criteriaMap[c.criterion_id] = {
-          ...c.toJSON(),
-          weight_percent: snap?.weight_percent_at_scoring ?? c.weight_percent,
-        };
+      // G09-FIX Fix 4: Only use the snapshot for freezing when ALL weight snapshots
+      // are present. A NULL weight_percent_at_scoring means the manager evaluation was
+      // submitted before the G09 weight-snapshot fix was deployed — using an incomplete
+      // snapshot would silently score the employee's submission with the wrong weights.
+      const hasNullWeight = existingManagerForFreeze.scores.some(
+        (s) => s.weight_percent_at_scoring == null
+      );
+      if (hasNullWeight) {
+        console.warn(
+          `[submitSelfAssessment] Checkpoint ${checkpointId}: manager's evaluation snapshot ` +
+          'has NULL weight_percent_at_scoring (pre-G09 row). ' +
+          'Skipping freeze; loading current active criteria instead.'
+        );
+      } else {
+        // Manager submitted first — build criteriaMap from their snapshot
+        frozenByManager = true;
+        const frozenIds = existingManagerForFreeze.scores.map((s) => s.criterion_id);
+        const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
+        for (const c of frozenCriteria) {
+          const snap = existingManagerForFreeze.scores.find((s) => s.criterion_id === c.criterion_id);
+          criteriaMap[c.criterion_id] = {
+            ...c.toJSON(),
+            weight_percent: Number.parseFloat(snap.weight_percent_at_scoring),
+          };
+        }
       }
-    } else {
+    }
+    if (!frozenByManager) {
       // No prior submission — load current active criteria
       const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
       for (const c of allCriteria) {
@@ -916,6 +1018,27 @@ const submitSelfAssessment = async (req, res) => {
           success: false,
           message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
         });
+      }
+    }
+
+    // G09-FIX Fix 5: Reject non-integer, non-numeric, and duplicate criterion_ids.
+    {
+      const seenCriterionIds = new Set();
+      for (const s of scores) {
+        const id     = Number.parseInt(s.criterion_id, 10);
+        const rawNum = Number(s.raw_score);
+        if (!Number.isFinite(id) || isNaN(id) || id <= 0) {
+          return res.status(400).json({ success: false, message: 'criterion_id must be a positive integer.' });
+        }
+        if (seenCriterionIds.has(id)) {
+          return res.status(400).json({ success: false, message: `Duplicate criterion_id ${id} in submission.` });
+        }
+        seenCriterionIds.add(id);
+        if (!Number.isFinite(rawNum) || !Number.isInteger(rawNum)) {
+          return res.status(400).json({ success: false, message: `raw_score must be a whole number between 1 and 5. Received: ${s.raw_score}` });
+        }
+        s.criterion_id = id;
+        s.raw_score    = rawNum;
       }
     }
 
@@ -946,11 +1069,13 @@ const submitSelfAssessment = async (req, res) => {
       const weightAtScoring = criteriaMap[s.criterion_id].weight_percent;
       const contribution    = calcContribution(s.raw_score, weightAtScoring);
       totalSelfScore += contribution;
-      // G09-FIX: snapshot the weight used at the time of submission.
+      // G09-FIX: snapshot the weight and name used at the time of submission.
       return {
         criterion_id:              s.criterion_id,
         raw_score:                 s.raw_score,
         weight_percent_at_scoring: weightAtScoring,
+        // G09-FIX Fix 3: snapshot criterion name so renames don't affect historical records.
+        name_at_scoring:           criteriaMap[s.criterion_id].name ?? null,
         weighted_contribution:     contribution,
       };
     });
@@ -967,6 +1092,28 @@ const submitSelfAssessment = async (req, res) => {
     }
 
     await sequelize.transaction(async (t) => {
+      // G09-FIX Fix 1: Atomic duplicate guard under a row-level lock.
+      const lockedCpSelf = await EvaluationCheckpoint.findByPk(checkpointId, {
+        lock: t.LOCK.UPDATE,
+        transaction: t,
+      });
+      if (!lockedCpSelf) {
+        throw new EligibilityError(404, { success: false, message: 'Checkpoint not found.' });
+      }
+      const atomicDuplicateSelf = await SelfAssessment.findOne({
+        where: { checkpoint_id: checkpointId },
+        transaction: t,
+      });
+      if (atomicDuplicateSelf) {
+        throw new EligibilityError(409, { success: false, message: 'Self-assessment already submitted for this checkpoint.' });
+      }
+      if (lockedCpSelf.status === 'CANCELLED') {
+        throw new EligibilityError(409, {
+          success: false,
+          message: 'Cannot submit self-assessment: this evaluation checkpoint has been cancelled.',
+        });
+      }
+
       const assessment = await SelfAssessment.create({
         checkpoint_id:                 checkpointId,
         employee_profile_id:           profile.profile_id,
@@ -1108,6 +1255,10 @@ const submitSelfAssessment = async (req, res) => {
       data: { checkpoint_id: checkpointId, self_score: totalSelfScore },
     });
   } catch (error) {
+    // G09-FIX Fix 1: EligibilityError from inside the transaction.
+    if (error instanceof EligibilityError) {
+      return res.status(error.status).json(error.body);
+    }
     console.error('[evaluationController.submitSelfAssessment]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to submit self-assessment.' });
   }

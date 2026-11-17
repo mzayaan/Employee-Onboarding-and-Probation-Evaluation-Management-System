@@ -229,10 +229,12 @@ export default function EvaluationFormPage() {
     late_arrivals: 0,
   })
   const [attendanceSummary, setAttendanceSummary] = useState(null)  // from attendance log
-  const [loading, setLoading] = useState(true)
-  const [saving,  setSaving]  = useState(false)
-  const [error,   setError]   = useState(null)
-  const [success, setSuccess] = useState(false)
+  const [loading,          setLoading]          = useState(true)
+  const [saving,           setSaving]           = useState(false)
+  const [error,            setError]            = useState(null)
+  const [success,          setSuccess]          = useState(false)
+  // G09-FIX Fix 6: eligibility message shown when the form must not accept a new submission.
+  const [eligibilityError, setEligibilityError] = useState(null)
 
   useEffect(() => {
     if (!checkpointId) return
@@ -247,6 +249,25 @@ export default function EvaluationFormPage() {
         setCheckpoint(cp)
         setCriteria(cri)
         setAllCheckpoints(siblings)
+
+        // G09-FIX Fix 6: Compute frontend eligibility so the submit button is
+        // disabled (and a clear reason is shown) when the checkpoint or period
+        // has been cancelled, the period is in a terminal state, or the
+        // checkpoint is not yet due (Mauritius Standard Time UTC+4).
+        if (!cp?.managerEvaluation?.eval_id) {
+          const todayMST = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)
+          const periodStatus = cp?.probationPeriod?.status
+          const TERMINAL = ['COMPLETED', 'CONFIRMED', 'DISMISSED', 'CANCELLED']
+          if (cp?.status === 'CANCELLED') {
+            setEligibilityError('This checkpoint has been cancelled and no longer accepts submissions.')
+          } else if (periodStatus === 'CANCELLED') {
+            setEligibilityError('The probation period has been cancelled.')
+          } else if (TERMINAL.includes(periodStatus)) {
+            setEligibilityError(`The probation period is already ${(periodStatus || '').toLowerCase()} — no new evaluations can be submitted.`)
+          } else if (cp?.due_date && cp.due_date > todayMST) {
+            setEligibilityError(`This checkpoint is not yet due. Submissions open from ${cp.due_date} (Mauritius time).`)
+          }
+        }
 
         // Store attendance summary from log (FR-12)
         if (res.attendanceSummary) {
@@ -385,6 +406,12 @@ export default function EvaluationFormPage() {
         <div className="mb-5 flex items-center gap-2 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700 ring-1 ring-blue-200">
           <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
           This evaluation has already been submitted. Scores shown in read-only mode.
+        </div>
+      )}
+      {/* G09-FIX Fix 6: eligibility banner */}
+      {eligibilityError && !alreadySubmitted && !success && (
+        <div className="mb-5 flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-amber-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" /> {eligibilityError}
         </div>
       )}
 
@@ -536,7 +563,7 @@ export default function EvaluationFormPage() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={saving || !allScored}
+                disabled={saving || !allScored || !!eligibilityError}
                 className="inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium text-white shadow-sm disabled:opacity-50"
                 style={{ backgroundColor: '#1e3a5f' }}
               >

@@ -207,8 +207,11 @@ describe('calcCriteriaWeightedScores', () => {
     ];
 
     expect(() => calcCriteriaWeightedScores(criteriaList, completedCps, [])).not.toThrow();
-    // Only cp10 contributes: (5/5)*20 = 20; average over 1 contribution = 20
-    expect(criteriaList[0].weightedScore).toBeCloseTo(20, 5);
+    // G09-FIX Fix 2: denominator is completedCps.length (2), not cpContributions.length (1).
+    // Only cp10 contributes: (5/5)*20 = 20; divided by 2 completed checkpoints = 10.
+    // This keeps sum(c.weightedScore) == cumulativeScore even when criteria differ between
+    // checkpoints (FR-14).
+    expect(criteriaList[0].weightedScore).toBeCloseTo(10, 5);
   });
 
   // TC-PDF-012: sets lastRaw from the last checkpoint's manager scores

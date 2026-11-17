@@ -138,6 +138,7 @@ export default function SelfAssessmentPage() {
   const [saving,  setSaving]  = useState(false)
   const [error,   setError]   = useState(null)
   const [success, setSuccess] = useState(false)
+  const [eligibilityError, setEligibilityError] = useState(null)  // G09-FIX Fix 6
 
   // Two-way probation feedback fields
   const [twoway, setTwoway] = useState({
@@ -184,6 +185,26 @@ export default function SelfAssessmentPage() {
         const cri = res.criteria || []
         setCheckpoint(cp)
         setCriteria(cri)
+
+        // G09-FIX Fix 6: frontend eligibility guard — mirrors backend checks
+        if (!cp?.selfAssessment?.assessment_id) {
+          const todayMST = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)
+          const periodStatus = cp?.probationPeriod?.status
+          const TERMINAL = ['COMPLETED', 'CONFIRMED', 'DISMISSED', 'CANCELLED']
+          if (cp?.status === 'CANCELLED') {
+            setEligibilityError('This checkpoint has been cancelled and no longer accepts submissions.')
+          } else if (periodStatus === 'CANCELLED') {
+            setEligibilityError('The probation period has been cancelled.')
+          } else if (TERMINAL.includes(periodStatus)) {
+            setEligibilityError(`The probation period is already ${periodStatus?.toLowerCase()}. No further self-assessments can be submitted.`)
+          } else if (cp?.due_date && cp.due_date > todayMST) {
+            setEligibilityError(`This checkpoint is not yet due. Submissions open from ${cp.due_date} (Mauritius time).`)
+          } else {
+            setEligibilityError(null)
+          }
+        } else {
+          setEligibilityError(null)
+        }
 
         // Pre-fill if self-assessment already submitted
         const existing = cp?.selfAssessment
@@ -332,6 +353,13 @@ export default function SelfAssessmentPage() {
         <div className="mb-5 flex items-center gap-2 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-700 ring-1 ring-blue-200">
           <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
           You have already submitted your self-assessment for this checkpoint. Shown in read-only mode.
+        </div>
+      )}
+      {/* G09-FIX Fix 6: eligibility guard banner */}
+      {eligibilityError && !alreadySubmitted && !success && (
+        <div className="mb-5 flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-amber-200">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          {eligibilityError}
         </div>
       )}
 
@@ -530,7 +558,7 @@ export default function SelfAssessmentPage() {
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={saving || !allScored}
+                  disabled={saving || !allScored || !!eligibilityError}
                   className="inline-flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium text-white shadow-sm disabled:opacity-50"
                   style={{ backgroundColor: '#1e3a5f' }}
                 >

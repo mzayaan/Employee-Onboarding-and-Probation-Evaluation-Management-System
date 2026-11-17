@@ -25,8 +25,7 @@
 -- Step 1: Add signed_at_ts as a nullable DATETIME column
 ALTER TABLE contracts
   ADD COLUMN signed_at_ts DATETIME NULL
-    COMMENT 'Precise UTC datetime of digital signing (G06). NULL until signed. '
-            'Complements signed_at (DATEONLY) which stores only the calendar date.'
+    COMMENT 'Precise UTC datetime of digital signing (G06). NULL until signed. Complements signed_at (DATEONLY) which stores only the calendar date.'
   AFTER signed_at;
 
 -- Step 2: Historical rows with signed_at already set are left with signed_at_ts = NULL.

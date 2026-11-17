@@ -170,9 +170,13 @@ beforeEach(() => {
   models.User.findAll                  = jest.fn().mockResolvedValue([]);
   models.EmployeeProfile.findByPk      = jest.fn().mockResolvedValue({ manager_id: 3 });
 
-  // sequelize.transaction: immediately invoke the callback, passing a mock transaction
+  // sequelize.transaction: immediately invoke the callback, passing a mock transaction.
+  // G09-FIX Fix 1 added locked re-fetches inside the transaction callback which
+  // access t.LOCK.UPDATE — the mock t must include a LOCK stub so those option
+  // objects can be evaluated without throwing a TypeError.
   const mockDb = require('../config/database');
-  mockDb.transaction = jest.fn().mockImplementation(async (cb) => cb({ /* mock t */ }));
+  const mockT = { LOCK: { UPDATE: 'UPDATE', SHARE: 'SHARE' } };
+  mockDb.transaction = jest.fn().mockImplementation(async (cb) => cb(mockT));
 });
 
 // =============================================================================
@@ -520,5 +524,301 @@ describe('Non-regression — EXTENDED period still accepts submissions', () => {
     await submitManagerEvaluation(req, res);
 
     expect(res.status).toHaveBeenCalledWith(201);
+  });
+});
+
+// =============================================================================
+// Fix 1 — Atomic duplicate guard inside the Sequelize transaction
+//
+// A second concurrent request can pass the outer fast-path duplicate check
+// (ManagerEvaluation.findOne returns null) before the first commit.  The
+// locked re-fetch inside the transaction catches this and returns 409 without
+// a 500 internal error.
+// =============================================================================
+
+describe('Fix 1 — atomic duplicate guard prevents race-condition double-submit', () => {
+  test('TC-G09-F1-MGR: outer check passes but inner locked check detects duplicate → 409 (not 500)', async () => {
+    // Simulate: first submitter already committed between the outer findOne check
+    // and the locked findOne inside the transaction.
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)   // 1st call: outer load with includes
+      .mockResolvedValueOnce(cp);  // 2nd call: locked re-fetch inside transaction
+
+    models.ManagerEvaluation.findOne
+      .mockResolvedValueOnce(null)                    // outer fast-path: no duplicate yet
+      .mockResolvedValueOnce({ eval_id: 50 });        // inner atomic check: race detected
+
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    const body = res.json.mock.calls[0][0];
+    expect(body.success).toBe(false);
+    expect(body.message).toMatch(/already submitted/i);
+    // Must NOT return 500 — EligibilityError is handled before the generic catch
+    expect(res.status).not.toHaveBeenCalledWith(500);
+  });
+
+  test('TC-G09-F1-EMP: outer check passes but inner locked check detects duplicate → 409 (not 500)', async () => {
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)   // outer load
+      .mockResolvedValueOnce(cp);  // inner locked re-fetch inside transaction
+
+    // submitSelfAssessment calls SelfAssessment.findOne twice:
+    //   1st: outer fast-path duplicate check   → null (passes)
+    //   2nd: inside transaction atomic check   → existing assessment (race!)
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(null)                       // outer fast-path
+      .mockResolvedValueOnce({ assessment_id: 99 });     // inner atomic check: race
+
+    // ManagerEvaluation.findOne: freeze check → no manager yet
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    const body = res.json.mock.calls[0][0];
+    expect(body.success).toBe(false);
+    expect(body.message).toMatch(/already submitted/i);
+    expect(res.status).not.toHaveBeenCalledWith(500);
+  });
+});
+
+// =============================================================================
+// Fix 3 — name_at_scoring populated in score rows
+//
+// The criterion name must be captured at submission time so that renaming
+// a criterion in the System Administrator configuration does not change
+// labels on historical evaluation records and PDF reports (FR-14).
+// =============================================================================
+
+describe('Fix 3 — name_at_scoring saved in EvaluationScore rows at submission time', () => {
+  test('TC-G09-F3-MGR: EvaluationScore.bulkCreate called with name_at_scoring set', async () => {
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 5 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+
+    // Verify EvaluationScore.bulkCreate was called with name_at_scoring populated
+    expect(models.EvaluationScore.bulkCreate).toHaveBeenCalled();
+    const bulkArg = models.EvaluationScore.bulkCreate.mock.calls[0][0];
+    expect(Array.isArray(bulkArg)).toBe(true);
+    expect(bulkArg.length).toBeGreaterThan(0);
+    // Every score row must carry a name_at_scoring value (not undefined/null for a named criterion)
+    bulkArg.forEach((row) => {
+      expect(row).toHaveProperty('name_at_scoring');
+      // makeCriterion gives name 'Criterion 1' — should be captured
+      expect(row.name_at_scoring).toBe('Criterion 1');
+    });
+  });
+
+  test('TC-G09-F3-EMP: SelfAssessmentScore.bulkCreate called with name_at_scoring set', async () => {
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+
+    expect(models.SelfAssessmentScore.bulkCreate).toHaveBeenCalled();
+    const bulkArg = models.SelfAssessmentScore.bulkCreate.mock.calls[0][0];
+    expect(Array.isArray(bulkArg)).toBe(true);
+    expect(bulkArg.length).toBeGreaterThan(0);
+    bulkArg.forEach((row) => {
+      expect(row).toHaveProperty('name_at_scoring');
+      expect(row.name_at_scoring).toBe('Criterion 1');
+    });
+  });
+});
+
+// =============================================================================
+// Fix 4 — NULL weight_percent_at_scoring guard
+//
+// When the first submitter's score snapshot has weight_percent_at_scoring = NULL
+// (rows inserted before the G09 snapshot fix), the freeze must be SKIPPED and
+// current active criteria loaded instead, so the second submitter is not scored
+// against undefined weights.
+// =============================================================================
+
+describe('Fix 4 — NULL weight guard: freeze skipped when snapshot has NULL weights', () => {
+  test('TC-G09-F4-MGR: employee scores with NULL weights → freeze skipped → current active criteria used', async () => {
+    // Employee self-assessment has scores with NULL weight snapshots (pre-G09 rows)
+    const nullWeightScores = [{ criterion_id: 1, weight_percent_at_scoring: null }];
+    const selfAssessmentMock = { assessment_id: 99, scores: nullWeightScores };
+
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+
+    models.ManagerEvaluation.findOne.mockResolvedValue(null); // no prior manager eval
+    models.SelfAssessment.findOne.mockResolvedValue(selfAssessmentMock); // employee went first
+    // Current active criteria: criterion_id=2 (different from the snapshot criterion_id=1)
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(2, 100)]);
+
+    // Manager submits for criterion_id=2 (current active, not the NULL-weight snapshot)
+    const req = managerReq('1', { scores: [{ criterion_id: 2, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    // Freeze was skipped → current active criteria used → criterion 2 is accepted → 201
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  test('TC-G09-F4-EMP: manager scores with NULL weights → freeze skipped → current active criteria used', async () => {
+    // Manager evaluation has scores with NULL weight snapshots (pre-G09 rows)
+    const nullWeightScores = [{ criterion_id: 1, weight_percent_at_scoring: null }];
+    const managerEvalMock = { eval_id: 50, scores: nullWeightScores };
+
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+
+    models.SelfAssessment.findOne.mockResolvedValue(null); // no prior self-assessment
+    models.ManagerEvaluation.findOne.mockResolvedValue(managerEvalMock); // manager went first with NULL weights
+    // Current active criteria: criterion_id=2
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(2, 100)]);
+
+    // Employee submits for criterion_id=2 (current active, not the NULL-weight snapshot)
+    const req = employeeReq('1', { scores: [{ criterion_id: 2, raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    // Freeze was skipped → current active criteria used → criterion 2 is accepted → 201
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+});
+
+// =============================================================================
+// Fix 5 — Score payload validation
+//
+// Invalid score values (fractional, NaN, negative, duplicate criterion_ids)
+// must be rejected with 400 before any database write, so they cannot produce
+// NaN contributions, inflated totals, or conflicting records (FR-14).
+// =============================================================================
+
+describe('Fix 5 — score payload validation rejects invalid inputs', () => {
+  // Shared setup: eligible checkpoint, no prior submissions, active criteria
+  function eligibleSetup() {
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 50),
+      makeCriterion(2, 50),
+    ]);
+  }
+
+  test('TC-G09-F5-FRAC-MGR: fractional raw_score → 400', async () => {
+    eligibleSetup();
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 3.5 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/whole number/i);
+  });
+
+  test('TC-G09-F5-NAN-MGR: non-numeric raw_score → 400', async () => {
+    eligibleSetup();
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 'abc' }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/whole number/i);
+  });
+
+  test('TC-G09-F5-DUP-MGR: duplicate criterion_id → 400', async () => {
+    eligibleSetup();
+    const req = managerReq('1', {
+      scores: [
+        { criterion_id: 1, raw_score: 4 },
+        { criterion_id: 1, raw_score: 5 },   // duplicate
+      ],
+    });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/duplicate criterion_id/i);
+  });
+
+  test('TC-G09-F5-NEG-MGR: negative criterion_id → 400', async () => {
+    eligibleSetup();
+    const req = managerReq('1', { scores: [{ criterion_id: -1, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/positive integer/i);
+  });
+
+  test('TC-G09-F5-FRAC-EMP: fractional raw_score in self-assessment → 400', async () => {
+    eligibleSetup();
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 2.7 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/whole number/i);
+  });
+
+  test('TC-G09-F5-DUP-EMP: duplicate criterion_id in self-assessment → 400', async () => {
+    eligibleSetup();
+    const req = employeeReq('1', {
+      scores: [
+        { criterion_id: 1, raw_score: 3 },
+        { criterion_id: 1, raw_score: 4 },   // duplicate
+      ],
+    });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/duplicate criterion_id/i);
+  });
+
+  test('TC-G09-F5-VALID: valid integer scores are accepted → 201', async () => {
+    // Positive control: a submission with two valid integer scores must pass validation
+    eligibleSetup();
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    const req = managerReq('1', {
+      scores: [
+        { criterion_id: 1, raw_score: 4 },
+        { criterion_id: 2, raw_score: 5 },
+      ],
+    });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(201);
+    // No 400 errors
+    expect(res.status).not.toHaveBeenCalledWith(400);
   });
 });

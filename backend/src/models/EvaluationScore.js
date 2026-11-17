@@ -35,6 +35,11 @@ const EvaluationScore = sequelize.define('EvaluationScore', {
     allowNull: true,
     comment: 'G09-FIX: Snapshot of EvaluationCriterion.weight_percent at the time of submission. Preserves the historical breakdown even if criteria weights are later adjusted.',
   },
+  name_at_scoring: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'G09-FIX: Snapshot of EvaluationCriterion.name at the time of submission. Prevents criterion renames from changing the label shown on historical evaluation records and PDF reports.',
+  },
   weighted_contribution: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: false,

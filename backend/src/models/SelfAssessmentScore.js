@@ -34,6 +34,11 @@ const SelfAssessmentScore = sequelize.define('SelfAssessmentScore', {
     allowNull: true,
     comment: 'G45-FIX: Snapshot of criterion weight at self-assessment submission time',
   },
+  name_at_scoring: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'G09-FIX: Snapshot of EvaluationCriterion.name at the time of self-assessment submission. Prevents criterion renames from changing the label shown on historical records and PDF reports.',
+  },
   weighted_contribution: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: false,

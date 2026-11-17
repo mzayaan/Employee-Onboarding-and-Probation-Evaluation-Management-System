@@ -57,7 +57,9 @@ function buildCriteriaMap(completedCps) {
 
   completedCps.forEach((cp) => {
     (cp.managerEvaluation?.scores || []).forEach((s) => {
-      const name = s.criterion?.name ?? `Criterion ${s.criterion_id}`;
+      // G09-FIX Fix 3: prefer the frozen name snapshot so that a criterion rename
+      // after submission does not change the label shown in this PDF.
+      const name = s.name_at_scoring ?? s.criterion?.name ?? `Criterion ${s.criterion_id}`;
       // G09: prefer the snapshot weight captured at submission time.
       const snapshotWeight = Number.parseFloat(
         s.weight_percent_at_scoring ?? s.criterion?.weight_percent ?? 0
@@ -129,8 +131,14 @@ function calcCriteriaWeightedScores(criteriaList, completedCps, lastMgrScores) {
       })
       .filter((v) => v != null);
 
-    c.weightedScore = cpContributions.length > 0
-      ? cpContributions.reduce((a, b) => a + b, 0) / cpContributions.length
+    // G09-FIX denominator: divide by the TOTAL number of completed checkpoints,
+    // not only the checkpoints where this criterion appeared.  This keeps
+    // sum(c.weightedScore) == cumulativeScore even when a criterion was added
+    // or removed between checkpoints (FR-14).
+    // Example: criterion only in cp2 of 2 checkpoints contributes 50/2 = 25,
+    // not 50/1 = 50, so the per-criterion rows still sum to the cumulative footer.
+    c.weightedScore = completedCps.length > 0 && cpContributions.length > 0
+      ? cpContributions.reduce((a, b) => a + b, 0) / completedCps.length
       : null;
   });
 }
