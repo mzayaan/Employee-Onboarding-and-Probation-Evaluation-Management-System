@@ -38,3 +38,6 @@ backend/uploads/
 
 # Linux-sandbox bcrypt workaround — do NOT commit; not needed on Windows
 backend/jest.config.js
+
+# Vite temporary config bundles
+*.timestamp-*.mjs

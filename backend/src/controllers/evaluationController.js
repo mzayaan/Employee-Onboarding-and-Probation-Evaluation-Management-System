@@ -11,8 +11,25 @@
 const { createAuditLog } = require('../utils/auditLogger');
 const { calcContribution, deriveRecommendation } = require('../utils/scoringHelpers');
 
+// G09-FIX D7: use req.ip (set by Express trust-proxy) instead of the raw
+// X-Forwarded-For header which can be forged by any client.
 const getIp = (req) =>
-  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+  req.ip || req.socket?.remoteAddress || 'unknown';
+
+// G09: Probation period statuses that must reject new submissions.
+// ACTIVE and EXTENDED are the only valid states for new assessments.
+const TERMINAL_PERIOD_STATUSES = ['COMPLETED', 'CONFIRMED', 'DISMISSED'];
+
+/**
+ * Return today's calendar date in Mauritius Standard Time (UTC+4) as a
+ * 'YYYY-MM-DD' string, suitable for DATEONLY comparisons.
+ * G09-FIX D3: submission timing is enforced using local Mauritius dates so
+ * that a checkpoint due on a given day can be submitted from midnight MST.
+ */
+const todayMST = () => {
+  const MST_OFFSET_MS = 4 * 60 * 60 * 1000; // UTC+4
+  return new Date(Date.now() + MST_OFFSET_MS).toISOString().slice(0, 10);
+};
 
 // =============================================================================
 // GET /api/evaluations/probation/:profileId
@@ -212,11 +229,61 @@ const getCheckpoint = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
-    // Also return all active criteria so the form can render even before submission
-    const criteria = await EvaluationCriterion.findAll({
-      where:  { is_active: true },
-      order:  [['display_order', 'ASC'], ['criterion_id', 'ASC']],
-    });
+    // G09-FIX D4: Criteria freezing — once any submission has been made for this
+    // checkpoint the criteria configuration is frozen.  Both the manager form and
+    // the employee self-assessment form must load exactly the same criteria that
+    // were used for the first submission, even if the System Administrator changes
+    // the global configuration between submissions.
+    //
+    // If the manager evaluation already exists, return the criteria that were
+    // snapshotted in its EvaluationScore rows (using weight_percent_at_scoring).
+    // If only the self-assessment exists (employee submitted first), use those
+    // SelfAssessmentScore rows instead.
+    // If neither exists yet, return the current active criteria as normal.
+    let criteria;
+    if (checkpoint.managerEvaluation?.scores?.length > 0) {
+      // Load from manager evaluation snapshot
+      const frozenIds = checkpoint.managerEvaluation.scores.map((s) => s.criterion_id);
+      const frozenCriteriaRaw = await EvaluationCriterion.findAll({
+        where: { criterion_id: frozenIds },
+        order: [['display_order', 'ASC'], ['criterion_id', 'ASC']],
+      });
+      // Replace weight_percent with the snapshotted weight so the form reflects
+      // the exact weights that were used at submission time (FR-14).
+      criteria = frozenCriteriaRaw.map((c) => {
+        const snap = checkpoint.managerEvaluation.scores.find(
+          (s) => s.criterion_id === c.criterion_id
+        );
+        const obj = c.toJSON ? c.toJSON() : { ...c.dataValues };
+        if (snap?.weight_percent_at_scoring != null) {
+          obj.weight_percent = snap.weight_percent_at_scoring;
+        }
+        return obj;
+      });
+    } else if (checkpoint.selfAssessment?.scores?.length > 0) {
+      // Load from self-assessment snapshot (employee submitted first)
+      const frozenIds = checkpoint.selfAssessment.scores.map((s) => s.criterion_id);
+      const frozenCriteriaRaw = await EvaluationCriterion.findAll({
+        where: { criterion_id: frozenIds },
+        order: [['display_order', 'ASC'], ['criterion_id', 'ASC']],
+      });
+      criteria = frozenCriteriaRaw.map((c) => {
+        const snap = checkpoint.selfAssessment.scores.find(
+          (s) => s.criterion_id === c.criterion_id
+        );
+        const obj = c.toJSON ? c.toJSON() : { ...c.dataValues };
+        if (snap?.weight_percent_at_scoring != null) {
+          obj.weight_percent = snap.weight_percent_at_scoring;
+        }
+        return obj;
+      });
+    } else {
+      // No submission yet — return current active criteria
+      criteria = await EvaluationCriterion.findAll({
+        where:  { is_active: true },
+        order:  [['display_order', 'ASC'], ['criterion_id', 'ASC']],
+      });
+    }
 
     // ── Attendance summary for this checkpoint's date window (FR-12) ──────────
     let attendanceSummary = null;
@@ -385,6 +452,7 @@ const submitManagerEvaluation = async (req, res) => {
       EvaluationCriterion,
       ManagerEvaluation,
       EvaluationScore,
+      SelfAssessmentScore,
       PerformanceNote,
       FinalRecommendation,
       SelfAssessment,
@@ -431,6 +499,15 @@ const submitManagerEvaluation = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Manager evaluation already submitted for this checkpoint.' });
     }
 
+    // G09-FIX D2: Reject if the checkpoint itself has been cancelled.
+    // A CANCELLED checkpoint is closed for all new submissions regardless of period status.
+    if (checkpoint.status === 'CANCELLED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot submit evaluation: this evaluation checkpoint has been cancelled.',
+      });
+    }
+
     // G07: Reject submission if the probation period has been cancelled (e.g. because
     // a no-probation contract was subsequently created for this employee).
     // Preserving COMPLETED evaluations is intentional; this guard only blocks NEW ones.
@@ -441,47 +518,95 @@ const submitManagerEvaluation = async (req, res) => {
       });
     }
 
+    // G09-FIX D1: Reject if the probation period has already reached a terminal state.
+    // New assessments are only valid while the period is ACTIVE or EXTENDED.
+    if (TERMINAL_PERIOD_STATUSES.includes(checkpoint.probationPeriod?.status)) {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot submit evaluation: the probation period is already ${(checkpoint.probationPeriod.status || '').toLowerCase()}.`,
+      });
+    }
+
+    // G09-FIX D3: Submission timing — the checkpoint must be on or past its due date
+    // (Mauritius Standard Time UTC+4; DATEONLY comparison so midnight MST counts).
+    // Overdue submissions against an ACTIVE/EXTENDED period are always accepted.
+    if (checkpoint.due_date > todayMST()) {
+      return res.status(422).json({
+        success: false,
+        message: `This checkpoint is not yet due. Submissions open from ${checkpoint.due_date} (Mauritius time).`,
+      });
+    }
+
     const profile = checkpoint.probationPeriod?.employeeProfile;
     if (req.user.role === 'LINE_MANAGER' && profile?.manager_id !== req.user.user_id) {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
-    // Load active criteria to validate and compute weights
+    // G09-FIX D6: Criteria freezing for the MANAGER submission path.
+    // If the employee submitted their self-assessment first, load criteria from
+    // that snapshot so both submissions use the same frozen configuration.
+    // Otherwise load the current active criteria as normal.
     const criteriaMap = {};
-    const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
-    for (const c of allCriteria) {
-      criteriaMap[c.criterion_id] = c;
+    const existingSelfAssessment = await SelfAssessment.findOne({
+      where: { checkpoint_id: checkpointId },
+      include: [{
+        model: SelfAssessmentScore,
+        as:    'scores',
+        attributes: ['criterion_id', 'weight_percent_at_scoring'],
+      }],
+    });
+
+    let frozenByEmployee = false;
+    if (existingSelfAssessment?.scores?.length > 0) {
+      // Employee submitted first — build criteriaMap from their snapshot
+      frozenByEmployee = true;
+      const frozenIds = existingSelfAssessment.scores.map((s) => s.criterion_id);
+      const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
+      for (const c of frozenCriteria) {
+        const snap = existingSelfAssessment.scores.find((s) => s.criterion_id === c.criterion_id);
+        criteriaMap[c.criterion_id] = {
+          ...c.toJSON(),
+          weight_percent: snap?.weight_percent_at_scoring ?? c.weight_percent,
+        };
+      }
+    } else {
+      // No prior submission — load current active criteria
+      const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
+      for (const c of allCriteria) {
+        criteriaMap[c.criterion_id] = c;
+      }
+
+      // FR-10: Active criteria weights must sum to exactly 100% before any
+      // evaluation can be submitted — otherwise scores are not comparable.
+      const totalCriteriaWeight = allCriteria.reduce(
+        (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
+      );
+      if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
+        return res.status(422).json({
+          success: false,
+          message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+        });
+      }
     }
 
-    // FR-10: Active criteria weights must sum to exactly 100% before any
-    // evaluation can be submitted — otherwise scores are not comparable.
-    const totalCriteriaWeight = allCriteria.reduce(
-      (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
-    );
-    if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
-      return res.status(422).json({
-        success: false,
-        message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
-      });
-    }
-
-    // Validate all submitted scores reference active criteria
+    // Validate all submitted scores reference criteria in the (frozen or active) set
     for (const s of scores) {
       if (!criteriaMap[s.criterion_id]) {
-        return res.status(400).json({ success: false, message: `Invalid criterion_id: ${s.criterion_id}` });
+        const ctx = frozenByEmployee ? 'frozen criteria for this checkpoint' : 'active criteria';
+        return res.status(400).json({ success: false, message: `Invalid criterion_id: ${s.criterion_id}. Must match the ${ctx}.` });
       }
       if (s.raw_score < 1 || s.raw_score > 5) {
         return res.status(400).json({ success: false, message: 'Each score must be between 1 and 5.' });
       }
     }
 
-    // Ensure ALL active criteria are covered — partial submissions are rejected (FR-10)
+    // Ensure ALL criteria in the (frozen or active) set are covered — partial submissions are rejected (FR-10)
     const submittedCriteriaIds = new Set(scores.map((s) => String(s.criterion_id)));
     const missingCriteriaIds   = Object.keys(criteriaMap).filter((id) => !submittedCriteriaIds.has(id));
     if (missingCriteriaIds.length > 0) {
       return res.status(400).json({
         success: false,
-        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} active criteria. Missing criterion IDs: ${missingCriteriaIds.join(', ')}.`,
+        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} criteria. Missing criterion IDs: ${missingCriteriaIds.join(', ')}.`,
       });
     }
 
@@ -662,6 +787,7 @@ const submitSelfAssessment = async (req, res) => {
       EmployeeProfile,
       EvaluationCriterion,
       ManagerEvaluation,
+      EvaluationScore,
       SelfAssessment,
       SelfAssessmentScore,
       FinalRecommendation,
@@ -714,6 +840,14 @@ const submitSelfAssessment = async (req, res) => {
       return res.status(409).json({ success: false, message: 'Self-assessment already submitted for this checkpoint.' });
     }
 
+    // G09-FIX D2: Reject if the checkpoint itself has been cancelled.
+    if (checkpoint.status === 'CANCELLED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot submit self-assessment: this evaluation checkpoint has been cancelled.',
+      });
+    }
+
     // G07: Reject submission if the probation period has been cancelled.
     if (checkpoint.probationPeriod?.status === 'CANCELLED') {
       return res.status(409).json({
@@ -722,43 +856,87 @@ const submitSelfAssessment = async (req, res) => {
       });
     }
 
-    // Load active criteria
-    const criteriaMap = {};
-    const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
-    for (const c of allCriteria) {
-      criteriaMap[c.criterion_id] = c;
-    }
-
-    // BUG-12 fix: Same weight-total validation as submitManagerEvaluation.
-    // Self-assessment scores are weighted using the same criteria, so they must
-    // also total 100% to produce a meaningful self_score.
-    const totalCriteriaWeight = allCriteria.reduce(
-      (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
-    );
-    if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
-      return res.status(422).json({
+    // G09-FIX D1: Reject if the probation period has already reached a terminal state.
+    if (TERMINAL_PERIOD_STATUSES.includes(checkpoint.probationPeriod?.status)) {
+      return res.status(409).json({
         success: false,
-        message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+        message: `Cannot submit self-assessment: the probation period is already ${(checkpoint.probationPeriod.status || '').toLowerCase()}.`,
       });
     }
 
-    // Validate scores
+    // G09-FIX D3: Submission timing — the checkpoint must be on or past its due date
+    // (Mauritius Standard Time UTC+4; DATEONLY comparison).
+    if (checkpoint.due_date > todayMST()) {
+      return res.status(422).json({
+        success: false,
+        message: `This checkpoint is not yet due. Submissions open from ${checkpoint.due_date} (Mauritius time).`,
+      });
+    }
+
+    // G09-FIX D5: Criteria freezing for the EMPLOYEE self-assessment path.
+    // If the manager submitted their evaluation first, load criteria from that
+    // snapshot so both submissions use the same frozen configuration (FR-14).
+    // Otherwise load the current active criteria as normal.
+    const criteriaMap = {};
+    const existingManagerForFreeze = await ManagerEvaluation.findOne({
+      where: { checkpoint_id: checkpointId },
+      include: [{
+        model: EvaluationScore,
+        as:    'scores',
+        attributes: ['criterion_id', 'weight_percent_at_scoring'],
+      }],
+    });
+
+    let frozenByManager = false;
+    if (existingManagerForFreeze?.scores?.length > 0) {
+      // Manager submitted first — build criteriaMap from their snapshot
+      frozenByManager = true;
+      const frozenIds = existingManagerForFreeze.scores.map((s) => s.criterion_id);
+      const frozenCriteria = await EvaluationCriterion.findAll({ where: { criterion_id: frozenIds } });
+      for (const c of frozenCriteria) {
+        const snap = existingManagerForFreeze.scores.find((s) => s.criterion_id === c.criterion_id);
+        criteriaMap[c.criterion_id] = {
+          ...c.toJSON(),
+          weight_percent: snap?.weight_percent_at_scoring ?? c.weight_percent,
+        };
+      }
+    } else {
+      // No prior submission — load current active criteria
+      const allCriteria = await EvaluationCriterion.findAll({ where: { is_active: true } });
+      for (const c of allCriteria) {
+        criteriaMap[c.criterion_id] = c;
+      }
+
+      // BUG-12 fix: Same weight-total validation as submitManagerEvaluation.
+      const totalCriteriaWeight = allCriteria.reduce(
+        (sum, c) => sum + Number.parseFloat(c.weight_percent), 0
+      );
+      if (Math.abs(totalCriteriaWeight - 100) > 0.01) {
+        return res.status(422).json({
+          success: false,
+          message: `Evaluation criteria weights must total 100%. Current total: ${totalCriteriaWeight.toFixed(2)}%. Please ask the System Administrator to update the criteria configuration.`,
+        });
+      }
+    }
+
+    // Validate scores against the (frozen or active) criteria set
     for (const s of scores) {
       if (!criteriaMap[s.criterion_id]) {
-        return res.status(400).json({ success: false, message: `Invalid criterion_id: ${s.criterion_id}` });
+        const ctx = frozenByManager ? 'frozen criteria for this checkpoint' : 'active criteria';
+        return res.status(400).json({ success: false, message: `Invalid criterion_id: ${s.criterion_id}. Must match the ${ctx}.` });
       }
       if (s.raw_score < 1 || s.raw_score > 5) {
         return res.status(400).json({ success: false, message: 'Each score must be between 1 and 5.' });
       }
     }
 
-    // Ensure ALL active criteria are covered — partial submissions are rejected (FR-10)
+    // Ensure ALL criteria are covered — partial submissions are rejected (FR-10)
     const submittedSelfCriteriaIds = new Set(scores.map((s) => String(s.criterion_id)));
     const missingSelfCriteriaIds   = Object.keys(criteriaMap).filter((id) => !submittedSelfCriteriaIds.has(id));
     if (missingSelfCriteriaIds.length > 0) {
       return res.status(400).json({
         success: false,
-        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} active criteria. Missing criterion IDs: ${missingSelfCriteriaIds.join(', ')}.`,
+        message: `Scores must be provided for all ${Object.keys(criteriaMap).length} criteria. Missing criterion IDs: ${missingSelfCriteriaIds.join(', ')}.`,
       });
     }
 
