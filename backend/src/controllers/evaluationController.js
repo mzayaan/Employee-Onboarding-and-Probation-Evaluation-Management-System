@@ -505,6 +505,10 @@ const submitManagerEvaluation = async (req, res) => {
       late_arrivals           = 0,
     } = req.body;
 
+    // G09-FIX Fix 5: guard before .length to prevent TypeError on null/non-array input.
+    if (!Array.isArray(scores)) {
+      return res.status(400).json({ success: false, message: 'scores must be an array.' });
+    }
     if (!scores.length) {
       return res.status(400).json({ success: false, message: 'At least one score is required.' });
     }
@@ -584,13 +588,18 @@ const submitManagerEvaluation = async (req, res) => {
     // Semantic validation (valid criterion_id, complete coverage) and score building
     // happen inside the transaction after criteria are loaded atomically (Fix 1).
     {
+      if (!Array.isArray(scores)) {
+        return res.status(400).json({ success: false, message: 'scores must be an array.' });
+      }
       const seenCriterionIds = new Set();
       for (const s of scores) {
         if (s == null) {
           return res.status(400).json({ success: false, message: 'Score entries must not be null.' });
         }
-        if (typeof s.criterion_id === 'boolean' || typeof s.raw_score === 'boolean') {
-          return res.status(400).json({ success: false, message: 'criterion_id and raw_score must be numbers, not booleans.' });
+        // Reject booleans AND objects/arrays — both coerce to numbers silently.
+        if (typeof s.criterion_id === 'boolean' || typeof s.criterion_id === 'object' ||
+            typeof s.raw_score   === 'boolean' || typeof s.raw_score   === 'object') {
+          return res.status(400).json({ success: false, message: 'criterion_id and raw_score must be numbers or numeric strings, not booleans or arrays.' });
         }
         const idStr = String(s.criterion_id ?? '').trim();
         if (!/^\d+$/.test(idStr)) {
@@ -677,7 +686,12 @@ const submitManagerEvaluation = async (req, res) => {
         include: [{
           model:      SelfAssessmentScore,
           as:         'scores',
-          attributes: ['criterion_id', 'weight_percent_at_scoring'],
+          // G09-FIX: also fetch raw_score + weighted_contribution so the original
+          // weight can be recovered when weight_percent_at_scoring is NULL (pre-G09
+          // rows).  name_at_scoring is fetched so the second submission freezes the
+          // same label as the first (FR-14).
+          attributes: ['criterion_id', 'weight_percent_at_scoring', 'name_at_scoring',
+                       'raw_score', 'weighted_contribution'],
         }],
         transaction: t,
       });
@@ -692,11 +706,30 @@ const submitManagerEvaluation = async (req, res) => {
         });
         for (const c of frozenCriteria) {
           const base = c.toJSON ? c.toJSON() : { ...c.dataValues };
+          const snap = txSelfSnap.scores.find((s) => s.criterion_id === c.criterion_id);
           if (!hasNullWeight) {
-            const snap = txSelfSnap.scores.find((s) => s.criterion_id === c.criterion_id);
             base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
+          } else {
+            // G09-FIX Fix 3 (corrected): recover the original weight from the stored
+            // contribution so the second submission does not silently use a different
+            // weight than the first (FR-14).
+            // weight_original = (weighted_contribution × 5) / raw_score
+            const rc = Number.parseFloat(snap.weighted_contribution);
+            const rs = Number.parseFloat(snap.raw_score);
+            if (rs > 0 && Number.isFinite(rc) && Number.isFinite(rs)) {
+              base.weight_percent = Number.parseFloat(((rc * 5) / rs).toFixed(2));
+            } else {
+              throw new EligibilityError(422, {
+                success: false,
+                message: 'The existing submission for this checkpoint predates weight tracking and the original weight cannot be recovered. Please contact your System Administrator.',
+              });
+            }
           }
-          // hasNullWeight case: use the current weight_percent from the criterion row
+          // G09-FIX Fix 2: carry the frozen criterion name so a rename after the
+          // first submission does not corrupt the second submission's stored label.
+          if (snap?.name_at_scoring != null) {
+            base.name = snap.name_at_scoring;
+          }
           txCriteriaMap[c.criterion_id] = base;
         }
       }
@@ -942,6 +975,10 @@ const submitSelfAssessment = async (req, res) => {
       employee_acknowledgement_date,
     } = req.body;
 
+    // G09-FIX Fix 5: guard before .length to prevent TypeError on null/non-array input.
+    if (!Array.isArray(scores)) {
+      return res.status(400).json({ success: false, message: 'scores must be an array.' });
+    }
     if (!scores.length) {
       return res.status(400).json({ success: false, message: 'At least one score is required.' });
     }
@@ -1011,13 +1048,18 @@ const submitSelfAssessment = async (req, res) => {
     // Semantic validation, score building, and totalSelfScore happen inside the
     // transaction after criteria are loaded atomically (Fix 1).
     {
+      if (!Array.isArray(scores)) {
+        return res.status(400).json({ success: false, message: 'scores must be an array.' });
+      }
       const seenCriterionIds = new Set();
       for (const s of scores) {
         if (s == null) {
           return res.status(400).json({ success: false, message: 'Score entries must not be null.' });
         }
-        if (typeof s.criterion_id === 'boolean' || typeof s.raw_score === 'boolean') {
-          return res.status(400).json({ success: false, message: 'criterion_id and raw_score must be numbers, not booleans.' });
+        // Reject booleans AND objects/arrays — both coerce to numbers silently.
+        if (typeof s.criterion_id === 'boolean' || typeof s.criterion_id === 'object' ||
+            typeof s.raw_score   === 'boolean' || typeof s.raw_score   === 'object') {
+          return res.status(400).json({ success: false, message: 'criterion_id and raw_score must be numbers or numeric strings, not booleans or arrays.' });
         }
         const idStr = String(s.criterion_id ?? '').trim();
         if (!/^\d+$/.test(idStr)) {
@@ -1107,7 +1149,12 @@ const submitSelfAssessment = async (req, res) => {
         include: [{
           model:      EvaluationScore,
           as:         'scores',
-          attributes: ['criterion_id', 'weight_percent_at_scoring'],
+          // G09-FIX: also fetch raw_score + weighted_contribution so the original
+          // weight can be recovered when weight_percent_at_scoring is NULL (pre-G09
+          // rows).  name_at_scoring is fetched so the second submission freezes the
+          // same label as the first (FR-14).
+          attributes: ['criterion_id', 'weight_percent_at_scoring', 'name_at_scoring',
+                       'raw_score', 'weighted_contribution'],
         }],
         transaction: t,
       });
@@ -1122,11 +1169,30 @@ const submitSelfAssessment = async (req, res) => {
         });
         for (const c of frozenCriteria) {
           const base = c.toJSON ? c.toJSON() : { ...c.dataValues };
+          const snap = txMgrSnap.scores.find((s) => s.criterion_id === c.criterion_id);
           if (!hasNullWeight) {
-            const snap = txMgrSnap.scores.find((s) => s.criterion_id === c.criterion_id);
             base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
+          } else {
+            // G09-FIX Fix 3 (corrected): recover the original weight from the stored
+            // contribution so the second submission does not silently use a different
+            // weight than the first (FR-14).
+            // weight_original = (weighted_contribution × 5) / raw_score
+            const rc = Number.parseFloat(snap.weighted_contribution);
+            const rs = Number.parseFloat(snap.raw_score);
+            if (rs > 0 && Number.isFinite(rc) && Number.isFinite(rs)) {
+              base.weight_percent = Number.parseFloat(((rc * 5) / rs).toFixed(2));
+            } else {
+              throw new EligibilityError(422, {
+                success: false,
+                message: 'The existing submission for this checkpoint predates weight tracking and the original weight cannot be recovered. Please contact your System Administrator.',
+              });
+            }
           }
-          // hasNullWeight case: use current weight_percent from the criterion row
+          // G09-FIX Fix 2: carry the frozen criterion name so a rename after the
+          // first submission does not corrupt the second submission's stored label.
+          if (snap?.name_at_scoring != null) {
+            base.name = snap.name_at_scoring;
+          }
           txCriteriaMapSelf[c.criterion_id] = base;
         }
       }

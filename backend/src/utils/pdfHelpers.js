@@ -60,10 +60,23 @@ function buildCriteriaMap(completedCps) {
       // G09-FIX Fix 3: prefer the frozen name snapshot so that a criterion rename
       // after submission does not change the label shown in this PDF.
       const name = s.name_at_scoring ?? s.criterion?.name ?? `Criterion ${s.criterion_id}`;
-      // G09: prefer the snapshot weight captured at submission time.
-      const snapshotWeight = Number.parseFloat(
-        s.weight_percent_at_scoring ?? s.criterion?.weight_percent ?? 0
-      );
+      // G09-FIX Fix 3 (corrected): prefer the snapshot weight captured at submission
+      // time.  For pre-G09 rows where weight_percent_at_scoring is NULL, recover the
+      // original weight from the stored contribution before falling back to the
+      // current criterion weight (which may have been changed by an admin).
+      let snapshotWeight;
+      if (s.weight_percent_at_scoring != null) {
+        snapshotWeight = Number.parseFloat(s.weight_percent_at_scoring);
+      } else {
+        const rc = Number.parseFloat(s.weighted_contribution);
+        const rs = Number.parseFloat(s.raw_score);
+        if (rs > 0 && Number.isFinite(rc) && Number.isFinite(rs)) {
+          snapshotWeight = Number.parseFloat(((rc * 5) / rs).toFixed(2));
+        } else {
+          // Last resort: use current criterion weight.
+          snapshotWeight = Number.parseFloat(s.criterion?.weight_percent ?? 0);
+        }
+      }
 
       if (!criteriaMap[name]) {
         criteriaMap[name] = {

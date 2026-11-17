@@ -674,8 +674,16 @@ describe('Fix 3 — name_at_scoring saved in EvaluationScore rows at submission 
 // historical consistency: both submitters always cover the same criterion set.
 describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current weights', () => {
   test('TC-G09-F4-MGR: employee snapshot has NULL weights → manager must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
-    // Employee self-assessment has criterion_id=1 with NULL weight (pre-G09 row)
-    const nullWeightScores = [{ criterion_id: 1, weight_percent_at_scoring: null }];
+    // Employee self-assessment has criterion_id=1 with NULL weight (pre-G09 row).
+    // raw_score=4 and weighted_contribution=80 let the controller recover the original
+    // weight:  (80 × 5) / 4 = 100 — matching the active criterion weight below.
+    const nullWeightScores = [{
+      criterion_id: 1,
+      weight_percent_at_scoring: null,
+      raw_score:              4,
+      weighted_contribution:  80,
+      name_at_scoring:        null,
+    }];
     const selfAssessmentMock = { assessment_id: 99, scores: nullWeightScores };
 
     const cp = makeCheckpoint({ due_date: '2020-01-01' });
@@ -719,8 +727,16 @@ describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current 
   });
 
   test('TC-G09-F4-EMP: manager snapshot has NULL weights → employee must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
-    // Manager evaluation has criterion_id=1 with NULL weight (pre-G09 row)
-    const nullWeightScores = [{ criterion_id: 1, weight_percent_at_scoring: null }];
+    // Manager evaluation has criterion_id=1 with NULL weight (pre-G09 row).
+    // raw_score=4 and weighted_contribution=80 let the controller recover the original
+    // weight:  (80 × 5) / 4 = 100 — matching the active criterion weight below.
+    const nullWeightScores = [{
+      criterion_id: 1,
+      weight_percent_at_scoring: null,
+      raw_score:              4,
+      weighted_contribution:  80,
+      name_at_scoring:        null,
+    }];
     const managerEvalMock = { eval_id: 50, scores: nullWeightScores };
 
     const cp = makeCheckpoint({ due_date: '2020-01-01' });
@@ -865,5 +881,325 @@ describe('Fix 5 — score payload validation rejects invalid inputs', () => {
     expect(res.status).toHaveBeenCalledWith(201);
     // No 400 errors
     expect(res.status).not.toHaveBeenCalledWith(400);
+  });
+
+  // ── Issue 3: array coercion and null scores ──────────────────────────────
+
+  test('TC-G09-F5-NULL-MGR: scores=null → 400 (not 500)', async () => {
+    eligibleSetup();
+    const req = managerReq('1', { scores: null });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/scores must be an array/i);
+    expect(res.status).not.toHaveBeenCalledWith(500);
+  });
+
+  test('TC-G09-F5-NULL-EMP: scores=null in self-assessment → 400 (not 500)', async () => {
+    eligibleSetup();
+    const req = employeeReq('1', { scores: null });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/scores must be an array/i);
+    expect(res.status).not.toHaveBeenCalledWith(500);
+  });
+
+  test('TC-G09-F5-ARR-RAW-MGR: raw_score=[5] (array) → 400', async () => {
+    eligibleSetup();
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: [5] }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/booleans or arrays/i);
+  });
+
+  test('TC-G09-F5-ARR-CID-MGR: criterion_id=[1] (array) → 400', async () => {
+    eligibleSetup();
+    const req = managerReq('1', { scores: [{ criterion_id: [1], raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/booleans or arrays/i);
+  });
+
+  test('TC-G09-F5-ARR-RAW-EMP: raw_score=[5] (array) in self-assessment → 400', async () => {
+    eligibleSetup();
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: [5] }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/booleans or arrays/i);
+  });
+
+  test('TC-G09-F5-ARR-CID-EMP: criterion_id=[1] (array) in self-assessment → 400', async () => {
+    eligibleSetup();
+    const req = employeeReq('1', { scores: [{ criterion_id: [1], raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].message).toMatch(/booleans or arrays/i);
+  });
+});
+
+// =============================================================================
+// Fix 3b — name carry-through from first-submitter snapshot (Issue 2)
+//
+// When the first submitter's snapshot has a name_at_scoring value, the second
+// submission must carry that same name into its own score rows so that criterion
+// renames after the first submission do not corrupt the second submission's label.
+// FR-14 — historical scoring data must remain consistent across both submissions.
+// =============================================================================
+
+describe('Fix 3b — name_at_scoring carried from first-submitter snapshot', () => {
+  /**
+   * Snapshot with a frozen name and valid weight/contribution so that weight
+   * recovery succeeds and the name test can reach bulkCreate.
+   */
+  function makeNamedSnapshot(frozenName) {
+    return [{
+      criterion_id:              1,
+      weight_percent_at_scoring: null,          // pre-G09 row: weight must be recovered
+      name_at_scoring:           frozenName,
+      raw_score:                 4,
+      weighted_contribution:     80,            // recovered weight = (80×5)/4 = 100
+    }];
+  }
+
+  test('TC-G09-F3B-MGR: manager uses employee frozen name ("Quality") even after criterion renamed', async () => {
+    // Employee submitted first with criterion named "Quality".
+    // The criterion has since been renamed to "Renamed after first submission".
+    const selfAssessmentMock = { assessment_id: 99, scores: makeNamedSnapshot('Quality') };
+
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock)   // outer fast-path
+      .mockResolvedValueOnce(selfAssessmentMock)   // inner freeze check
+      .mockResolvedValueOnce({ assessment_id: 99 }); // selfAssessmentDone check
+    // Current name on the criterion is "Renamed after first submission"
+    const renamedCriterion = {
+      criterion_id:   1,
+      name:           'Renamed after first submission',
+      weight_percent: 100,
+      is_active:      true,
+      toJSON: jest.fn().mockReturnValue({
+        criterion_id:   1,
+        name:           'Renamed after first submission',
+        weight_percent: 100,
+      }),
+    };
+    models.EvaluationCriterion.findAll.mockResolvedValue([renamedCriterion]);
+    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
+    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(models.EvaluationScore.bulkCreate).toHaveBeenCalled();
+    const bulkArg = models.EvaluationScore.bulkCreate.mock.calls[0][0];
+    expect(bulkArg[0].name_at_scoring).toBe('Quality');
+    // Must NOT store the post-rename name
+    expect(bulkArg[0].name_at_scoring).not.toBe('Renamed after first submission');
+  });
+
+  test('TC-G09-F3B-EMP: employee uses manager frozen name ("Quality") even after criterion renamed', async () => {
+    const managerEvalMock = { eval_id: 50, scores: makeNamedSnapshot('Quality') };
+
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne
+      .mockResolvedValueOnce(managerEvalMock)   // outer fast-path
+      .mockResolvedValueOnce(managerEvalMock)   // inner freeze check
+      .mockResolvedValueOnce(managerEvalMock);  // managerDone check
+    const renamedCriterion = {
+      criterion_id:   1,
+      name:           'Renamed after first submission',
+      weight_percent: 100,
+      is_active:      true,
+      toJSON: jest.fn().mockReturnValue({
+        criterion_id:   1,
+        name:           'Renamed after first submission',
+        weight_percent: 100,
+      }),
+    };
+    models.EvaluationCriterion.findAll.mockResolvedValue([renamedCriterion]);
+    models.SelfAssessment.create.mockResolvedValue({ assessment_id: 20 });
+    models.SelfAssessmentScore.bulkCreate.mockResolvedValue([]);
+
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(models.SelfAssessmentScore.bulkCreate).toHaveBeenCalled();
+    const bulkArg = models.SelfAssessmentScore.bulkCreate.mock.calls[0][0];
+    expect(bulkArg[0].name_at_scoring).toBe('Quality');
+    expect(bulkArg[0].name_at_scoring).not.toBe('Renamed after first submission');
+  });
+});
+
+// =============================================================================
+// Fix 3c — weight recovery from stored contribution (Issue 1)
+//
+// When a pre-G09 row has weight_percent_at_scoring = NULL but valid
+// weighted_contribution and raw_score, the controller must recover the original
+// weight via (weighted_contribution × 5) / raw_score instead of silently
+// substituting a changed current weight.
+// When recovery is impossible (raw_score = 0 or nulls), the submission must
+// be rejected with 422 to prevent silent data corruption.
+// FR-14 — historical scoring data must remain consistent.
+// =============================================================================
+
+describe('Fix 3c — weight recovery from stored contribution', () => {
+  function eligibleSetupSingle() {
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    return cp;
+  }
+
+  test('TC-G09-F3C-WR-MGR: NULL weight + valid rc/rs → recovered weight used, 201', async () => {
+    // Employee snapshot: weight_percent_at_scoring=NULL, rc=20, rs=4 → weight = (20×5)/4 = 25
+    const selfAssessmentMock = {
+      assessment_id: 99,
+      scores: [{
+        criterion_id:              1,
+        weight_percent_at_scoring: null,
+        name_at_scoring:           null,
+        raw_score:                 4,
+        weighted_contribution:     20,   // original weight = (20×5)/4 = 25
+      }],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock)   // outer check
+      .mockResolvedValueOnce(selfAssessmentMock)   // inner freeze check
+      .mockResolvedValueOnce({ assessment_id: 99 }); // selfAssessmentDone
+    // Active criterion has weight 25 (matches recovered weight)
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 25)]);
+    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
+    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    // The bulkCreate row should use the RECOVERED weight (25), not any other value
+    expect(models.EvaluationScore.bulkCreate).toHaveBeenCalled();
+    const bulkArg = models.EvaluationScore.bulkCreate.mock.calls[0][0];
+    expect(bulkArg[0].weight_percent_at_scoring).toBe(25);
+  });
+
+  test('TC-G09-F3C-WR-EMP: NULL weight + valid rc/rs → recovered weight used, 201', async () => {
+    // Manager snapshot: weight_percent_at_scoring=NULL, rc=20, rs=4 → weight = 25
+    const managerEvalMock = {
+      eval_id: 50,
+      scores: [{
+        criterion_id:              1,
+        weight_percent_at_scoring: null,
+        name_at_scoring:           null,
+        raw_score:                 4,
+        weighted_contribution:     20,
+      }],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne
+      .mockResolvedValueOnce(managerEvalMock)   // outer check
+      .mockResolvedValueOnce(managerEvalMock)   // inner freeze check
+      .mockResolvedValueOnce(managerEvalMock);  // managerDone check
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 25)]);
+    models.SelfAssessment.create.mockResolvedValue({ assessment_id: 20 });
+    models.SelfAssessmentScore.bulkCreate.mockResolvedValue([]);
+
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(models.SelfAssessmentScore.bulkCreate).toHaveBeenCalled();
+    const bulkArg = models.SelfAssessmentScore.bulkCreate.mock.calls[0][0];
+    expect(bulkArg[0].weight_percent_at_scoring).toBe(25);
+  });
+
+  test('TC-G09-F3C-UNREC-MGR: NULL weight + raw_score=0 → 422 (unrecoverable)', async () => {
+    // raw_score = 0 means division would produce Infinity/NaN → must reject
+    const selfAssessmentMock = {
+      assessment_id: 99,
+      scores: [{
+        criterion_id:              1,
+        weight_percent_at_scoring: null,
+        name_at_scoring:           null,
+        raw_score:                 0,
+        weighted_contribution:     0,
+      }],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock)
+      .mockResolvedValueOnce(selfAssessmentMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].message).toMatch(/cannot be recovered/i);
+    expect(res.status).not.toHaveBeenCalledWith(500);
+  });
+
+  test('TC-G09-F3C-UNREC-EMP: NULL weight + raw_score=0 → 422 (unrecoverable)', async () => {
+    const managerEvalMock = {
+      eval_id: 50,
+      scores: [{
+        criterion_id:              1,
+        weight_percent_at_scoring: null,
+        name_at_scoring:           null,
+        raw_score:                 0,
+        weighted_contribution:     0,
+      }],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne
+      .mockResolvedValueOnce(managerEvalMock)
+      .mockResolvedValueOnce(managerEvalMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].message).toMatch(/cannot be recovered/i);
+    expect(res.status).not.toHaveBeenCalledWith(500);
   });
 });
