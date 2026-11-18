@@ -350,27 +350,29 @@ describe('calcCriteriaWeightedScores', () => {
     expect(total).not.toBeCloseTo(84, 1);
   });
 
-  // TC-PDF-015: when weighted_contribution is NULL the formula falls through to
-  // (raw/5)*weight even when weightUnresolvable is true (contribution unavailable).
-  it('TC-PDF-015: falls back to (raw/5)*weight when weighted_contribution is null despite weightUnresolvable', () => {
-    // This covers the case where even the stored contribution is missing.
-    // The PDF must still render (using current weight as the best approximation)
-    // rather than producing null, so the row is not silently dropped.
+  // TC-PDF-015: when BOTH weight_percent_at_scoring AND weighted_contribution are
+  // unavailable the criterion breakdown is marked as unavailable (null) rather
+  // than being recalculated from the current weight.  Recalculating would present
+  // the current weight as a historical fact, which is misleading (G09, FR-14).
+  it('TC-PDF-015: weightedScore is null when weightUnresolvable and weighted_contribution is null', () => {
+    // Both the original weight and the stored contribution are unavailable.
+    // The PDF renderer will show "—" for this criterion row rather than a
+    // potentially incorrect figure derived from the current weight.
     const criteriaList = [{
       name: 'Teamwork',
       criterion_id: 3,
-      weight: 50, // current (fallback)
+      weight: 50, // current (fallback — NOT used for recalculation)
       cpScores: {
         10: {
           raw_score:            4,
           weight:               50,
           weightUnresolvable:   true,
-          weighted_contribution: null, // unavailable
+          weighted_contribution: null, // unavailable — breakdown cannot be recovered
         },
       },
     }];
     calcCriteriaWeightedScores(criteriaList, [{ checkpoint_id: 10 }], []);
-    // Falls back to (4/5)*50 = 40 — better than null.
-    expect(criteriaList[0].weightedScore).toBeCloseTo(40, 5);
+    // Must be null — not 40 from (4/5)*50 recalculation.
+    expect(criteriaList[0].weightedScore).toBeNull();
   });
 });

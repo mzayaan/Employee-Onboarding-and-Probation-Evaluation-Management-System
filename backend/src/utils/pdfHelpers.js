@@ -153,12 +153,16 @@ function calcCriteriaWeightedScores(criteriaList, completedCps, lastMgrScores) {
         const entry = c.cpScores[cp.checkpoint_id];
         if (!entry) return null;
         // G09: for pre-G09 rows where the original weight is unresolvable,
-        // use the stored weighted_contribution directly when it is available.
+        // use the stored weighted_contribution directly when available.
         // This prevents the current (post-change) weight being applied
         // retroactively to historical scores, which would misrepresent the
         // recorded outcome (e.g. stored 50/10 becoming 64/20 = 84 instead of 60).
-        if (entry.weightUnresolvable && entry.weighted_contribution != null) {
-          return entry.weighted_contribution;
+        // When BOTH the weight AND the contribution are unavailable the breakdown
+        // is entirely unknown — return null so the PDF renderer can mark that
+        // criterion as "Unavailable" rather than substituting current-weight
+        // recalculation as a historical fact (G09, FR-14).
+        if (entry.weightUnresolvable) {
+          return entry.weighted_contribution != null ? entry.weighted_contribution : null;
         }
         return (entry.raw_score / 5) * entry.weight;
       })

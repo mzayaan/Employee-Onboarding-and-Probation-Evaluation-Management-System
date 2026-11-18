@@ -293,6 +293,22 @@ describe('note boundary regression — allNotes must use completedCps, not all c
     expect(flattenNotes(completedCps)).toHaveLength(0);
   });
 
+  // ─── TC-RGR-011..014: G09 PDF renderer — weightUnresolvable display logic ───
+  //
+  // These tests exercise the layer between the pure helpers (pdfHelpers.js) and
+  // the PDFKit renderer (pdfController.js).  Rather than invoking PDFKit, they
+  // verify that the values fed into the renderer are correct:
+  //   • calcCriteriaWeightedScores produces the right weightedScore per criterion.
+  //   • The rendering decision logic (WT label, denominator, progress-bar guard)
+  //     is deterministically exercisable from those values.
+  //
+  // TC-RGR-011: 50 + 10 = 60 (stored contributions, not 84 from current weights)
+  // TC-RGR-012: null weighted_contribution + weightUnresolvable → null weightedScore
+  // TC-RGR-013: WT column rendering logic — unresolvable → 'Unavail.'
+  // TC-RGR-014: WGT column rendering logic — unresolvable → no "/weight" denominator
+
+  // TC-RGR-011..014 are appended after this describe block (see below).
+
   // TC-RGR-010: note added to an in-scope checkpoint AFTER Director approval is excluded
   //
   // This is the second-level filter identified in code review: completedCps already
@@ -336,5 +352,150 @@ describe('note boundary regression — allNotes must use completedCps, not all c
     expect(filteredNotes).toHaveLength(1);
     expect(filteredNotes[0].note_text).toBe('Early observation');
     expect(filteredNotes.map((n) => n.note_text)).not.toContain('Retrospective note');
+  });
+});
+
+// ─── TC-RGR-011..014: G09 PDF renderer — weightUnresolvable display logic ─────
+//
+// These tests verify the values that feed the PDF renderer for the two G09
+// unresolvable-weight scenarios, and the pure rendering-decision logic that
+// maps those values to displayed text.  PDFKit is not invoked; instead the
+// tests confirm that:
+//   • calcCriteriaWeightedScores returns the correct weightedScore per criterion.
+//   • The WT column, WGT column and progress-bar conditional logic, expressed as
+//     pure functions over those values, produce the right output strings/flags.
+//
+// Scenario A (TC-RGR-011): stored contributions present — 50 + 10 = 60, not 84.
+// Scenario B (TC-RGR-012): both weight and contribution unavailable — null.
+// TC-RGR-013: WT column rendering — unresolvable → 'Unavail.', not 'NN%'.
+// TC-RGR-014: WGT column rendering — unresolvable → no "/weight" denominator.
+
+const { calcCriteriaWeightedScores } = require('../utils/pdfHelpers');
+
+// Pure helper that mirrors the WT-label decision in pdfController Section 1:
+//   const wtLabel = c.weightUnresolvable ? 'Unavail.' : `${toFixed(c.weight)}%`;
+const renderWtLabel = (c) =>
+  c.weightUnresolvable
+    ? 'Unavail.'
+    : `${Number.parseFloat(c.weight).toFixed(0)}%`;
+
+// Pure helper that mirrors the WGT-text decision in pdfController Section 1:
+//   wgtTxt = weightedScore != null
+//     ? (weightUnresolvable ? fmtScore(ws) : `${fmtScore(ws)}/${weight}`)
+//     : '—'
+const fmtScore = (v) => Number.parseFloat(v).toFixed(1);
+const renderWgtText = (c) => {
+  if (c.weightedScore != null) {
+    return c.weightUnresolvable
+      ? fmtScore(c.weightedScore)
+      : `${fmtScore(c.weightedScore)}/${Number.parseFloat(c.weight).toFixed(0)}`;
+  }
+  return '—';
+};
+
+// Pure helper that mirrors the progress-bar guard in pdfController Section 1:
+//   if (!c.weightUnresolvable) { progressBar(...) }
+const shouldRenderProgressBar = (c) => !c.weightUnresolvable;
+
+describe('G09 PDF renderer — weightUnresolvable display logic (TC-RGR-011..014)', () => {
+
+  // TC-RGR-011: Scenario A — stored contributions 50 and 10 produce a total
+  // of 60, not 84 from recalculation against current weights of 80 and 20.
+  it('TC-RGR-011: stored contributions 50+10=60 — historical total preserved, not recalculated as 84', () => {
+    const criteriaList = [
+      {
+        name: 'Performance',
+        criterion_id: 1,
+        weight: 80,          // current (post-change) — must NOT be used for the weighted score
+        cpScores: {
+          10: { raw_score: 4, weight: 80, weightUnresolvable: true, weighted_contribution: 50 },
+        },
+      },
+      {
+        name: 'Attendance',
+        criterion_id: 2,
+        weight: 20,          // current (post-change)
+        cpScores: {
+          10: { raw_score: 5, weight: 20, weightUnresolvable: true, weighted_contribution: 10 },
+        },
+      },
+    ];
+    const completedCps = [{ checkpoint_id: 10 }];
+
+    calcCriteriaWeightedScores(criteriaList, completedCps, []);
+
+    // Individual weightedScores must equal the stored contributions.
+    expect(criteriaList[0].weightedScore).toBeCloseTo(50, 5);  // not 64 from (4/5)*80
+    expect(criteriaList[1].weightedScore).toBeCloseTo(10, 5);  // not 20 from (5/5)*20
+
+    // Sum of rendered weighted scores must be 60 (historical), not 84 (recalculated).
+    const renderedTotal = criteriaList.reduce((s, c) => s + c.weightedScore, 0);
+    expect(renderedTotal).toBeCloseTo(60, 5);
+    expect(renderedTotal).not.toBeCloseTo(84, 1);
+  });
+
+  // TC-RGR-012: Scenario B — both weight_percent_at_scoring and
+  // weighted_contribution are unavailable → weightedScore must be null so the
+  // renderer shows "—" rather than a figure derived from the current weight.
+  it('TC-RGR-012: null weighted_contribution + weightUnresolvable → null weightedScore (marked unavailable)', () => {
+    const criteriaList = [{
+      name: 'Teamwork',
+      criterion_id: 3,
+      weight: 50,  // current — must NOT be used for recalculation
+      cpScores: {
+        10: {
+          raw_score:            4,
+          weight:               50,
+          weightUnresolvable:   true,
+          weighted_contribution: null,  // unavailable
+        },
+      },
+    }];
+
+    calcCriteriaWeightedScores(criteriaList, [{ checkpoint_id: 10 }], []);
+
+    // Must be null — not 40 from (4/5)*50 recalculation.
+    expect(criteriaList[0].weightedScore).toBeNull();
+  });
+
+  // TC-RGR-013: WT column rendering — unresolvable criteria show 'Unavail.'
+  // rather than a numeric weight (even with the current weight available as a
+  // fallback), so the report does not present unverified data as historical fact.
+  it('TC-RGR-013: WT column renders "Unavail." for unresolvable criteria, numeric % for resolved', () => {
+    const unresolvable = { weight: 80, weightUnresolvable: true  };
+    const resolved     = { weight: 30, weightUnresolvable: false };
+
+    expect(renderWtLabel(unresolvable)).toBe('Unavail.');
+    expect(renderWtLabel(resolved)).toBe('30%');
+    // Must not contain any numeric weight approximation for unresolvable rows.
+    expect(renderWtLabel(unresolvable)).not.toMatch(/\d+%/);
+  });
+
+  // TC-RGR-014: WGT column rendering — unresolvable criteria with a known
+  // stored contribution show the score alone (no "/weight" denominator), because
+  // attaching the current weight as a denominator implies it was the historical
+  // weight, which is unverified.  Fully unavailable rows show "—".
+  it('TC-RGR-014: WGT column omits denominator for unresolvable rows; shows "—" when both unavailable', () => {
+    // Unresolvable but contribution known (Scenario A style):
+    const withContribution = { weight: 80, weightUnresolvable: true,  weightedScore: 50 };
+    // Unresolvable and contribution also missing (Scenario B style):
+    const fullyUnavailable = { weight: 50, weightUnresolvable: true,  weightedScore: null };
+    // Normal resolved row:
+    const resolved         = { weight: 30, weightUnresolvable: false, weightedScore: 24 };
+
+    // Known stored contribution — score only, no denominator.
+    expect(renderWgtText(withContribution)).toBe('50.0');
+    expect(renderWgtText(withContribution)).not.toContain('/');
+
+    // Fully unavailable — dash.
+    expect(renderWgtText(fullyUnavailable)).toBe('—');
+
+    // Resolved — score + denominator.
+    expect(renderWgtText(resolved)).toBe('24.0/30');
+
+    // Progress bar: skip for both unresolvable cases, draw for resolved.
+    expect(shouldRenderProgressBar(withContribution)).toBe(false);
+    expect(shouldRenderProgressBar(fullyUnavailable)).toBe(false);
+    expect(shouldRenderProgressBar(resolved)).toBe(true);
   });
 });

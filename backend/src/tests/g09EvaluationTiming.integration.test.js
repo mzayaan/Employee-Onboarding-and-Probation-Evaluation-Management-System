@@ -1331,3 +1331,180 @@ describe('Fix 3c — legacy-weight handling: NULL weight_percent_at_scoring → 
     expect(body.hasUnresolvableWeightHistory).toBe(false);
   });
 });
+
+// =============================================================================
+// Fix 3c — form regression tests (G09-FE)
+//
+// The frontend EvaluationFormPage and SelfAssessmentPage consume the
+// hasUnresolvableWeightHistory flag from getCheckpoint to:
+//   1. Display an inline warning banner.
+//   2. Disable the submit button.
+//   3. Clear the warning synchronously when the user switches to another
+//      checkpoint (the flag is re-fetched independently per checkpoint).
+//
+// These tests verify the backend contract that the frontend depends on:
+//   TC-G09-FORM-MIX : mixed scores (some NULL, some non-NULL weight) → flag true
+//   TC-G09-FORM-CLR : checkpoint with all non-NULL weights → flag false
+//                     (models "clear warning on switch to resolved checkpoint")
+//   TC-G09-FORM-422M: submitManagerEvaluation with mixed NULL/non-NULL → 422
+//   TC-G09-FORM-422S: submitSelfAssessment with mixed NULL/non-NULL → 422
+// =============================================================================
+
+describe('Fix 3c — form regression: warning display, disabled submit and checkpoint-switch clearing', () => {
+
+  const makeScoreObj = (criterionId, weightAtScoring) => ({
+    criterion_id:              criterionId,
+    weight_percent_at_scoring: weightAtScoring,
+    name_at_scoring:           null,
+    raw_score:                 4,
+    weighted_contribution:     weightAtScoring != null ? (4 / 5) * weightAtScoring : null,
+    criterion: { criterion_id: criterionId, name: `Criterion ${criterionId}`, description: '', weight_percent: weightAtScoring ?? 50 },
+  });
+
+  // TC-G09-FORM-MIX: a checkpoint whose managerEvaluation scores contain a MIX
+  // of NULL and non-NULL weight_percent_at_scoring values must expose
+  // hasUnresolvableWeightHistory:true so the form shows the warning banner and
+  // disables submission.
+  test('TC-G09-FORM-MIX: mixed NULL/non-NULL snapshot weights → hasUnresolvableWeightHistory:true', async () => {
+    const mixedScores = [
+      makeScoreObj(1, 60),   // non-NULL (post-G09 row)
+      makeScoreObj(2, null), // NULL     (pre-G09 row — triggers the flag)
+    ];
+    const cp = makeCheckpoint({
+      due_date: '2020-01-01',
+      managerEvaluation: {
+        eval_id: 50,
+        scores:  mixedScores,
+        toJSON:  jest.fn().mockReturnValue({ eval_id: 50, scores: mixedScores }),
+      },
+    });
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(cp);
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 60),
+      makeCriterion(2, 40),
+    ]);
+
+    const req = { params: { checkpointId: '1' }, user: { user_id: 1, role: 'HR_ADMIN' } };
+    const res = mockRes();
+    await getCheckpoint(req, res);
+
+    const body = res.json.mock.calls[0][0];
+    expect(body.success).toBe(true);
+    // Even one NULL weight triggers the flag — the form must block submission.
+    expect(body.hasUnresolvableWeightHistory).toBe(true);
+  });
+
+  // TC-G09-FORM-CLR: a subsequent GET for a different checkpoint with all non-NULL
+  // weights returns hasUnresolvableWeightHistory:false.  This models the
+  // "clear warning when the user switches to a resolved checkpoint" behaviour:
+  // the frontend resets the warning synchronously on checkpoint change and then
+  // sets it from the fresh API response, which is false for this checkpoint.
+  test('TC-G09-FORM-CLR: all non-NULL snapshot weights → hasUnresolvableWeightHistory:false (models warning cleared on checkpoint switch)', async () => {
+    const resolvedScores = [
+      makeScoreObj(1, 60),  // both non-NULL
+      makeScoreObj(2, 40),
+    ];
+    const cp = makeCheckpoint({
+      due_date: '2020-01-01',
+      managerEvaluation: {
+        eval_id: 51,
+        scores:  resolvedScores,
+        toJSON:  jest.fn().mockReturnValue({ eval_id: 51, scores: resolvedScores }),
+      },
+    });
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(cp);
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 60),
+      makeCriterion(2, 40),
+    ]);
+
+    const req = { params: { checkpointId: '2' }, user: { user_id: 1, role: 'HR_ADMIN' } };
+    const res = mockRes();
+    await getCheckpoint(req, res);
+
+    const body = res.json.mock.calls[0][0];
+    expect(body.success).toBe(true);
+    // No NULL weights — the form warning must be cleared.
+    expect(body.hasUnresolvableWeightHistory).toBe(false);
+  });
+
+  // TC-G09-FORM-422M: submitting a manager evaluation when the peer snapshot
+  // contains any NULL weight_percent_at_scoring returns 422 UNRESOLVED_WEIGHT_HISTORY.
+  // This confirms the backend rejects the submission that the frontend's disabled
+  // submit button is intended to prevent.
+  test('TC-G09-FORM-422M: manager submit with mixed NULL/non-NULL snapshot → 422 UNRESOLVED_WEIGHT_HISTORY', async () => {
+    const mixedScores = [
+      makeScoreObj(1, 60),
+      makeScoreObj(2, null), // triggers rejection
+    ];
+    // selfMock is what SelfAssessment.findOne returns inside the transaction —
+    // the UNRESOLVED check fires when any score has null weight_percent_at_scoring.
+    const selfMock = {
+      assessment_id: 99,
+      scores: mixedScores,
+    };
+    // makeCheckpoint returns manager_id:3; use user_id:3 so the 403 access check passes.
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(makeCheckpoint({
+      due_date: '2020-01-01',
+    }));
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 60),
+      makeCriterion(2, 40),
+    ]);
+    // No existing manager eval (not a duplicate), and the peer self-assessment
+    // has mixed NULL weights (triggers UNRESOLVED_WEIGHT_HISTORY inside the tx).
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne.mockResolvedValue(selfMock);
+
+    const req = {
+      params: { checkpointId: '1' },
+      user:   { user_id: 3, role: 'LINE_MANAGER' }, // must match makeCheckpoint's manager_id:3
+      body:   { scores: [{ criterion_id: 1, raw_score: 4 }, { criterion_id: 2, raw_score: 3 }], notes: '' },
+    };
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
+    expect(models.EvaluationScore.bulkCreate).not.toHaveBeenCalled();
+  });
+
+  // TC-G09-FORM-422S: submitting a self-assessment when the peer snapshot
+  // contains any NULL weight_percent_at_scoring returns 422 UNRESOLVED_WEIGHT_HISTORY.
+  test('TC-G09-FORM-422S: self-assessment submit with mixed NULL/non-NULL snapshot → 422 UNRESOLVED_WEIGHT_HISTORY', async () => {
+    const mixedScores = [
+      makeScoreObj(1, 60),
+      makeScoreObj(2, null),
+    ];
+    // managerMock is what ManagerEvaluation.findOne returns inside the transaction —
+    // the UNRESOLVED check fires when any score has null weight_percent_at_scoring.
+    const managerMock = {
+      eval_id: 50,
+      scores: mixedScores,
+    };
+    // makeCheckpoint returns user_id:5; use user_id:5 so the 403 access check passes.
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(makeCheckpoint({
+      due_date: '2020-01-01',
+    }));
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 60),
+      makeCriterion(2, 40),
+    ]);
+    // No existing self-assessment (not a duplicate), and the peer manager evaluation
+    // has mixed NULL weights (triggers UNRESOLVED_WEIGHT_HISTORY inside the tx).
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne.mockResolvedValue(managerMock);
+
+    const req = {
+      params: { checkpointId: '1' },
+      user:   { user_id: 5, role: 'NEW_EMPLOYEE' }, // must match makeCheckpoint's user_id:5
+      body:   { scores: [{ criterion_id: 1, raw_score: 4 }, { criterion_id: 2, raw_score: 3 }] },
+    };
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
+    expect(models.SelfAssessmentScore.bulkCreate).not.toHaveBeenCalled();
+  });
+});
