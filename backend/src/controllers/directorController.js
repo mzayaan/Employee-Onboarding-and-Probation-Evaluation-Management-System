@@ -105,10 +105,14 @@ const loadRecommendationForReview = (recId) =>
       { model: User, as: 'endorsedByHR',       attributes: ['user_id', 'first_name', 'last_name'] },
       { model: User, as: 'director',            attributes: ['user_id', 'first_name', 'last_name'] },
       // G08: immutable revision history (INSERT-only audit trail)
+      // separate:true runs a secondary SELECT so order:[['revised_at','ASC']] is
+      // applied by that query's ORDER BY clause — Sequelize 6 nested-include order
+      // is silently ignored without this flag.
       {
         model:    RecommendationRevision,
         as:       'revisions',
         required: false,
+        separate: true,
         include: [{
           model:      User,
           as:         'actor',
@@ -289,7 +293,7 @@ const getRecommendation = async (req, res) => {
 const endorseRecommendation = async (req, res) => {
   try {
     const { recId } = req.params;
-    const { hr_endorsement_notes = '' } = req.body;
+    const { hr_endorsement_notes = '', revision_count: clientRevisionCount } = req.body;
 
     const rec = await FinalRecommendation.findByPk(recId);
     if (!rec) {
@@ -301,6 +305,18 @@ const endorseRecommendation = async (req, res) => {
         success: false,
         message: `Cannot endorse: recommendation is currently "${rec.approval_status}". Only PENDING_HR_REVIEW recommendations can be endorsed.`,
       });
+    }
+
+    // G08 stale revision protection: if the client passes revision_count, verify it
+    // matches the DB value — a mismatch means the manager revised after HR loaded
+    // this recommendation, and HR must reload before endorsing.
+    if (clientRevisionCount !== undefined && clientRevisionCount !== null) {
+      if (Number(rec.revision_count) !== Number(clientRevisionCount)) {
+        return res.status(409).json({
+          success: false,
+          message: 'Recommendation has been revised since you last loaded it. Please reload and review the updated submission before endorsing.',
+        });
+      }
     }
 
     await rec.update({
@@ -431,8 +447,10 @@ const resubmitRecommendation = async (req, res) => {
       });
     }
 
-    // LINE_MANAGER may only resubmit their own recommendation
-    if (req.user.role === 'LINE_MANAGER' && rec.submitted_by !== req.user.user_id) {
+    // G08: unified ownership — any caller may only resubmit their own recommendation.
+    // The previous guard conditioned on role === 'LINE_MANAGER', which allowed an
+    // HR_ADMIN to bypass ownership and resubmit on behalf of any manager.
+    if (rec.submitted_by !== req.user.user_id) {
       return res.status(403).json({ success: false, message: 'Access denied. You may only resubmit your own recommendation.' });
     }
 
@@ -567,7 +585,9 @@ const reviseAndResubmitRecommendation = async (req, res) => {
     }
 
     // ── 3. Ownership / role gate ──────────────────────────────────────────────
-    if (req.user.role === 'LINE_MANAGER' && rec.submitted_by !== req.user.user_id) {
+    // G08: unified ownership — consistent with /resubmit, any caller may only
+    // revise their own recommendation (removes the LINE_MANAGER role condition).
+    if (rec.submitted_by !== req.user.user_id) {
       await t.rollback();
       return res.status(403).json({ success: false, message: 'Access denied. You may only revise your own recommendation.' });
     }
@@ -598,6 +618,17 @@ const reviseAndResubmitRecommendation = async (req, res) => {
       : null;
 
     // ── 6. Apply score corrections (if provided) ──────────────────────────────
+    // G08: validate that score_corrections is an array before iterating.
+    // A null, string or plain object body field would cause a silent no-op or
+    // thrown TypeError without this guard.
+    if (!Array.isArray(score_corrections)) {
+      await t.rollback();
+      return res.status(422).json({
+        success: false,
+        message: 'score_corrections must be an array.',
+      });
+    }
+
     const beforeScores             = [];
     const afterScores              = [];
     const beforeCheckpointTotals   = {};
@@ -608,6 +639,15 @@ const reviseAndResubmitRecommendation = async (req, res) => {
 
     for (const corr of score_corrections) {
       const { score_id, raw_score } = corr;
+
+      // G08: validate score_id is a positive integer before the DB lookup.
+      if (!Number.isInteger(score_id) || score_id < 1) {
+        await t.rollback();
+        return res.status(422).json({
+          success: false,
+          message: `Invalid score_id ${JSON.stringify(score_id)}. Must be a positive integer.`,
+        });
+      }
 
       // G09 — integer 1–5 validation
       if (!Number.isInteger(raw_score) || raw_score < 1 || raw_score > 5) {
@@ -804,8 +844,11 @@ const reviseAndResubmitRecommendation = async (req, res) => {
     }, { transaction: t });
 
     // ── 10. Update FinalRecommendation — restart review, clear all stale fields
+    // G08: increment revision_count so endorseRecommendation / approveRecommendation
+    // can detect staleness if the client passes a revision_count in the request body.
     await rec.update({
       approval_status:          'PENDING_HR_REVIEW',
+      revision_count:           (rec.revision_count || 0) + 1,
       justification:             justification.trim(),
       cumulative_score:          newCumulative,
       recommendation_type:       newRecType,
@@ -874,7 +917,7 @@ const reviseAndResubmitRecommendation = async (req, res) => {
 const approveRecommendation = async (req, res) => {
   try {
     const { recId } = req.params;
-    const { director_reason = '' } = req.body;
+    const { director_reason = '', revision_count: clientRevisionCount } = req.body;
 
     const rec = await FinalRecommendation.findByPk(recId, {
       include: [{ model: ProbationPeriod, as: 'probationPeriod' }],
@@ -900,6 +943,18 @@ const approveRecommendation = async (req, res) => {
       });
     }
 
+    // G08 stale revision protection: if the client passes revision_count, verify it
+    // matches the DB value.  A mismatch means the manager revised after the Director
+    // loaded this recommendation; the Director must reload before approving.
+    if (clientRevisionCount !== undefined && clientRevisionCount !== null) {
+      if (Number(rec.revision_count) !== Number(clientRevisionCount)) {
+        return res.status(409).json({
+          success: false,
+          message: 'Recommendation has been revised since you last loaded it. Please reload and review the updated submission before approving.',
+        });
+      }
+    }
+
     // Derive the new ProbationPeriod status from recommendation_type
     const periodStatusMap = {
       CONFIRM: 'CONFIRMED',
@@ -908,7 +963,8 @@ const approveRecommendation = async (req, res) => {
     };
     const newPeriodStatus = periodStatusMap[rec.recommendation_type] || 'COMPLETED';
 
-    const { sequelize } = require('../models');
+    // Note: sequelize is already destructured from require('../models') at the top
+    // of this file — the local re-require previously on this line has been removed.
     await sequelize.transaction(async (t) => {
       await rec.update({
         approval_status:    'APPROVED',

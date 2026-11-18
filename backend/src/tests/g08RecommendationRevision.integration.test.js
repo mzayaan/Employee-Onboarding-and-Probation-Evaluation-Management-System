@@ -83,6 +83,7 @@ const makeMockRec = (override = {}) => {
     director_decision_at: null,
     director_reason:      null,
     rejection_count:      1,
+    revision_count:       0,          // G08: optimistic-lock counter
     probationPeriod:      period,
     update:               jest.fn().mockResolvedValue(true),
     ...override,
@@ -164,14 +165,14 @@ const mockHRUser = {
 
 // ── Models mock ───────────────────────────────────────────────────────────────
 // These are populated in each describe/test block via mockResolvedValue.
-let _mockTransaction = makeMockTransaction();
+let mockTransaction = makeMockTransaction();
 
 jest.mock('../models', () => {
   return {
     sequelize: {
       authenticate: jest.fn().mockResolvedValue(undefined),
       // Manual-transaction style (not callback) used by reviseAndResubmit
-      transaction: jest.fn().mockImplementation(() => Promise.resolve(_mockTransaction)),
+      transaction: jest.fn().mockImplementation(() => Promise.resolve(mockTransaction)),
     },
     User: {
       findOne:  jest.fn().mockResolvedValue(mockManagerUser),
@@ -235,9 +236,10 @@ const {
 const token = (payload) =>
   jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-const mgrToken = token({ user_id: 5,  email: 'mgr@company.com',   role: 'LINE_MANAGER', first_name: 'Tom',   last_name: 'Jones'   });
-const otherMgrToken = token({ user_id: 99, email: 'other@company.com', role: 'LINE_MANAGER', first_name: 'Other', last_name: 'Manager' });
-const hrToken  = token({ user_id: 1,  email: 'hr@company.com',    role: 'HR_ADMIN',     first_name: 'Jane',  last_name: 'Doe'     });
+const mgrToken      = token({ user_id: 5,  email: 'mgr@company.com',      role: 'LINE_MANAGER', first_name: 'Tom',      last_name: 'Jones'    });
+const otherMgrToken = token({ user_id: 99, email: 'other@company.com',    role: 'LINE_MANAGER', first_name: 'Other',    last_name: 'Manager'  });
+const hrToken       = token({ user_id: 1,  email: 'hr@company.com',       role: 'HR_ADMIN',     first_name: 'Jane',     last_name: 'Doe'      });
+const directorToken = token({ user_id: 7,  email: 'director@company.com', role: 'DIRECTOR',     first_name: 'Director', last_name: 'Smith'    });
 
 // ── Shared valid body ─────────────────────────────────────────────────────────
 const VALID_BODY = {
@@ -253,9 +255,10 @@ describe('POST /api/director/:recId/revise-and-resubmit — happy path (G08)', (
 
   beforeEach(() => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous describe
+    mockTransaction = makeMockTransaction();
     // sequelize.transaction mock must return the refreshed object
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
 
     // FinalRecommendation.findOne: 1st call = load rec, 2nd call = lastApproved lookup
@@ -284,8 +287,8 @@ describe('POST /api/director/:recId/revise-and-resubmit — happy path (G08)', (
   // TC-G08-002: Resubmit with one score correction
   test('TC-G08-002: valid resubmit with score correction → 200; scores_corrected = 1', async () => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
 
     FinalRecommendation.findOne
@@ -326,8 +329,8 @@ describe('POST /api/director/:recId/revise-and-resubmit — happy path (G08)', (
   // TC-G08-003: Score correction that changes recommendation type (Req 4)
   test('TC-G08-003: score correction changes cumulative → updated recommendation_type returned', async () => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
 
     // Rec currently CONFIRM (78.5%)
@@ -371,8 +374,8 @@ describe('POST /api/director/:recId/revise-and-resubmit — required field valid
 
   beforeEach(() => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
     FinalRecommendation.findOne.mockResolvedValue(makeMockRec());
   });
@@ -411,8 +414,9 @@ describe('POST /api/director/:recId/revise-and-resubmit — eligibility gates (R
 
   beforeEach(() => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous describe
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
   });
 
@@ -489,8 +493,9 @@ describe('POST /api/director/:recId/revise-and-resubmit — score correction gat
 
   beforeEach(() => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous describe
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
     FinalRecommendation.findOne
       .mockResolvedValueOnce(makeMockRec())
@@ -578,8 +583,9 @@ describe('POST /api/director/:recId/revise-and-resubmit — score correction gat
   // TC-G08-013: Approved-cycle protection — checkpoint predates last approval → 409 (Req 2)
   test('TC-G08-013: checkpoint in approved cycle → 409 (approved-cycle protection)', async () => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous test
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
     FinalRecommendation.findOne
       .mockResolvedValueOnce(makeMockRec())
@@ -628,8 +634,9 @@ describe('POST /api/director/:recId/revise-and-resubmit — score data quality g
 
   beforeEach(() => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous describe
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
     User.findOne.mockResolvedValue(mockManagerUser);
     FinalRecommendation.findOne
       .mockResolvedValueOnce(makeMockRec())
@@ -717,8 +724,9 @@ describe('POST /api/director/:recId/revise-and-resubmit — RBAC and not-found',
 
   beforeEach(() => {
     jest.clearAllMocks();
-    _mockTransaction = makeMockTransaction();
-    sequelize.transaction.mockResolvedValue(_mockTransaction);
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous describe
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
   });
 
   // TC-G08-017: HR_ADMIN cannot access LINE_MANAGER route → 403 (NFR-03)
@@ -808,6 +816,246 @@ describe('Regression: existing justification-only /resubmit not broken (TC-DIR-0
       .post('/api/director/10/resubmit')
       .set('Authorization', `Bearer ${mgrToken}`)
       .send({ justification: 'Updated as requested.' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.approval_status).toBe('PENDING_HR_REVIEW');
+  });
+
+});
+
+// =============================================================================
+// TC-G08-021 — TC-G08-026: Input validation regression tests
+// Tests that malformed or blank inputs are rejected before DB work begins.
+// =============================================================================
+
+describe('POST /api/director/:recId/revise-and-resubmit — input validation regressions (G08)', () => {
+
+  /** Minimal rec mock sufficient to reach the score_corrections validation step */
+  const makeEligibleRec = () => makeMockRec();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset(); // drain any undrained Once queue from previous describe
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
+    User.findOne.mockResolvedValue(mockManagerUser);
+    // rec passes all gates before reaching the array check
+    FinalRecommendation.findOne
+      .mockResolvedValueOnce(makeEligibleRec())
+      .mockResolvedValueOnce(null);
+    EvaluationCheckpoint.findAll.mockResolvedValue([makeMockCompletedCp()]);
+  });
+
+  // TC-G08-021: score_corrections: null → not an array → 422
+  test('TC-G08-021: score_corrections: null → 422 unprocessable entity', async () => {
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ ...VALID_BODY, score_corrections: null });
+
+    expect(res.status).toBe(422);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/score_corrections must be an array/i);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+    expect(mockTransaction.commit).not.toHaveBeenCalled();
+  });
+
+  // TC-G08-022: score_corrections: 'invalid' (string) → not an array → 422
+  test('TC-G08-022: score_corrections: string → 422 unprocessable entity', async () => {
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ ...VALID_BODY, score_corrections: 'invalid' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/score_corrections must be an array/i);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+  });
+
+  // TC-G08-023: score_id: null → not a positive integer → 422
+  test('TC-G08-023: score_corrections with score_id null → 422', async () => {
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ ...VALID_BODY, score_corrections: [{ score_id: null, raw_score: 4 }] });
+
+    expect(res.status).toBe(422);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/Invalid score_id/i);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+  });
+
+  // TC-G08-024: score_id: 1.5 (float, non-integer) → 422
+  test('TC-G08-024: score_corrections with non-integer score_id → 422', async () => {
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ ...VALID_BODY, score_corrections: [{ score_id: 1.5, raw_score: 4 }] });
+
+    expect(res.status).toBe(422);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/Invalid score_id/i);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+  });
+
+  // TC-G08-025: whitespace-only justification → 400
+  test('TC-G08-025: justification is whitespace-only → 400 bad request', async () => {
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: '   ', correction_reason: VALID_BODY.correction_reason });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/justification is required/i);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+  });
+
+  // TC-G08-026: whitespace-only correction_reason → 400
+  test('TC-G08-026: correction_reason is whitespace-only → 400 bad request', async () => {
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: VALID_BODY.justification, correction_reason: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/correction_reason is required/i);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+  });
+
+});
+
+// =============================================================================
+// TC-G08-027 — TC-G08-028: Stale revision protection — endorse and approve
+// Tests that passing an outdated revision_count returns 409 so the caller
+// must reload before acting on a recommendation the manager has since revised.
+// =============================================================================
+
+describe('G08 stale revision protection — endorse and approve endpoints', () => {
+
+  // TC-G08-027: HR endorses after the manager has revised — revision_count mismatch → 409
+  test('TC-G08-027: endorse with stale revision_count → 409 conflict', async () => {
+    jest.clearAllMocks();
+    User.findOne.mockResolvedValue(mockHRUser);
+
+    // DB has revision_count: 1 (manager revised once since HR loaded the page)
+    FinalRecommendation.findByPk.mockResolvedValue({
+      ...makeMockRec({ approval_status: 'PENDING_HR_REVIEW' }),
+      revision_count: 1,
+    });
+
+    // HR sends the stale revision_count: 0 it had when it first loaded the rec
+    const res = await request(app)
+      .post('/api/director/10/endorse')
+      .set('Authorization', `Bearer ${hrToken}`)
+      .send({ hr_endorsement_notes: 'Looks good.', revision_count: 0 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/revised since you last loaded/i);
+  });
+
+  // TC-G08-028: Director approves after the manager has revised — revision_count mismatch → 409
+  test('TC-G08-028: approve with stale revision_count → 409 conflict', async () => {
+    jest.clearAllMocks();
+    const mockDirectorUser = {
+      user_id: 7, email: 'director@company.com', role: 'DIRECTOR',
+      first_name: 'Director', last_name: 'Smith', is_active: true,
+      toJSON: jest.fn().mockReturnValue({ user_id: 7, role: 'DIRECTOR' }),
+    };
+    User.findOne.mockResolvedValue(mockDirectorUser);
+
+    // DB has revision_count: 2 (manager revised twice since Director loaded the rec)
+    FinalRecommendation.findByPk.mockResolvedValue({
+      ...makeMockRec({ approval_status: 'PENDING_DIRECTOR', recommendation_type: 'CONFIRM' }),
+      probationPeriod: makeMockPeriod(),
+      revision_count: 2,
+    });
+
+    // Director sends stale revision_count: 0
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${directorToken}`)
+      .send({ director_reason: 'Approved.', revision_count: 0 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/revised since you last loaded/i);
+  });
+
+  // TC-G08-027b: Endorsing with the CORRECT revision_count still proceeds (no false positive)
+  test('TC-G08-027b: endorse with correct revision_count → not blocked by stale check', async () => {
+    jest.clearAllMocks();
+    User.findOne.mockResolvedValue(mockHRUser);
+
+    // DB revision_count: 1 — client sends the same value (fresh)
+    const rec = {
+      ...makeMockRec({ approval_status: 'PENDING_HR_REVIEW' }),
+      revision_count: 1,
+      update: jest.fn().mockResolvedValue(true),
+    };
+    FinalRecommendation.findByPk.mockResolvedValue(rec);
+
+    const res = await request(app)
+      .post('/api/director/10/endorse')
+      .set('Authorization', `Bearer ${hrToken}`)
+      .send({ hr_endorsement_notes: 'Looks good.', revision_count: 1 });
+
+    // Status check passes (PENDING_HR_REVIEW) and stale check passes → proceeds to update
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+});
+
+// =============================================================================
+// TC-G08-029: Unified ownership enforcement on /resubmit
+// HR_ADMIN whose user_id does not match submitted_by must be blocked (G08).
+// Before the fix, role === 'LINE_MANAGER' was required for the check to fire,
+// allowing HR_ADMIN to bypass ownership.
+// =============================================================================
+
+describe('G08 unified ownership regression — /resubmit endpoint', () => {
+
+  test('TC-G08-029: HR_ADMIN resubmitting another manager\'s rec → 403', async () => {
+    jest.clearAllMocks();
+    User.findOne.mockResolvedValue(mockHRUser);  // user_id: 1
+
+    FinalRecommendation.findByPk.mockResolvedValue({
+      rec_id:          10,
+      approval_status: 'RETURNED_TO_MANAGER',
+      submitted_by:    5,            // LINE_MANAGER user_id 5 — not the HR user (1)
+      update:          jest.fn().mockResolvedValue(true),
+    });
+
+    const res = await request(app)
+      .post('/api/director/10/resubmit')
+      .set('Authorization', `Bearer ${hrToken}`)  // HR_ADMIN, user_id: 1
+      .send({ justification: 'Submitting on manager\'s behalf.' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/access denied/i);
+  });
+
+  test('TC-G08-029b: LINE_MANAGER resubmitting own rec still succeeds after fix', async () => {
+    jest.clearAllMocks();
+    User.findOne.mockResolvedValue(mockManagerUser);  // user_id: 5
+
+    FinalRecommendation.findByPk.mockResolvedValue({
+      rec_id:          10,
+      approval_status: 'RETURNED_TO_MANAGER',
+      submitted_by:    5,            // same as mockManagerUser.user_id
+      update:          jest.fn().mockResolvedValue(true),
+    });
+
+    const res = await request(app)
+      .post('/api/director/10/resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: 'Resubmitting with updated justification.' });
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
