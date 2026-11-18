@@ -95,9 +95,9 @@ describe('buildCriteriaMap', () => {
 
     expect(map['Performance']).toBeDefined();
     // cpScores for checkpoint 10 should have weight = 30
-    expect(map['Performance'].cpScores[10]).toEqual({ raw_score: 4, weight: 30 });
+    expect(map['Performance'].cpScores[10]).toMatchObject({ raw_score: 4, weight: 30, weightUnresolvable: false });
     // cpScores for checkpoint 20 should have weight = 40 (changed weight)
-    expect(map['Performance'].cpScores[20]).toEqual({ raw_score: 3, weight: 40 });
+    expect(map['Performance'].cpScores[20]).toMatchObject({ raw_score: 3, weight: 40, weightUnresolvable: false });
     // The displayed weight should be the most recent (40)
     expect(map['Performance'].weight).toBe(40);
   });
@@ -112,12 +112,12 @@ describe('buildCriteriaMap', () => {
     const map = buildCriteriaMap([cp]);
 
     expect(Object.keys(map)).toHaveLength(2);
-    expect(map['Attendance'].cpScores[10]).toEqual({ raw_score: 5, weight: 20 });
+    expect(map['Attendance'].cpScores[10]).toMatchObject({ raw_score: 5, weight: 20, weightUnresolvable: false });
   });
 
-  // TC-PDF-008: last-resort fallback to criterion.weight_percent when snapshot is
-  // absent AND recovery data is also absent (pre-G09 row with no contribution stored)
-  it('TC-PDF-008: falls back to criterion.weight_percent when weight_percent_at_scoring is null and recovery data is absent', () => {
+  // TC-PDF-008: pre-G09 row with weight_percent_at_scoring NULL → falls back to
+  // current criterion.weight_percent for rendering (inversion removed in G09).
+  it('TC-PDF-008: falls back to criterion.weight_percent when weight_percent_at_scoring is null', () => {
     const score = {
       criterion_id: 1,
       raw_score:    4,
@@ -128,25 +128,32 @@ describe('buildCriteriaMap', () => {
     const cp = makeCheckpoint(10, 30, 'COMPLETED', '2026-01-30T00:00:00Z', [score]);
     const map = buildCriteriaMap([cp]);
     expect(map['Teamwork'].cpScores[10].weight).toBe(25);
+    expect(map['Teamwork'].cpScores[10].weightUnresolvable).toBe(true);
+    expect(map['Teamwork'].weightUnresolvable).toBe(true);
   });
 
-  // TC-PDF-008b (Issue 1): when weight_percent_at_scoring is NULL but
-  // weighted_contribution and raw_score are stored, the original weight must
-  // be recovered as (weighted_contribution × 5) / raw_score instead of
-  // silently substituting the current criterion weight (FR-14).
-  it('TC-PDF-008b: recovers original weight from weighted_contribution and raw_score when weight_percent_at_scoring is null', () => {
+  // TC-PDF-008b (G09 updated): weight_percent_at_scoring NULL → fall back to
+  // current criterion weight for rendering and mark weightUnresolvable:true.
+  // The old inversion via (weighted_contribution × 5) / raw_score was removed
+  // because rounding error makes it unreliable: 68.74 % stored as 55.0
+  // inverts to 68.75 %, not 68.74 %.  The PDF must still render (using the
+  // current weight as the best available approximation) but must annotate the
+  // entry so callers can display a warning (FR-14).
+  it('TC-PDF-008b: NULL weight_percent_at_scoring → falls back to current criterion weight and sets weightUnresolvable:true', () => {
     const score = {
       criterion_id:              1,
       raw_score:                 4,
-      weighted_contribution:     20,     // recovered weight = (20 × 5) / 4 = 25
+      weighted_contribution:     20,     // present but NOT used for inversion
       weight_percent_at_scoring: null,
-      criterion: { name: 'Teamwork', weight_percent: 50 },  // current weight changed to 50
+      criterion: { name: 'Teamwork', weight_percent: 50 },  // current weight used as fallback
     };
     const cp = makeCheckpoint(10, 30, 'COMPLETED', '2026-01-30T00:00:00Z', [score]);
     const map = buildCriteriaMap([cp]);
-    // Must use the RECOVERED weight (25), not the current criterion weight (50)
-    expect(map['Teamwork'].cpScores[10].weight).toBe(25);
-    expect(map['Teamwork'].cpScores[10].weight).not.toBe(50);
+    // Falls back to the CURRENT criterion weight (50), not an inverted value (25)
+    expect(map['Teamwork'].cpScores[10].weight).toBe(50);
+    // Must be flagged so the PDF can annotate the unresolvable weight
+    expect(map['Teamwork'].cpScores[10].weightUnresolvable).toBe(true);
+    expect(map['Teamwork'].weightUnresolvable).toBe(true);
   });
 });
 

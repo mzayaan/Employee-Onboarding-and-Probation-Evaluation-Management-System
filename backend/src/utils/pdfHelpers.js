@@ -60,42 +60,48 @@ function buildCriteriaMap(completedCps) {
       // G09-FIX Fix 3: prefer the frozen name snapshot so that a criterion rename
       // after submission does not change the label shown in this PDF.
       const name = s.name_at_scoring ?? s.criterion?.name ?? `Criterion ${s.criterion_id}`;
-      // G09-FIX Fix 3 (corrected): prefer the snapshot weight captured at submission
-      // time.  For pre-G09 rows where weight_percent_at_scoring is NULL, recover the
-      // original weight from the stored contribution before falling back to the
-      // current criterion weight (which may have been changed by an admin).
+      // G09-FIX Fix 3 (legacy): prefer the snapshot weight captured at submission
+      // time.  For pre-G09 rows where weight_percent_at_scoring is NULL, do NOT
+      // attempt to recover the original weight via (contribution × 5) / raw_score —
+      // that inversion is unreliable on rounded decimals (e.g. 68.74 % and 31.26 %
+      // both map to the same rounded contribution at 1 dp, so the inverse gives
+      // 68.75 % and 31.25 % — different values).  Fall back to the current criterion
+      // weight for rendering and mark the entry as weight-unresolvable so calling
+      // code can annotate it in the PDF (FR-14).
       let snapshotWeight;
+      let weightUnresolvable = false;
       if (s.weight_percent_at_scoring != null) {
         snapshotWeight = Number.parseFloat(s.weight_percent_at_scoring);
       } else {
-        const rc = Number.parseFloat(s.weighted_contribution);
-        const rs = Number.parseFloat(s.raw_score);
-        if (rs > 0 && Number.isFinite(rc) && Number.isFinite(rs)) {
-          snapshotWeight = Number.parseFloat(((rc * 5) / rs).toFixed(2));
-        } else {
-          // Last resort: use current criterion weight.
-          snapshotWeight = Number.parseFloat(s.criterion?.weight_percent ?? 0);
-        }
+        // weight_percent_at_scoring is NULL — pre-G09 row.
+        // Fall back to current criterion weight for rendering; flag as unresolvable.
+        snapshotWeight     = Number.parseFloat(s.criterion?.weight_percent ?? 0);
+        weightUnresolvable = true;
       }
 
       if (!criteriaMap[name]) {
         criteriaMap[name] = {
           name,
           // Updated on each iteration — ends up as the most recent checkpoint's weight.
-          weight:       snapshotWeight,
-          criterion_id: s.criterion_id,
-          cpScores:     {},
+          weight:             snapshotWeight,
+          criterion_id:       s.criterion_id,
+          cpScores:           {},
+          weightUnresolvable: weightUnresolvable,
         };
       } else {
         // Keep the most-recent snapshot weight for the display column.
         criteriaMap[name].weight = snapshotWeight;
+        // Propagate the flag: once any checkpoint has an unresolvable weight
+        // the criterion is marked across all checkpoints.
+        if (weightUnresolvable) criteriaMap[name].weightUnresolvable = true;
       }
 
       // Store BOTH raw_score AND the per-checkpoint weight so the weighted
       // contribution can be calculated with the correct snapshot later.
       criteriaMap[name].cpScores[cp.checkpoint_id] = {
-        raw_score: Number.parseFloat(s.raw_score),
-        weight:    snapshotWeight,
+        raw_score:          Number.parseFloat(s.raw_score),
+        weight:             snapshotWeight,
+        weightUnresolvable: weightUnresolvable,
       };
     });
   });

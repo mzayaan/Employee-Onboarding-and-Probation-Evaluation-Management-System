@@ -240,9 +240,17 @@ const getCheckpoint = async (req, res) => {
     // If only the self-assessment exists (employee submitted first), use those
     // SelfAssessmentScore rows instead.
     // If neither exists yet, return the current active criteria as normal.
+    // G09-FIX Fix 3 (legacy): flag whether this checkpoint has pre-G09 score rows
+    // where weight_percent_at_scoring was not snapshotted.  The frontend can use
+    // this to warn the reviewer before submission; both submission paths will return
+    // 422 UNRESOLVED_WEIGHT_HISTORY if the flag is true.
+    let hasUnresolvableWeightHistory = false;
     let criteria;
     if (checkpoint.managerEvaluation?.scores?.length > 0) {
       // Load from manager evaluation snapshot
+      hasUnresolvableWeightHistory = checkpoint.managerEvaluation.scores.some(
+        (s) => s.weight_percent_at_scoring == null
+      );
       const frozenIds = checkpoint.managerEvaluation.scores.map((s) => s.criterion_id);
       const frozenCriteriaRaw = await EvaluationCriterion.findAll({
         where: { criterion_id: frozenIds },
@@ -268,6 +276,9 @@ const getCheckpoint = async (req, res) => {
       });
     } else if (checkpoint.selfAssessment?.scores?.length > 0) {
       // Load from self-assessment snapshot (employee submitted first)
+      hasUnresolvableWeightHistory = checkpoint.selfAssessment.scores.some(
+        (s) => s.weight_percent_at_scoring == null
+      );
       const frozenIds = checkpoint.selfAssessment.scores.map((s) => s.criterion_id);
       const frozenCriteriaRaw = await EvaluationCriterion.findAll({
         where: { criterion_id: frozenIds },
@@ -370,7 +381,7 @@ const getCheckpoint = async (req, res) => {
       if (ep) SENSITIVE_FIELDS.forEach((f) => delete ep[f]);
     }
 
-    return res.json({ success: true, data: checkpointData, criteria, attendanceSummary });
+    return res.json({ success: true, data: checkpointData, criteria, attendanceSummary, hasUnresolvableWeightHistory });
   } catch (error) {
     console.error('[evaluationController.getCheckpoint]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to retrieve checkpoint.' });
@@ -686,19 +697,33 @@ const submitManagerEvaluation = async (req, res) => {
         include: [{
           model:      SelfAssessmentScore,
           as:         'scores',
-          // G09-FIX: also fetch raw_score + weighted_contribution so the original
-          // weight can be recovered when weight_percent_at_scoring is NULL (pre-G09
-          // rows).  name_at_scoring is fetched so the second submission freezes the
-          // same label as the first (FR-14).
-          attributes: ['criterion_id', 'weight_percent_at_scoring', 'name_at_scoring',
-                       'raw_score', 'weighted_contribution'],
+            // G09-FIX Fix 3 (legacy): weight_percent_at_scoring is the authoritative
+          // snapshot; raw_score and weighted_contribution are no longer fetched because
+          // inversion is unreliable on rounded decimals (see 68.74/31.26 example).
+          // name_at_scoring is fetched so the second submission freezes the same label
+          // as the first (FR-14).
+          attributes: ['criterion_id', 'weight_percent_at_scoring', 'name_at_scoring'],
         }],
         transaction: t,
       });
       let txFrozenByEmployee = false;
       if (txSelfSnap?.scores?.length > 0) {
         txFrozenByEmployee = true;
-        const hasNullWeight  = txSelfSnap.scores.some((s) => s.weight_percent_at_scoring == null);
+        // G09-FIX Fix 3 (legacy): any NULL weight_percent_at_scoring means this is a
+        // pre-G09 row.  Recovering the original weight via (contribution × 5) / raw_score
+        // is unreliable: weighted_contribution is stored as a rounded decimal, so
+        // inversion introduces rounding error (e.g. weights of 68.74 % and 31.26 %
+        // both map to the same rounded contribution at limited decimal precision).
+        // Reject unconditionally with UNRESOLVED_WEIGHT_HISTORY so the second submission
+        // cannot silently use an incorrect weight (FR-14).
+        const hasNullWeight = txSelfSnap.scores.some((s) => s.weight_percent_at_scoring == null);
+        if (hasNullWeight) {
+          throw new EligibilityError(422, {
+            success: false,
+            message: 'This checkpoint has unresolved weight history: the original evaluation weights cannot be reliably recovered from pre-G09 data. Please contact your System Administrator to resolve this checkpoint before the second submission can proceed.',
+            code: 'UNRESOLVED_WEIGHT_HISTORY',
+          });
+        }
         const frozenIds      = txSelfSnap.scores.map((s) => s.criterion_id);
         const frozenCriteria = await EvaluationCriterion.findAll({
           where: { criterion_id: frozenIds },
@@ -707,24 +732,8 @@ const submitManagerEvaluation = async (req, res) => {
         for (const c of frozenCriteria) {
           const base = c.toJSON ? c.toJSON() : { ...c.dataValues };
           const snap = txSelfSnap.scores.find((s) => s.criterion_id === c.criterion_id);
-          if (!hasNullWeight) {
-            base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
-          } else {
-            // G09-FIX Fix 3 (corrected): recover the original weight from the stored
-            // contribution so the second submission does not silently use a different
-            // weight than the first (FR-14).
-            // weight_original = (weighted_contribution × 5) / raw_score
-            const rc = Number.parseFloat(snap.weighted_contribution);
-            const rs = Number.parseFloat(snap.raw_score);
-            if (rs > 0 && Number.isFinite(rc) && Number.isFinite(rs)) {
-              base.weight_percent = Number.parseFloat(((rc * 5) / rs).toFixed(2));
-            } else {
-              throw new EligibilityError(422, {
-                success: false,
-                message: 'The existing submission for this checkpoint predates weight tracking and the original weight cannot be recovered. Please contact your System Administrator.',
-              });
-            }
-          }
+          // All weights are non-NULL — use the snapshot value directly.
+          base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
           // G09-FIX Fix 2: carry the frozen criterion name so a rename after the
           // first submission does not corrupt the second submission's stored label.
           if (snap?.name_at_scoring != null) {
@@ -1149,19 +1158,33 @@ const submitSelfAssessment = async (req, res) => {
         include: [{
           model:      EvaluationScore,
           as:         'scores',
-          // G09-FIX: also fetch raw_score + weighted_contribution so the original
-          // weight can be recovered when weight_percent_at_scoring is NULL (pre-G09
-          // rows).  name_at_scoring is fetched so the second submission freezes the
-          // same label as the first (FR-14).
-          attributes: ['criterion_id', 'weight_percent_at_scoring', 'name_at_scoring',
-                       'raw_score', 'weighted_contribution'],
+            // G09-FIX Fix 3 (legacy): weight_percent_at_scoring is the authoritative
+          // snapshot; raw_score and weighted_contribution are no longer fetched because
+          // inversion is unreliable on rounded decimals (see 68.74/31.26 example).
+          // name_at_scoring is fetched so the second submission freezes the same label
+          // as the first (FR-14).
+          attributes: ['criterion_id', 'weight_percent_at_scoring', 'name_at_scoring'],
         }],
         transaction: t,
       });
       let txFrozenByManager = false;
       if (txMgrSnap?.scores?.length > 0) {
         txFrozenByManager = true;
-        const hasNullWeight  = txMgrSnap.scores.some((s) => s.weight_percent_at_scoring == null);
+        // G09-FIX Fix 3 (legacy): any NULL weight_percent_at_scoring means this is a
+        // pre-G09 row.  Recovering the original weight via (contribution × 5) / raw_score
+        // is unreliable: weighted_contribution is stored as a rounded decimal, so
+        // inversion introduces rounding error (e.g. weights of 68.74 % and 31.26 %
+        // both map to the same rounded contribution at limited decimal precision).
+        // Reject unconditionally with UNRESOLVED_WEIGHT_HISTORY so the second submission
+        // cannot silently use an incorrect weight (FR-14).
+        const hasNullWeight = txMgrSnap.scores.some((s) => s.weight_percent_at_scoring == null);
+        if (hasNullWeight) {
+          throw new EligibilityError(422, {
+            success: false,
+            message: 'This checkpoint has unresolved weight history: the original evaluation weights cannot be reliably recovered from pre-G09 data. Please contact your System Administrator to resolve this checkpoint before the second submission can proceed.',
+            code: 'UNRESOLVED_WEIGHT_HISTORY',
+          });
+        }
         const frozenIds      = txMgrSnap.scores.map((s) => s.criterion_id);
         const frozenCriteria = await EvaluationCriterion.findAll({
           where: { criterion_id: frozenIds },
@@ -1170,24 +1193,8 @@ const submitSelfAssessment = async (req, res) => {
         for (const c of frozenCriteria) {
           const base = c.toJSON ? c.toJSON() : { ...c.dataValues };
           const snap = txMgrSnap.scores.find((s) => s.criterion_id === c.criterion_id);
-          if (!hasNullWeight) {
-            base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
-          } else {
-            // G09-FIX Fix 3 (corrected): recover the original weight from the stored
-            // contribution so the second submission does not silently use a different
-            // weight than the first (FR-14).
-            // weight_original = (weighted_contribution × 5) / raw_score
-            const rc = Number.parseFloat(snap.weighted_contribution);
-            const rs = Number.parseFloat(snap.raw_score);
-            if (rs > 0 && Number.isFinite(rc) && Number.isFinite(rs)) {
-              base.weight_percent = Number.parseFloat(((rc * 5) / rs).toFixed(2));
-            } else {
-              throw new EligibilityError(422, {
-                success: false,
-                message: 'The existing submission for this checkpoint predates weight tracking and the original weight cannot be recovered. Please contact your System Administrator.',
-              });
-            }
-          }
+          // All weights are non-NULL — use the snapshot value directly.
+          base.weight_percent = Number.parseFloat(snap.weight_percent_at_scoring);
           // G09-FIX Fix 2: carry the frozen criterion name so a rename after the
           // first submission does not corrupt the second submission's stored label.
           if (snap?.name_at_scoring != null) {

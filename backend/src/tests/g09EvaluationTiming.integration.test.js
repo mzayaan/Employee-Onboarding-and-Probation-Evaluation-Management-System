@@ -659,32 +659,28 @@ describe('Fix 3 — name_at_scoring saved in EvaluationScore rows at submission 
 });
 
 // =============================================================================
-// Fix 4 — NULL weight_percent_at_scoring guard
+// Fix 4 — Frozen-criteria enforcement with non-NULL weights
 //
-// When the first submitter's score snapshot has weight_percent_at_scoring = NULL
-// (rows inserted before the G09 snapshot fix), the freeze must be SKIPPED and
-// current active criteria loaded instead, so the second submitter is not scored
-// against undefined weights.
+// When the first submitter's score snapshot has non-NULL weight_percent_at_scoring
+// the second submitter must be validated against those frozen criterion IDs.
+// A criterion ID not in the snapshot is rejected 400; the frozen criterion ID
+// is accepted and produces 201.
+//
+// (Pre-G09 NULL-weight snapshots are covered separately in Fix 3c where they
+// produce 422 UNRESOLVED_WEIGHT_HISTORY before criterion validation is reached.)
 // =============================================================================
 
-// G09-FIX Fix 3 (corrected): when the first submitter's snapshot has NULL
-// weight_percent_at_scoring (pre-G09 rows), the system must STILL use the
-// criterion IDs from the snapshot — it fetches those criteria with their
-// CURRENT weights, not fall back to all active criteria.  This preserves
-// historical consistency: both submitters always cover the same criterion set.
-describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current weights', () => {
-  test('TC-G09-F4-MGR: employee snapshot has NULL weights → manager must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
-    // Employee self-assessment has criterion_id=1 with NULL weight (pre-G09 row).
-    // raw_score=4 and weighted_contribution=80 let the controller recover the original
-    // weight:  (80 × 5) / 4 = 100 — matching the active criterion weight below.
-    const nullWeightScores = [{
-      criterion_id: 1,
-      weight_percent_at_scoring: null,
-      raw_score:              4,
-      weighted_contribution:  80,
-      name_at_scoring:        null,
+describe('Fix 4 — Frozen-criteria enforcement (non-NULL weight snapshot)', () => {
+  test('TC-G09-F4-MGR: employee snapshot has non-NULL weights → manager must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
+    // Employee self-assessment has criterion_id=1 with a known weight.
+    // weight_percent_at_scoring is non-NULL so the NULL-weight guard is not triggered
+    // and criterion ID validation is reached.
+    const frozenScores = [{
+      criterion_id:              1,
+      weight_percent_at_scoring: 100,   // non-NULL — criterion freeze path
+      name_at_scoring:           null,
     }];
-    const selfAssessmentMock = { assessment_id: 99, scores: nullWeightScores };
+    const selfAssessmentMock = { assessment_id: 99, scores: frozenScores };
 
     const cp = makeCheckpoint({ due_date: '2020-01-01' });
     models.EvaluationCheckpoint.findByPk
@@ -693,7 +689,7 @@ describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current 
 
     models.ManagerEvaluation.findOne.mockResolvedValue(null);
     models.SelfAssessment.findOne.mockResolvedValue(selfAssessmentMock);
-    // findAll called with { where: { criterion_id: [1] } } returns criterion 1 with current weight
+    // findAll called with { where: { criterion_id: [1] } } returns criterion 1
     models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
 
     // Manager submits for criterion_id=2 — not in the snapshot — must be REJECTED
@@ -709,13 +705,12 @@ describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current 
       .mockResolvedValueOnce(cp2)
       .mockResolvedValueOnce(cp2);
     models.ManagerEvaluation.findOne.mockResolvedValue(null);
-    models.SelfAssessment.findOne.mockResolvedValue(selfAssessmentMock);
-    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
-    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
-    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
     models.SelfAssessment.findOne
       .mockResolvedValueOnce(selfAssessmentMock) // freeze check inside txn
       .mockResolvedValueOnce({ assessment_id: 99 }); // selfAssessmentDone check
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
+    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
     models.EvaluationCheckpoint.update.mockResolvedValue([1]);
     models.AuditLog.create.mockResolvedValue({});
     models.Notification.create.mockResolvedValue({});
@@ -726,18 +721,16 @@ describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current 
     expect(resGood.status).toHaveBeenCalledWith(201);
   });
 
-  test('TC-G09-F4-EMP: manager snapshot has NULL weights → employee must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
-    // Manager evaluation has criterion_id=1 with NULL weight (pre-G09 row).
-    // raw_score=4 and weighted_contribution=80 let the controller recover the original
-    // weight:  (80 × 5) / 4 = 100 — matching the active criterion weight below.
-    const nullWeightScores = [{
-      criterion_id: 1,
-      weight_percent_at_scoring: null,
-      raw_score:              4,
-      weighted_contribution:  80,
-      name_at_scoring:        null,
+  test('TC-G09-F4-EMP: manager snapshot has non-NULL weights → employee must submit for snapshot criterion ID (1), not a different active criterion (2)', async () => {
+    // Manager evaluation has criterion_id=1 with a known weight.
+    // weight_percent_at_scoring is non-NULL so the NULL-weight guard is not triggered
+    // and criterion ID validation is reached.
+    const frozenScores = [{
+      criterion_id:              1,
+      weight_percent_at_scoring: 100,   // non-NULL — criterion freeze path
+      name_at_scoring:           null,
     }];
-    const managerEvalMock = { eval_id: 50, scores: nullWeightScores };
+    const managerEvalMock = { eval_id: 50, scores: frozenScores };
 
     const cp = makeCheckpoint({ due_date: '2020-01-01' });
     models.EvaluationCheckpoint.findByPk
@@ -746,7 +739,7 @@ describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current 
 
     models.SelfAssessment.findOne.mockResolvedValue(null);
     models.ManagerEvaluation.findOne.mockResolvedValue(managerEvalMock);
-    // findAll called with { where: { criterion_id: [1] } } returns criterion 1 with current weight
+    // findAll called with { where: { criterion_id: [1] } } returns criterion 1
     models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
 
     // Employee submits for criterion_id=2 — not in the snapshot — must be REJECTED
@@ -762,11 +755,12 @@ describe('Fix 4 — NULL weight guard: snapshot criterion IDs used with current 
       .mockResolvedValueOnce(cp2)
       .mockResolvedValueOnce(cp2);
     models.SelfAssessment.findOne.mockResolvedValue(null);
-    models.ManagerEvaluation.findOne.mockResolvedValue(managerEvalMock);
+    models.ManagerEvaluation.findOne
+      .mockResolvedValueOnce(managerEvalMock) // freeze check inside txn
+      .mockResolvedValueOnce(managerEvalMock); // managerDone check
     models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
     models.SelfAssessment.create.mockResolvedValue({ assessment_id: 20 });
     models.SelfAssessmentScore.bulkCreate.mockResolvedValue([]);
-    models.ManagerEvaluation.findOne.mockResolvedValueOnce(managerEvalMock); // managerDone check
     models.EvaluationCheckpoint.update.mockResolvedValue([1]);
     models.AuditLog.create.mockResolvedValue({});
     models.Notification.create.mockResolvedValue({});
@@ -953,16 +947,15 @@ describe('Fix 5 — score payload validation rejects invalid inputs', () => {
 
 describe('Fix 3b — name_at_scoring carried from first-submitter snapshot', () => {
   /**
-   * Snapshot with a frozen name and valid weight/contribution so that weight
-   * recovery succeeds and the name test can reach bulkCreate.
+   * Snapshot with a frozen name and non-NULL weight so that the NULL-weight guard
+   * is not triggered and the name carry-through test reaches bulkCreate (FR-14).
+   * With the new policy, NULL weight → 422 before name validation is checked.
    */
   function makeNamedSnapshot(frozenName) {
     return [{
       criterion_id:              1,
-      weight_percent_at_scoring: null,          // pre-G09 row: weight must be recovered
+      weight_percent_at_scoring: 100,           // non-NULL: NULL-weight guard bypassed
       name_at_scoring:           frozenName,
-      raw_score:                 4,
-      weighted_contribution:     80,            // recovered weight = (80×5)/4 = 100
     }];
   }
 
@@ -1048,110 +1041,41 @@ describe('Fix 3b — name_at_scoring carried from first-submitter snapshot', () 
 });
 
 // =============================================================================
-// Fix 3c — weight recovery from stored contribution (Issue 1)
+// Fix 3c — legacy-weight handling (Issue 1)
 //
-// When a pre-G09 row has weight_percent_at_scoring = NULL but valid
-// weighted_contribution and raw_score, the controller must recover the original
-// weight via (weighted_contribution × 5) / raw_score instead of silently
-// substituting a changed current weight.
-// When recovery is impossible (raw_score = 0 or nulls), the submission must
-// be rejected with 422 to prevent silent data corruption.
+// NULL weight_percent_at_scoring means a pre-G09 row where the original weight
+// was not snapshotted.  Recovering the weight via (contribution × 5) / raw_score
+// is unreliable: weighted_contribution is stored as a rounded decimal, so
+// inversion introduces rounding error.  The 68.74 / 31.26 example illustrates
+// this:
+//
+//   original weights: 68.74 %, 31.26 %
+//   contributions at 1 dp: (4/5)×68.74 = 54.992 → stored as 55.0
+//                           (4/5)×31.26 = 25.008 → stored as 25.0
+//   inversion:   (55.0×5)/4 = 68.75  ≠ 68.74
+//                (25.0×5)/4 = 31.25  ≠ 31.26
+//
+// The system must reject any second submission where ANY score has NULL
+// weight_percent_at_scoring, returning 422 UNRESOLVED_WEIGHT_HISTORY.
+// The getCheckpoint endpoint must expose hasUnresolvableWeightHistory:true so
+// the frontend can warn the reviewer before the second submission is attempted.
+//
+// Non-NULL weight_percent_at_scoring rows are unaffected — the stored value is
+// used exactly as-is (no inversion, no rounding).
+//
 // FR-14 — historical scoring data must remain consistent.
 // =============================================================================
 
-describe('Fix 3c — weight recovery from stored contribution', () => {
-  function eligibleSetupSingle() {
-    const cp = makeCheckpoint({ due_date: '2020-01-01' });
-    models.EvaluationCheckpoint.findByPk
-      .mockResolvedValueOnce(cp)
-      .mockResolvedValueOnce(cp);
-    models.ManagerEvaluation.findOne.mockResolvedValue(null);
-    models.SelfAssessment.findOne.mockResolvedValue(null);
-    return cp;
-  }
+describe('Fix 3c — legacy-weight handling: NULL weight_percent_at_scoring → 422', () => {
 
-  test('TC-G09-F3C-WR-MGR: NULL weight + valid rc/rs → recovered weight used, 201', async () => {
-    // Employee snapshot: weight_percent_at_scoring=NULL, rc=20, rs=4 → weight = (20×5)/4 = 25
+  test('TC-G09-F3C-NULL-MGR: NULL weight_percent_at_scoring → 422 (UNRESOLVED_WEIGHT_HISTORY) regardless of other fields', async () => {
+    // Employee snapshot with NULL weight (pre-G09 row).  Inversion is not attempted.
     const selfAssessmentMock = {
       assessment_id: 99,
       scores: [{
         criterion_id:              1,
-        weight_percent_at_scoring: null,
+        weight_percent_at_scoring: null,  // pre-G09: no snapshot
         name_at_scoring:           null,
-        raw_score:                 4,
-        weighted_contribution:     20,   // original weight = (20×5)/4 = 25
-      }],
-    };
-    const cp = makeCheckpoint({ due_date: '2020-01-01' });
-    models.EvaluationCheckpoint.findByPk
-      .mockResolvedValueOnce(cp)
-      .mockResolvedValueOnce(cp);
-    models.ManagerEvaluation.findOne.mockResolvedValue(null);
-    models.SelfAssessment.findOne
-      .mockResolvedValueOnce(selfAssessmentMock)   // outer check
-      .mockResolvedValueOnce(selfAssessmentMock)   // inner freeze check
-      .mockResolvedValueOnce({ assessment_id: 99 }); // selfAssessmentDone
-    // Active criterion has weight 25 (matches recovered weight)
-    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 25)]);
-    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
-    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
-
-    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }] });
-    const res = mockRes();
-    await submitManagerEvaluation(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(201);
-    // The bulkCreate row should use the RECOVERED weight (25), not any other value
-    expect(models.EvaluationScore.bulkCreate).toHaveBeenCalled();
-    const bulkArg = models.EvaluationScore.bulkCreate.mock.calls[0][0];
-    expect(bulkArg[0].weight_percent_at_scoring).toBe(25);
-  });
-
-  test('TC-G09-F3C-WR-EMP: NULL weight + valid rc/rs → recovered weight used, 201', async () => {
-    // Manager snapshot: weight_percent_at_scoring=NULL, rc=20, rs=4 → weight = 25
-    const managerEvalMock = {
-      eval_id: 50,
-      scores: [{
-        criterion_id:              1,
-        weight_percent_at_scoring: null,
-        name_at_scoring:           null,
-        raw_score:                 4,
-        weighted_contribution:     20,
-      }],
-    };
-    const cp = makeCheckpoint({ due_date: '2020-01-01' });
-    models.EvaluationCheckpoint.findByPk
-      .mockResolvedValueOnce(cp)
-      .mockResolvedValueOnce(cp);
-    models.SelfAssessment.findOne.mockResolvedValue(null);
-    models.ManagerEvaluation.findOne
-      .mockResolvedValueOnce(managerEvalMock)   // outer check
-      .mockResolvedValueOnce(managerEvalMock)   // inner freeze check
-      .mockResolvedValueOnce(managerEvalMock);  // managerDone check
-    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 25)]);
-    models.SelfAssessment.create.mockResolvedValue({ assessment_id: 20 });
-    models.SelfAssessmentScore.bulkCreate.mockResolvedValue([]);
-
-    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 3 }] });
-    const res = mockRes();
-    await submitSelfAssessment(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(201);
-    expect(models.SelfAssessmentScore.bulkCreate).toHaveBeenCalled();
-    const bulkArg = models.SelfAssessmentScore.bulkCreate.mock.calls[0][0];
-    expect(bulkArg[0].weight_percent_at_scoring).toBe(25);
-  });
-
-  test('TC-G09-F3C-UNREC-MGR: NULL weight + raw_score=0 → 422 (unrecoverable)', async () => {
-    // raw_score = 0 means division would produce Infinity/NaN → must reject
-    const selfAssessmentMock = {
-      assessment_id: 99,
-      scores: [{
-        criterion_id:              1,
-        weight_percent_at_scoring: null,
-        name_at_scoring:           null,
-        raw_score:                 0,
-        weighted_contribution:     0,
       }],
     };
     const cp = makeCheckpoint({ due_date: '2020-01-01' });
@@ -1169,19 +1093,20 @@ describe('Fix 3c — weight recovery from stored contribution', () => {
     await submitManagerEvaluation(req, res);
 
     expect(res.status).toHaveBeenCalledWith(422);
-    expect(res.json.mock.calls[0][0].message).toMatch(/cannot be recovered/i);
+    expect(res.json.mock.calls[0][0].message).toMatch(/unresolved weight history/i);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
     expect(res.status).not.toHaveBeenCalledWith(500);
+    // Must not reach bulkCreate
+    expect(models.EvaluationScore.bulkCreate).not.toHaveBeenCalled();
   });
 
-  test('TC-G09-F3C-UNREC-EMP: NULL weight + raw_score=0 → 422 (unrecoverable)', async () => {
+  test('TC-G09-F3C-NULL-EMP: NULL weight_percent_at_scoring → 422 (UNRESOLVED_WEIGHT_HISTORY) regardless of other fields', async () => {
     const managerEvalMock = {
       eval_id: 50,
       scores: [{
         criterion_id:              1,
-        weight_percent_at_scoring: null,
+        weight_percent_at_scoring: null,  // pre-G09: no snapshot
         name_at_scoring:           null,
-        raw_score:                 0,
-        weighted_contribution:     0,
       }],
     };
     const cp = makeCheckpoint({ due_date: '2020-01-01' });
@@ -1199,7 +1124,210 @@ describe('Fix 3c — weight recovery from stored contribution', () => {
     await submitSelfAssessment(req, res);
 
     expect(res.status).toHaveBeenCalledWith(422);
-    expect(res.json.mock.calls[0][0].message).toMatch(/cannot be recovered/i);
+    expect(res.json.mock.calls[0][0].message).toMatch(/unresolved weight history/i);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
     expect(res.status).not.toHaveBeenCalledWith(500);
+    expect(models.SelfAssessmentScore.bulkCreate).not.toHaveBeenCalled();
+  });
+
+  test('TC-G09-F3C-MIX-MGR: mixed NULL/non-NULL snapshot → 422 (entire snapshot is unresolvable)', async () => {
+    // Even if one criterion has a valid weight, ANY NULL makes the whole snapshot
+    // unresolvable — a partial recovery would produce inconsistent results.
+    const selfAssessmentMock = {
+      assessment_id: 99,
+      scores: [
+        { criterion_id: 1, weight_percent_at_scoring: 70,   name_at_scoring: null },  // OK
+        { criterion_id: 2, weight_percent_at_scoring: null, name_at_scoring: null },  // NULL
+      ],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock)
+      .mockResolvedValueOnce(selfAssessmentMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 70), makeCriterion(2, 30)]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }, { criterion_id: 2, raw_score: 3 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
+    expect(models.EvaluationScore.bulkCreate).not.toHaveBeenCalled();
+  });
+
+  test('TC-G09-F3C-MIX-EMP: mixed NULL/non-NULL manager snapshot → 422 (entire snapshot is unresolvable)', async () => {
+    const managerEvalMock = {
+      eval_id: 50,
+      scores: [
+        { criterion_id: 1, weight_percent_at_scoring: 70,   name_at_scoring: null },
+        { criterion_id: 2, weight_percent_at_scoring: null, name_at_scoring: null },
+      ],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.SelfAssessment.findOne.mockResolvedValue(null);
+    models.ManagerEvaluation.findOne
+      .mockResolvedValueOnce(managerEvalMock)
+      .mockResolvedValueOnce(managerEvalMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 70), makeCriterion(2, 30)]);
+
+    const req = employeeReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }, { criterion_id: 2, raw_score: 3 }] });
+    const res = mockRes();
+    await submitSelfAssessment(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
+    expect(models.SelfAssessmentScore.bulkCreate).not.toHaveBeenCalled();
+  });
+
+  test('TC-G09-F3C-AMBIG-MGR: 68.74/31.26 ambiguous-rounding case → 422, no inversion guess', async () => {
+    // Demonstrates the rounding problem: contributions stored at 1 dp give
+    // 55.0 and 25.0.  Inversion would produce 68.75 and 31.25 — different from the
+    // original 68.74 and 31.26.  The system must reject rather than guess.
+    const selfAssessmentMock = {
+      assessment_id: 99,
+      scores: [
+        { criterion_id: 1, weight_percent_at_scoring: null, name_at_scoring: null },
+        { criterion_id: 2, weight_percent_at_scoring: null, name_at_scoring: null },
+      ],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock)
+      .mockResolvedValueOnce(selfAssessmentMock);
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 68.74),
+      makeCriterion(2, 31.26),
+    ]);
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }, { criterion_id: 2, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    // Must be UNRESOLVED_WEIGHT_HISTORY — not an attempt to invert rounded contributions
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.json.mock.calls[0][0].code).toBe('UNRESOLVED_WEIGHT_HISTORY');
+    expect(models.EvaluationScore.bulkCreate).not.toHaveBeenCalled();
+  });
+
+  test('TC-G09-F3C-PRESERVED-MGR: non-NULL weights (68.74 / 31.26) used exactly — not rounded by inversion', async () => {
+    // A post-G09 snapshot stores the original weights directly.  They must be passed
+    // through unchanged — no inversion, no rounding.
+    const selfAssessmentMock = {
+      assessment_id: 99,
+      scores: [
+        { criterion_id: 1, weight_percent_at_scoring: 68.74, name_at_scoring: null },
+        { criterion_id: 2, weight_percent_at_scoring: 31.26, name_at_scoring: null },
+      ],
+    };
+    const cp = makeCheckpoint({ due_date: '2020-01-01' });
+    models.EvaluationCheckpoint.findByPk
+      .mockResolvedValueOnce(cp)
+      .mockResolvedValueOnce(cp);
+    models.ManagerEvaluation.findOne.mockResolvedValue(null);
+    models.SelfAssessment.findOne
+      .mockResolvedValueOnce(selfAssessmentMock)   // outer fast-path
+      .mockResolvedValueOnce(selfAssessmentMock)   // inner freeze check
+      .mockResolvedValueOnce({ assessment_id: 99 }); // selfAssessmentDone
+    models.EvaluationCriterion.findAll.mockResolvedValue([
+      makeCriterion(1, 68.74),
+      makeCriterion(2, 31.26),
+    ]);
+    models.ManagerEvaluation.create.mockResolvedValue({ eval_id: 10 });
+    models.EvaluationScore.bulkCreate.mockResolvedValue([]);
+    models.EvaluationCheckpoint.update.mockResolvedValue([1]);
+    models.AuditLog.create.mockResolvedValue({});
+    models.Notification.create.mockResolvedValue({});
+
+    const req = managerReq('1', { scores: [{ criterion_id: 1, raw_score: 4 }, { criterion_id: 2, raw_score: 4 }] });
+    const res = mockRes();
+    await submitManagerEvaluation(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    const bulkArg = models.EvaluationScore.bulkCreate.mock.calls[0][0];
+    const c1Row = bulkArg.find((r) => r.criterion_id === 1);
+    const c2Row = bulkArg.find((r) => r.criterion_id === 2);
+    expect(c1Row.weight_percent_at_scoring).toBe(68.74);  // exact original, not 68.75
+    expect(c2Row.weight_percent_at_scoring).toBe(31.26);  // exact original, not 31.25
+  });
+
+  test('TC-G09-F3C-GET-UNR: getCheckpoint with NULL snapshot weight → hasUnresolvableWeightHistory:true', async () => {
+    // The GET endpoint must expose the flag so the frontend can warn the reviewer
+    // before the second submission is attempted (consistency with submission 422).
+    const scoreWithNullWeight = {
+      criterion_id:              1,
+      weight_percent_at_scoring: null,  // pre-G09 row
+      name_at_scoring:           null,
+      raw_score:                 4,
+      weighted_contribution:     80,
+      criterion: { criterion_id: 1, name: 'Criterion 1', description: '', weight_percent: 100 },
+    };
+    const cpWithMgrEval = makeCheckpoint({
+      due_date: '2020-01-01',
+      managerEvaluation: {
+        eval_id:    50,
+        scores:     [scoreWithNullWeight],
+        toJSON:     jest.fn().mockReturnValue({ eval_id: 50, scores: [scoreWithNullWeight] }),
+      },
+    });
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(cpWithMgrEval);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    // HR_ADMIN role bypasses access control
+    const req = {
+      params: { checkpointId: '1' },
+      user:   { user_id: 1, role: 'HR_ADMIN' },
+    };
+    const res = mockRes();
+    await getCheckpoint(req, res);
+
+    expect(res.json).toHaveBeenCalled();
+    const body = res.json.mock.calls[0][0];
+    expect(body.success).toBe(true);
+    expect(body.hasUnresolvableWeightHistory).toBe(true);
+  });
+
+  test('TC-G09-F3C-GET-OK: getCheckpoint with non-NULL snapshot weight → hasUnresolvableWeightHistory:false', async () => {
+    // A post-G09 checkpoint with valid weight_percent_at_scoring should NOT be flagged.
+    const scoreWithWeight = {
+      criterion_id:              1,
+      weight_percent_at_scoring: 100,  // post-G09 row
+      name_at_scoring:           null,
+      raw_score:                 4,
+      weighted_contribution:     80,
+      criterion: { criterion_id: 1, name: 'Criterion 1', description: '', weight_percent: 100 },
+    };
+    const cpWithMgrEval = makeCheckpoint({
+      due_date: '2020-01-01',
+      managerEvaluation: {
+        eval_id:    50,
+        scores:     [scoreWithWeight],
+        toJSON:     jest.fn().mockReturnValue({ eval_id: 50, scores: [scoreWithWeight] }),
+      },
+    });
+    models.EvaluationCheckpoint.findByPk.mockResolvedValue(cpWithMgrEval);
+    models.EvaluationCriterion.findAll.mockResolvedValue([makeCriterion(1, 100)]);
+
+    const req = {
+      params: { checkpointId: '1' },
+      user:   { user_id: 1, role: 'HR_ADMIN' },
+    };
+    const res = mockRes();
+    await getCheckpoint(req, res);
+
+    expect(res.json).toHaveBeenCalled();
+    const body = res.json.mock.calls[0][0];
+    expect(body.success).toBe(true);
+    expect(body.hasUnresolvableWeightHistory).toBe(false);
   });
 });
