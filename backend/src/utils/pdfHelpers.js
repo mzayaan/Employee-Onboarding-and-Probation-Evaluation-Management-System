@@ -96,12 +96,18 @@ function buildCriteriaMap(completedCps) {
         if (weightUnresolvable) criteriaMap[name].weightUnresolvable = true;
       }
 
-      // Store BOTH raw_score AND the per-checkpoint weight so the weighted
-      // contribution can be calculated with the correct snapshot later.
+      // Store raw_score, the per-checkpoint weight, and the original
+      // weighted_contribution (if present) so the PDF renderer can use the
+      // stored contribution directly for pre-G09 rows where the original
+      // weight cannot be reliably recovered (G09 — avoids presenting the
+      // current weight as a historical fact, FR-14).
       criteriaMap[name].cpScores[cp.checkpoint_id] = {
-        raw_score:          Number.parseFloat(s.raw_score),
-        weight:             snapshotWeight,
-        weightUnresolvable: weightUnresolvable,
+        raw_score:            Number.parseFloat(s.raw_score),
+        weight:               snapshotWeight,
+        weightUnresolvable:   weightUnresolvable,
+        weighted_contribution: s.weighted_contribution != null
+          ? Number.parseFloat(s.weighted_contribution)
+          : null,
       };
     });
   });
@@ -146,6 +152,14 @@ function calcCriteriaWeightedScores(criteriaList, completedCps, lastMgrScores) {
       .map((cp) => {
         const entry = c.cpScores[cp.checkpoint_id];
         if (!entry) return null;
+        // G09: for pre-G09 rows where the original weight is unresolvable,
+        // use the stored weighted_contribution directly when it is available.
+        // This prevents the current (post-change) weight being applied
+        // retroactively to historical scores, which would misrepresent the
+        // recorded outcome (e.g. stored 50/10 becoming 64/20 = 84 instead of 60).
+        if (entry.weightUnresolvable && entry.weighted_contribution != null) {
+          return entry.weighted_contribution;
+        }
         return (entry.raw_score / 5) * entry.weight;
       })
       .filter((v) => v != null);

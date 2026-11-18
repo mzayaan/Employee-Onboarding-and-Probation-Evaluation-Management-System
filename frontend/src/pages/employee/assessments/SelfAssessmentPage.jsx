@@ -139,6 +139,9 @@ export default function SelfAssessmentPage() {
   const [error,   setError]   = useState(null)
   const [success, setSuccess] = useState(false)
   const [eligibilityError, setEligibilityError] = useState(null)  // G09-FIX Fix 6
+  // G09-FIX: weight-history warning — shown and blocks submission when any score
+  // in this checkpoint's peer snapshot has a NULL weight_percent_at_scoring.
+  const [weightHistoryWarning, setWeightHistoryWarning] = useState(null)
 
   // Two-way probation feedback fields
   const [twoway, setTwoway] = useState({
@@ -181,6 +184,8 @@ export default function SelfAssessmentPage() {
     // G09-FIX Fix 5: clear stale eligibility error synchronously before the
     // async fetch so the submit button is not locked when switching checkpoints.
     setEligibilityError(null)
+    // G09-FIX: clear stale weight-history warning synchronously.
+    setWeightHistoryWarning(null)
     getCheckpoint(selectedCheckpoint)
       .then((res) => {
         // res = { success, data: checkpoint, criteria }
@@ -207,6 +212,18 @@ export default function SelfAssessmentPage() {
           }
         } else {
           setEligibilityError(null)
+        }
+
+        // G09-FIX: weight-history warning blocks submission when any peer snapshot
+        // has a NULL weight_percent_at_scoring (backend would reject with 422).
+        if (res.hasUnresolvableWeightHistory) {
+          setWeightHistoryWarning(
+            'This checkpoint has evaluation records from before the scoring system was updated. ' +
+            'The original criteria weights for some earlier checkpoints cannot be fully recovered. ' +
+            'Please contact your System Administrator to resolve the weight history before submitting.'
+          )
+        } else {
+          setWeightHistoryWarning(null)
         }
 
         // Pre-fill if self-assessment already submitted
@@ -363,6 +380,18 @@ export default function SelfAssessmentPage() {
         <div className="mb-5 flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-amber-200">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
           {eligibilityError}
+        </div>
+      )}
+      {/* G09-FIX: weight-history warning — submission is blocked until resolved */}
+      {weightHistoryWarning && !alreadySubmitted && !success && (
+        <div className="mb-5 rounded-lg bg-orange-50 px-4 py-3 text-sm text-orange-800 ring-1 ring-orange-200">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div>
+              <p className="font-semibold mb-0.5">Weight history unavailable — submission blocked</p>
+              <p>{weightHistoryWarning}</p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -561,7 +590,7 @@ export default function SelfAssessmentPage() {
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={saving || !allScored || !!eligibilityError}
+                  disabled={saving || !allScored || !!eligibilityError || !!weightHistoryWarning}
                   className="inline-flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-medium text-white shadow-sm disabled:opacity-50"
                   style={{ backgroundColor: '#1e3a5f' }}
                 >

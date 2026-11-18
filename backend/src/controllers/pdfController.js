@@ -153,9 +153,12 @@ const generateReport = async (req, res) => {
                 {
                   model: EvaluationScore,
                   as: 'scores',
-                  // Include weight_percent_at_scoring (snapshot taken at submission, G09).
-                  // Falls back to criterion.weight_percent for rows predating migration 005.
-                  attributes: { include: ['weight_percent_at_scoring'] },
+                  // Include weight_percent_at_scoring and weighted_contribution
+                  // (snapshots taken at submission, G09).  weighted_contribution
+                  // is used as a historical ground-truth for pre-G09 rows where
+                  // weight_percent_at_scoring is NULL, preventing the current
+                  // weight from being applied retroactively (FR-14).
+                  attributes: { include: ['weight_percent_at_scoring', 'weighted_contribution'] },
                   include: [
                     { model: EvaluationCriterion, as: 'criterion', attributes: ['name', 'weight_percent', 'criterion_id'] },
                   ],
@@ -492,9 +495,15 @@ const generateReport = async (req, res) => {
         doc.save().fillColor(DARK).font('Helvetica-Bold').fontSize(8)
            .text(c.name, CX_CRIT + 4, rowY + 5, { width: CRIT_W - 8 }).restore();
 
-        // Weight %
-        doc.save().fillColor(GREY).font('Helvetica').fontSize(8)
-           .text(`${Number.parseFloat(c.weight).toFixed(0)}%`, CX_WT + 2, rowY + 5, { width: WT_W - 4, align: 'center' }).restore();
+        // Weight % — annotate when the original weight cannot be established
+        // (pre-G09 row with NULL weight_percent_at_scoring).  Show the current
+        // weight with a "(~)" marker so readers know the displayed weight is an
+        // approximation rather than a verified historical snapshot (FR-14).
+        const wtLabel = c.weightUnresolvable
+          ? `${Number.parseFloat(c.weight).toFixed(0)}%(~)`
+          : `${Number.parseFloat(c.weight).toFixed(0)}%`;
+        doc.save().fillColor(c.weightUnresolvable ? '#b45309' : GREY).font('Helvetica').fontSize(8)
+           .text(wtLabel, CX_WT + 2, rowY + 5, { width: WT_W - 4, align: 'center' }).restore();
 
         // Per-checkpoint raw score
         // cpScores entries are { raw_score, weight } objects (G09-WEIGHT fix) —

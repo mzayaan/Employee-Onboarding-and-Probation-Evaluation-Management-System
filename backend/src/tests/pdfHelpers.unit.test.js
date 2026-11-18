@@ -132,6 +132,25 @@ describe('buildCriteriaMap', () => {
     expect(map['Teamwork'].weightUnresolvable).toBe(true);
   });
 
+  // TC-PDF-008c: weighted_contribution is passed through to cpScores entries
+  // when present, so calcCriteriaWeightedScores can use the stored historical
+  // contribution rather than recalculating via the current weight (FR-14).
+  it('TC-PDF-008c: passes weighted_contribution through to cpScores entry', () => {
+    const score = {
+      criterion_id:              1,
+      raw_score:                 4,
+      weighted_contribution:     50,   // historical ground-truth contribution
+      weight_percent_at_scoring: null, // pre-G09 row
+      criterion: { name: 'Performance', weight_percent: 80 },
+    };
+    const cp = makeCheckpoint(10, 30, 'COMPLETED', '2026-01-30T00:00:00Z', [score]);
+    const map = buildCriteriaMap([cp]);
+    // weighted_contribution must be preserved in the cpScores entry.
+    expect(map['Performance'].cpScores[10].weighted_contribution).toBe(50);
+    // Must still be flagged unresolvable (original weight is unknown).
+    expect(map['Performance'].cpScores[10].weightUnresolvable).toBe(true);
+  });
+
   // TC-PDF-008b (G09 updated): weight_percent_at_scoring NULL → fall back to
   // current criterion weight for rendering and mark weightUnresolvable:true.
   // The old inversion via (weighted_contribution × 5) / raw_score was removed
@@ -269,5 +288,89 @@ describe('calcCriteriaWeightedScores', () => {
     }];
     calcCriteriaWeightedScores(criteriaList, [{ checkpoint_id: 10 }], []);
     expect(criteriaList[0].weightedScore).toBeNull();
+  });
+
+  // TC-PDF-014: G09 historical-contribution preservation — the 50/10 → 60 scenario.
+  //
+  // Background: a checkpoint was scored before G09 so weight_percent_at_scoring
+  // is NULL.  The stored weighted_contribution values are 50 (criterion A, raw=4)
+  // and 10 (criterion B, raw=5).  Current weights have since changed to 80 % and
+  // 20 % respectively.  Recalculating via current weights gives:
+  //   A: (4/5)*80 = 64,  B: (5/5)*20 = 20  → total = 84  (WRONG — G09 regression)
+  //
+  // The correct result uses the STORED contributions:
+  //   A: 50,  B: 10  → total = 60  (CORRECT — historical fact preserved)
+  //
+  // This test verifies that calcCriteriaWeightedScores uses weighted_contribution
+  // when weightUnresolvable is true, not (raw/5)*currentWeight.
+  it('TC-PDF-014: uses stored weighted_contribution for unresolvable rows — 50+10=60 not 84', () => {
+    // Criterion A: stored contribution=50, raw=4, current weight=80 (changed post-scoring)
+    // Criterion B: stored contribution=10, raw=5, current weight=20 (changed post-scoring)
+    // Single checkpoint — weightedScore = contribution / 1 for each criterion.
+    const criteriaList = [
+      {
+        name: 'Performance',
+        criterion_id: 1,
+        weight: 80, // current (post-change)
+        cpScores: {
+          10: {
+            raw_score:            4,
+            weight:               80,          // current weight (fallback from NULL)
+            weightUnresolvable:   true,
+            weighted_contribution: 50,          // historical ground truth
+          },
+        },
+      },
+      {
+        name: 'Attendance',
+        criterion_id: 2,
+        weight: 20, // current (post-change)
+        cpScores: {
+          10: {
+            raw_score:            5,
+            weight:               20,          // current weight (fallback from NULL)
+            weightUnresolvable:   true,
+            weighted_contribution: 10,          // historical ground truth
+          },
+        },
+      },
+    ];
+    const completedCps = [{ checkpoint_id: 10 }];
+
+    calcCriteriaWeightedScores(criteriaList, completedCps, []);
+
+    // Must use stored contributions (50 and 10), not recalculated ones (64 and 20).
+    expect(criteriaList[0].weightedScore).toBeCloseTo(50, 5);  // not 64
+    expect(criteriaList[1].weightedScore).toBeCloseTo(10, 5);  // not 20
+
+    // The sum of weightedScores must equal the historical cumulative total (60),
+    // not the recalculated total (84).
+    const total = criteriaList.reduce((s, c) => s + c.weightedScore, 0);
+    expect(total).toBeCloseTo(60, 5);
+    expect(total).not.toBeCloseTo(84, 1);
+  });
+
+  // TC-PDF-015: when weighted_contribution is NULL the formula falls through to
+  // (raw/5)*weight even when weightUnresolvable is true (contribution unavailable).
+  it('TC-PDF-015: falls back to (raw/5)*weight when weighted_contribution is null despite weightUnresolvable', () => {
+    // This covers the case where even the stored contribution is missing.
+    // The PDF must still render (using current weight as the best approximation)
+    // rather than producing null, so the row is not silently dropped.
+    const criteriaList = [{
+      name: 'Teamwork',
+      criterion_id: 3,
+      weight: 50, // current (fallback)
+      cpScores: {
+        10: {
+          raw_score:            4,
+          weight:               50,
+          weightUnresolvable:   true,
+          weighted_contribution: null, // unavailable
+        },
+      },
+    }];
+    calcCriteriaWeightedScores(criteriaList, [{ checkpoint_id: 10 }], []);
+    // Falls back to (4/5)*50 = 40 — better than null.
+    expect(criteriaList[0].weightedScore).toBeCloseTo(40, 5);
   });
 });
