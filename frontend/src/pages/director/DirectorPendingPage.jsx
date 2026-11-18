@@ -63,7 +63,7 @@ function PendingCard({ rec, onRefresh }) {
     setBusy(true); setErr(''); setOk(false)
     try {
       if (mode === 'approve') {
-        await approveRecommendation(rec.rec_id, { director_reason: reason.trim() || undefined })
+        await approveRecommendation(rec.rec_id, { director_reason: reason.trim() || undefined, revision_count: rec.revision_count })
       } else {
         await returnByDirector(rec.rec_id, { director_reason: reason.trim() })
       }

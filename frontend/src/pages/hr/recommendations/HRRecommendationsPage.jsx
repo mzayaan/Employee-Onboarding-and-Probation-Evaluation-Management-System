@@ -84,7 +84,7 @@ function PendingRow({ rec, onRefresh }) {
     setBusy(true); setErr(''); setOk(false)
     try {
       if (mode === 'endorse') {
-        await endorseRecommendation(rec.rec_id, { hr_endorsement_notes: notes.trim() || undefined })
+        await endorseRecommendation(rec.rec_id, { hr_endorsement_notes: notes.trim() || undefined, revision_count: rec.revision_count })
       } else {
         await returnToManagerByHR(rec.rec_id, { hr_endorsement_notes: notes.trim() })
       }

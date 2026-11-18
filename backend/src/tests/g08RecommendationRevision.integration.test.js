@@ -1049,6 +1049,7 @@ describe('G08 unified ownership regression — /resubmit endpoint', () => {
       rec_id:          10,
       approval_status: 'RETURNED_TO_MANAGER',
       submitted_by:    5,            // same as mockManagerUser.user_id
+      revision_count:  0,
       update:          jest.fn().mockResolvedValue(true),
     });
 
@@ -1060,6 +1061,149 @@ describe('G08 unified ownership regression — /resubmit endpoint', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.approval_status).toBe('PENDING_HR_REVIEW');
+  });
+
+});
+
+// =============================================================================
+// TC-G08-030 — TC-G08-033: Atomicity and revision_count regression tests
+// These tests reproduce each reported production gap (F1–F3) so that the
+// failure is verifiable and the fix is evidence-backed.
+// =============================================================================
+
+describe('G08 atomicity and revision_count regression tests', () => {
+
+  // TC-G08-030: /resubmit must increment revision_count on success
+  // Reproduces F3 gap — before the fix revision_count was never incremented.
+  test('TC-G08-030: resubmitRecommendation increments revision_count on success', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+
+    User.findOne.mockResolvedValue(mockManagerUser); // user_id: 5
+
+    const mockRec = {
+      rec_id:          10,
+      approval_status: 'RETURNED_TO_MANAGER',
+      submitted_by:    5,
+      revision_count:  2,                                    // current counter
+      update:          jest.fn().mockResolvedValue(true),
+    };
+    FinalRecommendation.findByPk.mockResolvedValue(mockRec);
+
+    const res = await request(app)
+      .post('/api/director/10/resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: 'Resubmitting with corrected note.' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    // Verify revision_count was incremented from 2 → 3
+    expect(mockRec.update).toHaveBeenCalled();
+    const updateArgs = mockRec.update.mock.calls[0][0];
+    expect(updateArgs.revision_count).toBe(3);
+  });
+
+  // TC-G08-031: /resubmit must commit its transaction on success
+  // Reproduces F3 gap — before the fix no transaction was opened so commit never ran.
+  test('TC-G08-031: resubmitRecommendation commits transaction on success', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+
+    User.findOne.mockResolvedValue(mockManagerUser);
+
+    FinalRecommendation.findByPk.mockResolvedValue({
+      rec_id:          10,
+      approval_status: 'RETURNED_TO_MANAGER',
+      submitted_by:    5,
+      revision_count:  0,
+      update:          jest.fn().mockResolvedValue(true),
+    });
+
+    const res = await request(app)
+      .post('/api/director/10/resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: 'Resubmitting with corrected note.' });
+
+    expect(res.status).toBe(200);
+    // Transaction commit must have been called — proves the operation is wrapped
+    // in a transaction that is explicitly committed on the happy path.
+    expect(freshTx.commit).toHaveBeenCalled();
+  });
+
+  // TC-G08-032: /endorse must use a transaction (atomicity regression)
+  // Reproduces F1 gap — before the fix endorseRecommendation called findByPk
+  // and rec.update without any transaction, leaving the stale check non-atomic.
+  test('TC-G08-032: endorseRecommendation commits transaction on success', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+
+    User.findOne.mockResolvedValue(mockHRUser);
+
+    FinalRecommendation.findByPk.mockResolvedValue({
+      ...makeMockRec({ approval_status: 'PENDING_HR_REVIEW' }),
+      revision_count: 0,
+      update: jest.fn().mockResolvedValue(true),
+    });
+
+    const res = await request(app)
+      .post('/api/director/10/endorse')
+      .set('Authorization', `Bearer ${hrToken}`)
+      .send({ hr_endorsement_notes: 'Score verified.' });
+
+    expect(res.status).toBe(200);
+    // Transaction commit proves endorseRecommendation opened a transaction and
+    // committed it — the stale check is now inside the same transaction.
+    expect(freshTx.commit).toHaveBeenCalled();
+  });
+
+  // TC-G08-033: /approve must use a transaction (atomicity regression)
+  // Reproduces F2 gap — before the fix approveRecommendation fetched the rec
+  // outside any transaction and the stale check ran on an unlocked row.
+  test('TC-G08-033: approveRecommendation commits transaction on success', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+
+    const mockDirectorUser = {
+      user_id: 7, email: 'director@company.com', role: 'DIRECTOR',
+      first_name: 'Director', last_name: 'Smith', is_active: true,
+      toJSON: jest.fn().mockReturnValue({ user_id: 7, role: 'DIRECTOR' }),
+    };
+    User.findOne.mockResolvedValue(mockDirectorUser);
+
+    FinalRecommendation.findByPk.mockResolvedValue({
+      ...makeMockRec({
+        approval_status:     'PENDING_DIRECTOR',
+        recommendation_type: 'CONFIRM',
+      }),
+      probationPeriod: makeMockPeriod(),
+      revision_count:  0,
+      submitted_by:    5,
+      update: jest.fn().mockResolvedValue(true),
+    });
+
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${directorToken}`)
+      .send({ director_reason: 'All criteria met.' });
+
+    expect(res.status).toBe(200);
+    // Transaction commit proves approveRecommendation opened a single unmanaged
+    // transaction that wrapped the stale check, the rec update and the period
+    // update atomically.
+    expect(freshTx.commit).toHaveBeenCalled();
   });
 
 });

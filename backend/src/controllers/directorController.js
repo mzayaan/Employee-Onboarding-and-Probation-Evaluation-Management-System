@@ -291,16 +291,26 @@ const getRecommendation = async (req, res) => {
 // FR-20 | NFR-03
 // =============================================================================
 const endorseRecommendation = async (req, res) => {
+  let t;
   try {
     const { recId } = req.params;
     const { hr_endorsement_notes = '', revision_count: clientRevisionCount } = req.body;
 
-    const rec = await FinalRecommendation.findByPk(recId);
+    // G08: atomic stale-revision check — fetch with row-level lock so no concurrent
+    // revision can slip between the check and the status update.
+    t = await sequelize.transaction();
+
+    const rec = await FinalRecommendation.findByPk(recId, {
+      lock:        t.LOCK.UPDATE,
+      transaction: t,
+    });
     if (!rec) {
+      await t.rollback();
       return res.status(404).json({ success: false, message: 'Recommendation not found.' });
     }
 
     if (rec.approval_status !== 'PENDING_HR_REVIEW') {
+      await t.rollback();
       return res.status(409).json({
         success: false,
         message: `Cannot endorse: recommendation is currently "${rec.approval_status}". Only PENDING_HR_REVIEW recommendations can be endorsed.`,
@@ -312,6 +322,7 @@ const endorseRecommendation = async (req, res) => {
     // this recommendation, and HR must reload before endorsing.
     if (clientRevisionCount !== undefined && clientRevisionCount !== null) {
       if (Number(rec.revision_count) !== Number(clientRevisionCount)) {
+        await t.rollback();
         return res.status(409).json({
           success: false,
           message: 'Recommendation has been revised since you last loaded it. Please reload and review the updated submission before endorsing.',
@@ -325,7 +336,9 @@ const endorseRecommendation = async (req, res) => {
       endorsed_at:           new Date(),
       hr_endorsement_notes:  hr_endorsement_notes?.trim() || null,
       submitted_to_director_at: new Date(),
-    });
+    }, { transaction: t });
+
+    await t.commit();
 
     await createAuditLog({
       userId:      req.user.user_id,
@@ -346,6 +359,7 @@ const endorseRecommendation = async (req, res) => {
       data:    { rec_id: recId, approval_status: 'PENDING_DIRECTOR' },
     });
   } catch (error) {
+    if (t) await t.rollback().catch(() => {});
     console.error('[directorController.endorseRecommendation]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to endorse recommendation.' });
   }
@@ -427,6 +441,7 @@ const returnToManagerByHR = async (req, res) => {
 // FR-20 | NFR-03
 // =============================================================================
 const resubmitRecommendation = async (req, res) => {
+  let t;
   try {
     const { recId } = req.params;
     const { justification = '' } = req.body;
@@ -435,12 +450,21 @@ const resubmitRecommendation = async (req, res) => {
       return res.status(400).json({ success: false, message: 'justification is required when resubmitting.' });
     }
 
-    const rec = await FinalRecommendation.findByPk(recId);
+    // G08: atomic ownership + status check — fetch with row-level lock so no concurrent
+    // modification can slip between the check and the update.
+    t = await sequelize.transaction();
+
+    const rec = await FinalRecommendation.findByPk(recId, {
+      lock:        t.LOCK.UPDATE,
+      transaction: t,
+    });
     if (!rec) {
+      await t.rollback();
       return res.status(404).json({ success: false, message: 'Recommendation not found.' });
     }
 
     if (rec.approval_status !== 'RETURNED_TO_MANAGER') {
+      await t.rollback();
       return res.status(409).json({
         success: false,
         message: `Cannot resubmit: recommendation status is "${rec.approval_status}". Only RETURNED_TO_MANAGER recommendations can be resubmitted.`,
@@ -451,12 +475,16 @@ const resubmitRecommendation = async (req, res) => {
     // The previous guard conditioned on role === 'LINE_MANAGER', which allowed an
     // HR_ADMIN to bypass ownership and resubmit on behalf of any manager.
     if (rec.submitted_by !== req.user.user_id) {
+      await t.rollback();
       return res.status(403).json({ success: false, message: 'Access denied. You may only resubmit your own recommendation.' });
     }
 
     await rec.update({
       approval_status: 'PENDING_HR_REVIEW',
       justification:   justification.trim(),
+      // G08: increment on every resubmit so endorsers and approvers can detect
+      // that the recommendation was revised since they last loaded it.
+      revision_count:  (rec.revision_count || 0) + 1,
       // Clear all stale decision fields so HR reviews fresh from the start (G08-Req6).
       // Both HR-returned and Director-returned paths must undergo a fresh HR review,
       // so Director decision fields are cleared here as well.
@@ -467,7 +495,9 @@ const resubmitRecommendation = async (req, res) => {
       director_id:              null,
       director_decision_at:     null,
       director_reason:          null,
-    });
+    }, { transaction: t });
+
+    await t.commit();
 
     await createAuditLog({
       userId:      req.user.user_id,
@@ -487,6 +517,7 @@ const resubmitRecommendation = async (req, res) => {
       data:    { rec_id: recId, approval_status: 'PENDING_HR_REVIEW' },
     });
   } catch (error) {
+    if (t) await t.rollback().catch(() => {});
     console.error('[directorController.resubmitRecommendation]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to resubmit recommendation.' });
   }
@@ -915,18 +946,28 @@ const reviseAndResubmitRecommendation = async (req, res) => {
 // FR-15, FR-20
 // =============================================================================
 const approveRecommendation = async (req, res) => {
+  let t;
   try {
     const { recId } = req.params;
     const { director_reason = '', revision_count: clientRevisionCount } = req.body;
 
+    // G08: atomic stale-revision + status check — fetch with row-level lock inside a
+    // single transaction so no concurrent revision or approval can slip between the
+    // check and the update (replaces the previous outer-fetch + inner-transaction split).
+    t = await sequelize.transaction();
+
     const rec = await FinalRecommendation.findByPk(recId, {
-      include: [{ model: ProbationPeriod, as: 'probationPeriod' }],
+      include:     [{ model: ProbationPeriod, as: 'probationPeriod' }],
+      lock:        t.LOCK.UPDATE,
+      transaction: t,
     });
     if (!rec) {
+      await t.rollback();
       return res.status(404).json({ success: false, message: 'Recommendation not found.' });
     }
 
     if (rec.approval_status !== 'PENDING_DIRECTOR') {
+      await t.rollback();
       return res.status(409).json({
         success: false,
         message: `Cannot approve: recommendation is currently "${rec.approval_status}". Only PENDING_DIRECTOR recommendations can be approved.`,
@@ -937,6 +978,7 @@ const approveRecommendation = async (req, res) => {
     // period.  This can happen when a no-probation contract is created for the employee
     // after the recommendation was raised but before the Director acts on it.
     if (rec.probationPeriod?.status === 'CANCELLED') {
+      await t.rollback();
       return res.status(409).json({
         success: false,
         message: 'Cannot approve: the linked probation period has been cancelled.',
@@ -948,6 +990,7 @@ const approveRecommendation = async (req, res) => {
     // loaded this recommendation; the Director must reload before approving.
     if (clientRevisionCount !== undefined && clientRevisionCount !== null) {
       if (Number(rec.revision_count) !== Number(clientRevisionCount)) {
+        await t.rollback();
         return res.status(409).json({
           success: false,
           message: 'Recommendation has been revised since you last loaded it. Please reload and review the updated submission before approving.',
@@ -963,77 +1006,75 @@ const approveRecommendation = async (req, res) => {
     };
     const newPeriodStatus = periodStatusMap[rec.recommendation_type] || 'COMPLETED';
 
-    // Note: sequelize is already destructured from require('../models') at the top
-    // of this file — the local re-require previously on this line has been removed.
-    await sequelize.transaction(async (t) => {
-      await rec.update({
-        approval_status:    'APPROVED',
-        director_id:        req.user.user_id,
-        director_decision_at: new Date(),
-        director_reason:    director_reason?.trim() || null,
-      }, { transaction: t });
+    await rec.update({
+      approval_status:    'APPROVED',
+      director_id:        req.user.user_id,
+      director_decision_at: new Date(),
+      director_reason:    director_reason?.trim() || null,
+    }, { transaction: t });
 
-      // Update ProbationPeriod to reflect the Director's decision
-      if (rec.probationPeriod) {
-        const periodUpdate = {
-          status:     newPeriodStatus,
-          updated_at: new Date(),
-        };
+    // Update ProbationPeriod to reflect the Director's decision
+    if (rec.probationPeriod) {
+      const periodUpdate = {
+        status:     newPeriodStatus,
+        updated_at: new Date(),
+      };
 
-        // FR-15 / EXTEND: push the end_date forward by the extension length and
-        // create a follow-up evaluation checkpoint so the system can track the
-        // extended period without requiring manual configuration.
-        if (rec.recommendation_type === 'EXTEND' && rec.probationPeriod.end_date) {
-          const extensionDays = 90; // default extension period — configurable in future
-          const currentEnd    = new Date(rec.probationPeriod.end_date);
-          const newEnd        = new Date(currentEnd);
-          newEnd.setDate(newEnd.getDate() + extensionDays);
-          periodUpdate.end_date = newEnd.toISOString().slice(0, 10);
+      // FR-15 / EXTEND: push the end_date forward by the extension length and
+      // create a follow-up evaluation checkpoint so the system can track the
+      // extended period without requiring manual configuration.
+      if (rec.recommendation_type === 'EXTEND' && rec.probationPeriod.end_date) {
+        const extensionDays = 90; // default extension period — configurable in future
+        const currentEnd    = new Date(rec.probationPeriod.end_date);
+        const newEnd        = new Date(currentEnd);
+        newEnd.setDate(newEnd.getDate() + extensionDays);
+        periodUpdate.end_date = newEnd.toISOString().slice(0, 10);
 
-          // Determine the highest existing day_number so the new checkpoint
-          // sits after the last one (avoids the unique(period_id, day_number) constraint)
-          const lastCheckpoint = await EvaluationCheckpoint.findOne({
-            where:  { period_id: rec.probationPeriod.period_id },
-            order:  [['day_number', 'DESC']],
-            transaction: t,
-          });
-          const nextDayNumber = (lastCheckpoint?.day_number ?? 0) + extensionDays;
+        // Determine the highest existing day_number so the new checkpoint
+        // sits after the last one (avoids the unique(period_id, day_number) constraint)
+        const lastCheckpoint = await EvaluationCheckpoint.findOne({
+          where:  { period_id: rec.probationPeriod.period_id },
+          order:  [['day_number', 'DESC']],
+          transaction: t,
+        });
+        const nextDayNumber = (lastCheckpoint?.day_number ?? 0) + extensionDays;
 
-          // Create a follow-up checkpoint at the new end date
-          await EvaluationCheckpoint.create({
-            period_id:        rec.probationPeriod.period_id,
-            checkpoint_label: 'Extension Review',
-            day_number:       nextDayNumber,
-            due_date:         newEnd.toISOString().slice(0, 10),
-            status:           'PENDING',
-          }, { transaction: t });
-        }
-
-        await rec.probationPeriod.update(periodUpdate, { transaction: t });
-
-        // G02-FIX: Sync EmployeeProfile with the Director decision.
-        //   employment_status: CONFIRM → PERMANENT, EXTEND → EXTENDED, DISMISS → DISMISSED
-        //   probation_end_date: synced to the new period end_date on EXTEND so that
-        //     HR and employee profile screens always display the current end date.
-        const employmentStatusMap = {
-          CONFIRM: 'PERMANENT',
-          EXTEND:  'EXTENDED',
-          DISMISS: 'DISMISSED',
-        };
-        const newEmploymentStatus = employmentStatusMap[rec.recommendation_type];
-        if (newEmploymentStatus) {
-          const profileUpdate = { employment_status: newEmploymentStatus };
-          // periodUpdate.end_date is only set when recommendation_type === 'EXTEND'
-          if (periodUpdate.end_date) {
-            profileUpdate.probation_end_date = periodUpdate.end_date;
-          }
-          await EmployeeProfile.update(
-            profileUpdate,
-            { where: { profile_id: rec.probationPeriod.profile_id }, transaction: t }
-          );
-        }
+        // Create a follow-up checkpoint at the new end date
+        await EvaluationCheckpoint.create({
+          period_id:        rec.probationPeriod.period_id,
+          checkpoint_label: 'Extension Review',
+          day_number:       nextDayNumber,
+          due_date:         newEnd.toISOString().slice(0, 10),
+          status:           'PENDING',
+        }, { transaction: t });
       }
-    });
+
+      await rec.probationPeriod.update(periodUpdate, { transaction: t });
+
+      // G02-FIX: Sync EmployeeProfile with the Director decision.
+      //   employment_status: CONFIRM → PERMANENT, EXTEND → EXTENDED, DISMISS → DISMISSED
+      //   probation_end_date: synced to the new period end_date on EXTEND so that
+      //     HR and employee profile screens always display the current end date.
+      const employmentStatusMap = {
+        CONFIRM: 'PERMANENT',
+        EXTEND:  'EXTENDED',
+        DISMISS: 'DISMISSED',
+      };
+      const newEmploymentStatus = employmentStatusMap[rec.recommendation_type];
+      if (newEmploymentStatus) {
+        const profileUpdate = { employment_status: newEmploymentStatus };
+        // periodUpdate.end_date is only set when recommendation_type === 'EXTEND'
+        if (periodUpdate.end_date) {
+          profileUpdate.probation_end_date = periodUpdate.end_date;
+        }
+        await EmployeeProfile.update(
+          profileUpdate,
+          { where: { profile_id: rec.probationPeriod.profile_id }, transaction: t }
+        );
+      }
+    }
+
+    await t.commit();
 
     await createAuditLog({
       userId:      req.user.user_id,
@@ -1082,6 +1123,7 @@ const approveRecommendation = async (req, res) => {
       data:    { rec_id: recId, approval_status: 'APPROVED', period_status: newPeriodStatus },
     });
   } catch (error) {
+    if (t) await t.rollback().catch(() => {});
     console.error('[directorController.approveRecommendation]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to approve recommendation.' });
   }

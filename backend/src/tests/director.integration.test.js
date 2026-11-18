@@ -101,9 +101,19 @@ const mockManagerUser = {
   }),
 };
 
-// The sequelize.transaction helper used in approveRecommendation
-const mockTransaction = jest.fn().mockImplementation(async (cb) => {
-  await cb({ /* fake transaction handle */ });
+// Dual-mode sequelize.transaction mock — supports both:
+//   managed:   sequelize.transaction(async (t) => { ... })  — callback style
+//   unmanaged: const t = await sequelize.transaction(); ... await t.commit()
+// approveRecommendation, endorseRecommendation and resubmitRecommendation
+// all use the unmanaged (promise-returning) style after the G08 atomicity fix.
+const txHandle = {
+  LOCK:     { UPDATE: 'UPDATE' },
+  commit:   jest.fn().mockResolvedValue(undefined),
+  rollback: jest.fn().mockResolvedValue(undefined),
+};
+const mockTransaction = jest.fn().mockImplementation(async (cbOrUndefined) => {
+  if (typeof cbOrUndefined === 'function') return cbOrUndefined(txHandle);
+  return txHandle;
 });
 
 jest.mock('../models', () => {

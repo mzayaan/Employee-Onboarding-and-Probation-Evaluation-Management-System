@@ -23,7 +23,11 @@ jest.mock('../config/database', () => ({
   define:       jest.fn().mockReturnValue({}),
   authenticate: jest.fn().mockResolvedValue(undefined),
   sync:         jest.fn().mockResolvedValue(undefined),
-  transaction:  jest.fn().mockImplementation(async (cb) => cb({})),
+  transaction:  jest.fn().mockImplementation(async (cbOrUndefined) => {
+    const h = { LOCK: { UPDATE: 'UPDATE' }, commit: jest.fn().mockResolvedValue(undefined), rollback: jest.fn().mockResolvedValue(undefined) };
+    if (typeof cbOrUndefined === 'function') return cbOrUndefined(h);
+    return h;
+  }),
   query:        jest.fn().mockResolvedValue([[], []]),
 }));
 
@@ -75,7 +79,11 @@ jest.mock('../models', () => {
   const mockSequelize = {
     authenticate: jest.fn().mockResolvedValue(undefined),
     sync:         jest.fn().mockResolvedValue(undefined),
-    transaction:  jest.fn().mockImplementation(async (cb) => cb({})),
+    transaction:  jest.fn().mockImplementation(async (cbOrUndefined) => {
+      const h = { LOCK: { UPDATE: 'UPDATE' }, commit: jest.fn().mockResolvedValue(undefined), rollback: jest.fn().mockResolvedValue(undefined) };
+      if (typeof cbOrUndefined === 'function') return cbOrUndefined(h);
+      return h;
+    }),
   };
 
   const mockHRUser = {
@@ -228,8 +236,12 @@ const getResponse = (res) => {
 beforeEach(() => {
   jest.clearAllMocks();
 
-  // Restore transaction to default pass-through
-  m.sequelize.transaction.mockImplementation(async (cb) => cb({}));
+  // Restore transaction to default pass-through (dual-mode: callback or promise-returning)
+  m.sequelize.transaction.mockImplementation(async (cbOrUndefined) => {
+    const h = { LOCK: { UPDATE: 'UPDATE' }, commit: jest.fn().mockResolvedValue(undefined), rollback: jest.fn().mockResolvedValue(undefined) };
+    if (typeof cbOrUndefined === 'function') return cbOrUndefined(h);
+    return h;
+  });
 
   // Restore model defaults
   m.Contract.findOne.mockResolvedValue(null);
