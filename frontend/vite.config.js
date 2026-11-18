@@ -19,9 +19,19 @@ export default defineConfig({
       },
     },
   },
+  // ── Test configuration (Vitest 1.6, jsdom 24, Node 22.x) ──────────────────
+  // Verified passing on Node 22.x (LTS).  The setup file handles the
+  // Request / AbortSignal compatibility shim for Node 18+ environments.
   test: {
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/tests/setup.js'],
+    // Expose the jsdom window globals (fetch, Request, Headers, …) so that
+    // the compatibility shim in setup.js can read them before tests run.
+    environmentOptions: {
+      jsdom: {
+        resources: 'usable',
+      },
+    },
   },
 })
