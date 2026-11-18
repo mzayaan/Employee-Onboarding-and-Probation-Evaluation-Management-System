@@ -375,4 +375,42 @@ describe('calcCriteriaWeightedScores', () => {
     // Must be null — not 40 from (4/5)*50 recalculation.
     expect(criteriaList[0].weightedScore).toBeNull();
   });
+
+  // TC-PDF-016: two-checkpoint mixed availability — cp1 has a known stored
+  // contribution (50, weightUnresolvable=true), cp2 has a null contribution
+  // (also weightUnresolvable=true).  The aggregate must be null, not 50/2=25.
+  //
+  // Rationale: cp2 was evaluated (entry != null) but its contribution cannot be
+  // recovered.  Using only cp1's contribution and dividing by 2 would silently
+  // produce a figure (25) that ignores cp2's real but unrecoverable value.
+  // This is the "unresolvable gap" case distinct from a criterion truly absent
+  // from a checkpoint (entry == null), where the full-denominator average is
+  // intentional.  (G09-EDGE, FR-14)
+  it('TC-PDF-016: two checkpoints — cp1 known contribution=50, cp2 null contribution → null, not 25', () => {
+    const criteriaList = [{
+      name: 'Performance',
+      criterion_id: 1,
+      weight: 80, // current (post-change — must NOT be used)
+      cpScores: {
+        10: {
+          raw_score:            4,
+          weight:               80,
+          weightUnresolvable:   true,
+          weighted_contribution: 50,    // cp1: known historical contribution
+        },
+        20: {
+          raw_score:            3,
+          weight:               80,
+          weightUnresolvable:   true,
+          weighted_contribution: null,  // cp2: unrecoverable — the gap
+        },
+      },
+    }];
+    const completedCps = [{ checkpoint_id: 10 }, { checkpoint_id: 20 }];
+
+    calcCriteriaWeightedScores(criteriaList, completedCps, []);
+
+    // Must be null, not 25 (which would be 50/2 ignoring the unrecoverable cp2).
+    expect(criteriaList[0].weightedScore).toBeNull();
+  });
 });

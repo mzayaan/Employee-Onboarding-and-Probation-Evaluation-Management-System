@@ -370,32 +370,14 @@ describe('note boundary regression — allNotes must use completedCps, not all c
 // TC-RGR-013: WT column rendering — unresolvable → 'Unavail.', not 'NN%'.
 // TC-RGR-014: WGT column rendering — unresolvable → no "/weight" denominator.
 
-const { calcCriteriaWeightedScores } = require('../utils/pdfHelpers');
+const { calcCriteriaWeightedScores,
+        formatWtLabel, formatWgtText,
+        shouldRenderProgressBar }    = require('../utils/pdfHelpers');
 
-// Pure helper that mirrors the WT-label decision in pdfController Section 1:
-//   const wtLabel = c.weightUnresolvable ? 'Unavail.' : `${toFixed(c.weight)}%`;
-const renderWtLabel = (c) =>
-  c.weightUnresolvable
-    ? 'Unavail.'
-    : `${Number.parseFloat(c.weight).toFixed(0)}%`;
-
-// Pure helper that mirrors the WGT-text decision in pdfController Section 1:
-//   wgtTxt = weightedScore != null
-//     ? (weightUnresolvable ? fmtScore(ws) : `${fmtScore(ws)}/${weight}`)
-//     : '—'
-const fmtScore = (v) => Number.parseFloat(v).toFixed(1);
-const renderWgtText = (c) => {
-  if (c.weightedScore != null) {
-    return c.weightUnresolvable
-      ? fmtScore(c.weightedScore)
-      : `${fmtScore(c.weightedScore)}/${Number.parseFloat(c.weight).toFixed(0)}`;
-  }
-  return '—';
-};
-
-// Pure helper that mirrors the progress-bar guard in pdfController Section 1:
-//   if (!c.weightUnresolvable) { progressBar(...) }
-const shouldRenderProgressBar = (c) => !c.weightUnresolvable;
+// TC-RGR-013 and TC-RGR-014 previously used local mirror functions that
+// duplicated pdfController's inline conditional expressions.  Those mirrors
+// have been replaced with the production helpers exported from pdfHelpers.js,
+// so the tests now exercise the same code path the PDF renderer calls.
 
 describe('G09 PDF renderer — weightUnresolvable display logic (TC-RGR-011..014)', () => {
 
@@ -465,10 +447,10 @@ describe('G09 PDF renderer — weightUnresolvable display logic (TC-RGR-011..014
     const unresolvable = { weight: 80, weightUnresolvable: true  };
     const resolved     = { weight: 30, weightUnresolvable: false };
 
-    expect(renderWtLabel(unresolvable)).toBe('Unavail.');
-    expect(renderWtLabel(resolved)).toBe('30%');
+    expect(formatWtLabel(unresolvable)).toBe('Unavail.');
+    expect(formatWtLabel(resolved)).toBe('30%');
     // Must not contain any numeric weight approximation for unresolvable rows.
-    expect(renderWtLabel(unresolvable)).not.toMatch(/\d+%/);
+    expect(formatWtLabel(unresolvable)).not.toMatch(/\d+%/);
   });
 
   // TC-RGR-014: WGT column rendering — unresolvable criteria with a known
@@ -484,18 +466,59 @@ describe('G09 PDF renderer — weightUnresolvable display logic (TC-RGR-011..014
     const resolved         = { weight: 30, weightUnresolvable: false, weightedScore: 24 };
 
     // Known stored contribution — score only, no denominator.
-    expect(renderWgtText(withContribution)).toBe('50.0');
-    expect(renderWgtText(withContribution)).not.toContain('/');
+    expect(formatWgtText(withContribution)).toBe('50.0');
+    expect(formatWgtText(withContribution)).not.toContain('/');
 
     // Fully unavailable — dash.
-    expect(renderWgtText(fullyUnavailable)).toBe('—');
+    expect(formatWgtText(fullyUnavailable)).toBe('—');
 
     // Resolved — score + denominator.
-    expect(renderWgtText(resolved)).toBe('24.0/30');
+    expect(formatWgtText(resolved)).toBe('24.0/30');
 
     // Progress bar: skip for both unresolvable cases, draw for resolved.
     expect(shouldRenderProgressBar(withContribution)).toBe(false);
     expect(shouldRenderProgressBar(fullyUnavailable)).toBe(false);
     expect(shouldRenderProgressBar(resolved)).toBe(true);
+  });
+
+  // TC-RGR-015: two-checkpoint mixed availability — cp1 has a known stored
+  // contribution (50, weightUnresolvable=true), cp2 has a null contribution
+  // (also weightUnresolvable=true).  The aggregate must be null, not 50/2=25.
+  //
+  // Previously calcCriteriaWeightedScores would filter out cp2's null, leaving
+  // cpContributions=[50] and dividing by completedCps.length=2 → 25.  With the
+  // hasUnresolvableGap fix the function detects that cp2 was evaluated but its
+  // contribution is unrecoverable and sets weightedScore = null, so formatWgtText
+  // returns '—' and no progress bar is drawn.
+  it('TC-RGR-015: two checkpoints mixed — cp1 known contribution=50, cp2 null → null aggregate, renders "—"', () => {
+    const criteriaList = [{
+      name: 'Performance',
+      criterion_id: 1,
+      weight: 80,
+      cpScores: {
+        10: { raw_score: 4, weight: 80, weightUnresolvable: true, weighted_contribution: 50 },
+        20: { raw_score: 3, weight: 80, weightUnresolvable: true, weighted_contribution: null },
+      },
+    }];
+    const completedCps = [{ checkpoint_id: 10 }, { checkpoint_id: 20 }];
+
+    calcCriteriaWeightedScores(criteriaList, completedCps, []);
+
+    const c = criteriaList[0];
+
+    // Core invariant: aggregate must be null, not 25 (= 50/2).
+    expect(c.weightedScore).toBeNull();
+    expect(c.weightedScore).not.toBe(25);
+
+    // Rendering: dash in WGT column, no progress bar.
+    expect(formatWgtText(c)).toBe('—');
+    expect(shouldRenderProgressBar(c)).toBe(false);
+
+    // WT label: the aggregate criterion's weight (80) IS known even though the
+    // individual cpScore rows lacked weight_percent_at_scoring.  buildCriteriaMap
+    // would have set c.weightUnresolvable only if the criterion-level weight
+    // record itself was null; here we pass weight:80 directly, so the WT column
+    // shows the current weight, not 'Unavail.'.
+    expect(formatWtLabel(c)).toBe('80%');
   });
 });

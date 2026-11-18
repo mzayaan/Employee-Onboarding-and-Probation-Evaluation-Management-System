@@ -148,6 +148,24 @@ function calcCriteriaWeightedScores(criteriaList, completedCps, lastMgrScores) {
     // Using the per-checkpoint weight snapshot means a criterion whose weight
     // changed from 20 % to 30 % between checkpoints contributes correctly from
     // each checkpoint rather than always using the first (or last) weight.
+
+    // G09-EDGE: if any completed checkpoint evaluated this criterion but has BOTH
+    // an unresolvable weight AND a missing stored contribution, the aggregate is
+    // unknown — it cannot be partially averaged.  This case is distinct from a
+    // criterion genuinely absent from a checkpoint (entry == null), where the
+    // full-denominator average is intentional and the absent checkpoint simply
+    // contributes 0.  When an unresolvable gap exists, mark the criterion null so
+    // the PDF renderer shows "—" rather than a figure derived only from the known
+    // checkpoint(s), which would implicitly divide by fewer than all checkpoints.
+    const hasUnresolvableGap = completedCps.some((cp) => {
+      const entry = c.cpScores[cp.checkpoint_id];
+      return entry != null && entry.weightUnresolvable && entry.weighted_contribution == null;
+    });
+    if (hasUnresolvableGap) {
+      c.weightedScore = null;
+      return;
+    }
+
     const cpContributions = completedCps
       .map((cp) => {
         const entry = c.cpScores[cp.checkpoint_id];
@@ -180,8 +198,64 @@ function calcCriteriaWeightedScores(criteriaList, completedCps, lastMgrScores) {
   });
 }
 
+// ── PDF rendering decision helpers ────────────────────────────────────────────
+//
+// These pure functions mirror the inline conditional expressions in
+// pdfController.js Section 1 so that the display logic can be unit-tested
+// directly without invoking PDFKit (TC-RGR-013, TC-RGR-014, TC-RGR-015).
+//
+// FR-14, FR-16 | G09
+
+/** Format value for a toFixed(1) score column. */
+const _fmtScore = (v) => Number.parseFloat(v).toFixed(1);
+
+/**
+ * WT column label — 'Unavail.' when the original weight cannot be established
+ * (pre-G09 NULL weight_percent_at_scoring), or 'NN%' when known.
+ * @param {{ weight: number, weightUnresolvable: boolean }} c
+ */
+function formatWtLabel(c) {
+  return c.weightUnresolvable
+    ? 'Unavail.'
+    : `${Number.parseFloat(c.weight).toFixed(0)}%`;
+}
+
+/**
+ * WGT column text:
+ *   • Resolved weight, score available → 'XX.X/NN'  (score / weight denominator)
+ *   • Unresolvable weight, score available → 'XX.X'  (no denominator — current weight
+ *     is not the historical weight so appending it would be misleading)
+ *   • Score null → '—'
+ * @param {{ weight: number, weightUnresolvable: boolean, weightedScore: number|null }} c
+ */
+function formatWgtText(c) {
+  if (c.weightedScore != null) {
+    return c.weightUnresolvable
+      ? _fmtScore(c.weightedScore)
+      : `${_fmtScore(c.weightedScore)}/${Number.parseFloat(c.weight).toFixed(0)}`;
+  }
+  return '—';
+}
+
+/**
+ * Returns true when the progress bar should be drawn for this criterion.
+ * Skipped for unresolvable rows because a bar scaled against the current weight
+ * would be misleading when that weight may not match the historical weight.
+ * Returns false when no meaningful bar can be drawn — either because the
+ * weight record is unresolvable or because the aggregate weighted score is
+ * null (e.g. a gap in the contribution history prevents a valid average).
+ *
+ * @param {{ weightUnresolvable: boolean, weightedScore: number|null }} c
+ */
+function shouldRenderProgressBar(c) {
+  return !c.weightUnresolvable && c.weightedScore != null;
+}
+
 module.exports = {
   filterCheckpointsByCycle,
   buildCriteriaMap,
   calcCriteriaWeightedScores,
+  formatWtLabel,
+  formatWgtText,
+  shouldRenderProgressBar,
 };

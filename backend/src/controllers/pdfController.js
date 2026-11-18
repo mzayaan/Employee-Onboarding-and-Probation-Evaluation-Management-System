@@ -26,7 +26,9 @@ const {
 } = require('../models');
 const { createAuditLog }                                        = require('../utils/auditLogger');
 const { filterCheckpointsByCycle, buildCriteriaMap,
-        calcCriteriaWeightedScores }                            = require('../utils/pdfHelpers');
+        calcCriteriaWeightedScores,
+        formatWtLabel, formatWgtText,
+        shouldRenderProgressBar }                               = require('../utils/pdfHelpers');
 
 // ── Colour palette (matches Figma design) ──────────────────────────────────
 const NAVY      = '#1e3a5f';   // header background, avatar, table header
@@ -500,9 +502,7 @@ const generateReport = async (req, res) => {
         // than the current weight.  Showing the current weight with a "(~)"
         // marker would still present a numeric value that readers might
         // interpret as a historical fact, which it is not (G09, FR-14).
-        const wtLabel = c.weightUnresolvable
-          ? 'Unavail.'
-          : `${Number.parseFloat(c.weight).toFixed(0)}%`;
+        const wtLabel = formatWtLabel(c);
         doc.save().fillColor(c.weightUnresolvable ? '#b45309' : GREY).font('Helvetica').fontSize(8)
            .text(wtLabel, CX_WT + 2, rowY + 5, { width: WT_W - 4, align: 'center' }).restore();
 
@@ -520,21 +520,14 @@ const generateReport = async (req, res) => {
         // weight is unresolvable: showing "50.0/80" implies the current weight
         // of 80 was the historical weight, which is unverified (G09, FR-14).
         // When the contribution is also unavailable, show "—".
-        let wgtTxt;
-        if (c.weightedScore != null) {
-          wgtTxt = c.weightUnresolvable
-            ? fmtScore(c.weightedScore)
-            : `${fmtScore(c.weightedScore)}/${Number.parseFloat(c.weight).toFixed(0)}`;
-        } else {
-          wgtTxt = '—';
-        }
+        const wgtTxt = formatWgtText(c);
         doc.save().fillColor(DARK).font('Helvetica-Bold').fontSize(8)
            .text(wgtTxt, CX_WGT + 2, rowY + 5, { width: WGT_W - 4, align: 'center' }).restore();
 
         // Progress bar — skip for unresolvable rows: a bar scaled against the
         // current weight would be misleading when that weight is not the
         // historical weight (G09, FR-14).
-        if (!c.weightUnresolvable) {
+        if (shouldRenderProgressBar(c)) {
           const pct      = (c.weight > 0 && c.weightedScore != null) ? c.weightedScore / c.weight : 0;
           const barColor = pct >= 0.75 ? '#22c55e' : pct >= 0.5 ? '#3b82f6' : '#ef4444';
           progressBar(doc, CX_PROG + 4, rowY + 7, PROG_W - 8, pct, barColor);
