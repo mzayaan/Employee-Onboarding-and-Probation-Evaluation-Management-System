@@ -28,8 +28,9 @@ const ManagerEvaluation   = require('./ManagerEvaluation');
 const EvaluationScore     = require('./EvaluationScore');
 const SelfAssessment      = require('./SelfAssessment');
 const SelfAssessmentScore = require('./SelfAssessmentScore');
-const FinalRecommendation = require('./FinalRecommendation');
-const PerformanceNote     = require('./PerformanceNote');
+const FinalRecommendation    = require('./FinalRecommendation');
+const RecommendationRevision = require('./RecommendationRevision');
+const PerformanceNote        = require('./PerformanceNote');
 const GeneratedReport     = require('./GeneratedReport');
 const Notification        = require('./Notification');
 const AuditLog            = require('./AuditLog');
@@ -401,6 +402,29 @@ FinalRecommendation.belongsTo(User, {
   as: 'director',
 });
 
+// ── FinalRecommendation ↔ RecommendationRevision (G08 audit trail) ───────
+FinalRecommendation.hasMany(RecommendationRevision, {
+  foreignKey: 'rec_id',
+  as: 'revisions',
+  onDelete: 'RESTRICT',
+  onUpdate: 'CASCADE',
+});
+RecommendationRevision.belongsTo(FinalRecommendation, {
+  foreignKey: 'rec_id',
+  as: 'recommendation',
+});
+// ── User (actor) ↔ RecommendationRevision ────────────────────────────────
+User.hasMany(RecommendationRevision, {
+  foreignKey: 'actor_id',
+  as: 'recommendationRevisions',
+  onDelete: 'RESTRICT',
+  onUpdate: 'CASCADE',
+});
+RecommendationRevision.belongsTo(User, {
+  foreignKey: 'actor_id',
+  as: 'actor',
+});
+
 // ── EmployeeProfile ↔ PerformanceNote ────────────────────────────────────
 EmployeeProfile.hasMany(PerformanceNote, {
   foreignKey: 'profile_id',
@@ -623,6 +647,7 @@ module.exports = {
   SelfAssessment,
   SelfAssessmentScore,
   FinalRecommendation,
+  RecommendationRevision,
   PerformanceNote,
   GeneratedReport,
   Notification,

@@ -21,12 +21,19 @@
 
 const {
   FinalRecommendation,
+  RecommendationRevision,
   ProbationPeriod,
   EvaluationCheckpoint,
+  ManagerEvaluation,
+  EvaluationScore,
+  EvaluationCriterion,
   EmployeeProfile,
   Department,
   User,
+  sequelize,
 } = require('../models');
+
+const { calcContribution, deriveRecommendation } = require('../utils/scoringHelpers');
 
 const { createAuditLog }    = require('../utils/auditLogger');
 const { createNotification } = require('../services/notificationService');
@@ -69,11 +76,46 @@ const loadRecommendationForReview = (recId) =>
               { model: User,       as: 'manager',     attributes: ['user_id', 'first_name', 'last_name', 'email'] },
             ],
           },
+          // G08: include COMPLETED checkpoints with their evaluation scores so the
+          // manager correction form can render current scores by checkpoint.
+          {
+            model:    EvaluationCheckpoint,
+            as:       'checkpoints',
+            where:    { status: 'COMPLETED' },
+            required: false,
+            include: [{
+              model:    ManagerEvaluation,
+              as:       'managerEvaluation',
+              required: false,
+              include: [{
+                model:    EvaluationScore,
+                as:       'scores',
+                required: false,
+                include: [{
+                  model:      EvaluationCriterion,
+                  as:         'criterion',
+                  attributes: ['criterion_id', 'name'],
+                }],
+              }],
+            }],
+          },
         ],
       },
       { model: User, as: 'submittedByManager', attributes: ['user_id', 'first_name', 'last_name', 'email'] },
       { model: User, as: 'endorsedByHR',       attributes: ['user_id', 'first_name', 'last_name'] },
       { model: User, as: 'director',            attributes: ['user_id', 'first_name', 'last_name'] },
+      // G08: immutable revision history (INSERT-only audit trail)
+      {
+        model:    RecommendationRevision,
+        as:       'revisions',
+        required: false,
+        include: [{
+          model:      User,
+          as:         'actor',
+          attributes: ['user_id', 'first_name', 'last_name'],
+        }],
+        order: [['revised_at', 'ASC']],
+      },
     ],
   });
 
@@ -397,11 +439,16 @@ const resubmitRecommendation = async (req, res) => {
     await rec.update({
       approval_status: 'PENDING_HR_REVIEW',
       justification:   justification.trim(),
-      // Clear previous endorsement fields so HR reviews fresh
-      endorsed_by:          null,
-      endorsed_at:          null,
-      hr_endorsement_notes: null,
+      // Clear all stale decision fields so HR reviews fresh from the start (G08-Req6).
+      // Both HR-returned and Director-returned paths must undergo a fresh HR review,
+      // so Director decision fields are cleared here as well.
+      endorsed_by:              null,
+      endorsed_at:              null,
+      hr_endorsement_notes:     null,
       submitted_to_director_at: null,
+      director_id:              null,
+      director_decision_at:     null,
+      director_reason:          null,
     });
 
     await createAuditLog({
@@ -424,6 +471,394 @@ const resubmitRecommendation = async (req, res) => {
   } catch (error) {
     console.error('[directorController.resubmitRecommendation]', error.message);
     return res.status(500).json({ success: false, message: 'Failed to resubmit recommendation.' });
+  }
+};
+
+// =============================================================================
+// POST /api/director/:recId/revise-and-resubmit                          (G08)
+// Line Manager makes controlled corrections to evaluation scores and
+// resubmits a RETURNED_TO_MANAGER recommendation for fresh HR review.
+//
+// Transition: RETURNED_TO_MANAGER → PENDING_HR_REVIEW
+//
+// Req 1 (Eligibility):
+//   • rec.approval_status === 'RETURNED_TO_MANAGER'
+//   • period.status in ['ACTIVE', 'EXTENDED']
+//   • requester is LINE_MANAGER and rec.submitted_by === req.user.user_id
+//   • period not CANCELLED
+//
+// Req 2 (Protect Approved History):
+//   • score_corrections may only target checkpoints in the CURRENT unapproved cycle
+//     (completed_at strictly AFTER the last approved Director decision timestamp)
+//
+// Req 3 (Preserve Scoring Evidence):
+//   • Uses frozen weight_percent_at_scoring; rejects unresolved-weight scores
+//   • Applies G09 integer 1–5 validation on each corrected raw_score
+//   • Keeps existing EvaluationScore.score_id / criterion_id
+//
+// Req 4 (Recalculate Consistently):
+//   • Recalculates weighted_contribution per score using frozen weight
+//   • Recalculates ManagerEvaluation.weighted_score for each affected checkpoint
+//   • Recalculates FinalRecommendation.cumulative_score and recommendation_type
+//     using the same formula as the original submission
+//
+// Req 5 (Revision History):
+//   • Writes an immutable RecommendationRevision row inside the same transaction
+//     (not a best-effort audit helper — a failed write aborts the entire operation)
+//
+// Req 6 (Restart Review):
+//   • Clears ALL stale HR and Director decision fields (see resubmitRecommendation fix)
+//   • Both HR-returned and Director-returned paths undergo fresh HR review
+//
+// Req 7 (Atomicity):
+//   • Single Sequelize transaction covers score corrections, recalculation,
+//     revision history write, and workflow status transition
+//   • Row-level locks (LOCK.UPDATE) on FinalRecommendation and affected scores
+//   • Notifications sent only after COMMIT
+//
+// Body: {
+//   justification     (string, required) — updated submission justification
+//   correction_reason (string, required) — explanation of why scores were changed
+//   score_corrections (array, optional)  — [{ score_id, raw_score }, ...]
+// }
+//
+// FR-15, FR-18 | G08 | NFR-02, NFR-03 | Objective 3
+// =============================================================================
+const reviseAndResubmitRecommendation = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const { recId } = req.params;
+    const {
+      justification      = '',
+      correction_reason  = '',
+      score_corrections  = [],
+    } = req.body;
+
+    // ── Validate required text fields ────────────────────────────────────────
+    if (!justification?.trim()) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'justification is required.' });
+    }
+    if (!correction_reason?.trim()) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'correction_reason is required.' });
+    }
+
+    // ── 1. Lock-fetch FinalRecommendation ────────────────────────────────────
+    const rec = await FinalRecommendation.findOne({
+      where: { rec_id: recId },
+      lock: t.LOCK.UPDATE,
+      transaction: t,
+      include: [{ model: ProbationPeriod, as: 'probationPeriod' }],
+    });
+
+    if (!rec) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Recommendation not found.' });
+    }
+
+    // ── 2. Status gate ────────────────────────────────────────────────────────
+    if (rec.approval_status !== 'RETURNED_TO_MANAGER') {
+      await t.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `Cannot revise: recommendation status is "${rec.approval_status}". Only RETURNED_TO_MANAGER recommendations can be revised and resubmitted.`,
+      });
+    }
+
+    // ── 3. Ownership / role gate ──────────────────────────────────────────────
+    if (req.user.role === 'LINE_MANAGER' && rec.submitted_by !== req.user.user_id) {
+      await t.rollback();
+      return res.status(403).json({ success: false, message: 'Access denied. You may only revise your own recommendation.' });
+    }
+
+    // ── 4. Period status gate ─────────────────────────────────────────────────
+    const period = rec.probationPeriod;
+    if (period.status === 'CANCELLED') {
+      await t.rollback();
+      return res.status(409).json({ success: false, message: 'Cannot revise: probation period is cancelled.' });
+    }
+    if (!['ACTIVE', 'EXTENDED'].includes(period.status)) {
+      await t.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `Cannot revise: probation period status is "${period.status}". Only ACTIVE or EXTENDED periods are eligible.`,
+      });
+    }
+
+    // ── 5. Determine cycle boundary (last APPROVED Director decision) ─────────
+    const lastApproved = await FinalRecommendation.findOne({
+      where: { period_id: period.period_id, approval_status: 'APPROVED' },
+      order: [['director_decision_at', 'DESC']],
+      attributes: ['director_decision_at'],
+      transaction: t,
+    });
+    const cycleDecisionAt = lastApproved?.director_decision_at
+      ? new Date(lastApproved.director_decision_at)
+      : null;
+
+    // ── 6. Apply score corrections (if provided) ──────────────────────────────
+    const beforeScores             = [];
+    const afterScores              = [];
+    const beforeCheckpointTotals   = {};
+    const afterCheckpointTotals    = {};
+    const affectedCheckpointIds    = new Set();
+    // Deduplication: only process each score_id once
+    const processedScoreIds        = new Set();
+
+    for (const corr of score_corrections) {
+      const { score_id, raw_score } = corr;
+
+      // G09 — integer 1–5 validation
+      if (!Number.isInteger(raw_score) || raw_score < 1 || raw_score > 5) {
+        await t.rollback();
+        return res.status(422).json({
+          success: false,
+          message: `Invalid raw_score ${raw_score} for score_id ${score_id}. Must be an integer between 1 and 5.`,
+        });
+      }
+
+      if (processedScoreIds.has(score_id)) {
+        await t.rollback();
+        return res.status(422).json({ success: false, message: `Duplicate score_id ${score_id} in score_corrections.` });
+      }
+      processedScoreIds.add(score_id);
+
+      // Load score with its evaluation and checkpoint for ownership + cycle checks
+      const score = await EvaluationScore.findOne({
+        where: { score_id },
+        lock: t.LOCK.UPDATE,
+        transaction: t,
+        include: [{
+          model: ManagerEvaluation,
+          as:    'managerEvaluation',
+          include: [{
+            model: EvaluationCheckpoint,
+            as:    'checkpoint',
+          }],
+        }],
+      });
+
+      if (!score) {
+        await t.rollback();
+        return res.status(404).json({ success: false, message: `EvaluationScore ${score_id} not found.` });
+      }
+
+      const checkpoint = score.managerEvaluation?.checkpoint;
+
+      // Ownership: checkpoint must belong to this period
+      if (!checkpoint || checkpoint.period_id !== period.period_id) {
+        await t.rollback();
+        return res.status(403).json({
+          success: false,
+          message: `Score ${score_id} does not belong to period ${period.period_id}.`,
+        });
+      }
+
+      // Cancelled checkpoint gate
+      if (checkpoint.status === 'CANCELLED') {
+        await t.rollback();
+        return res.status(409).json({
+          success: false,
+          message: `Checkpoint ${checkpoint.checkpoint_id} is CANCELLED and cannot be corrected.`,
+        });
+      }
+
+      // Approved-cycle protection (Req 2)
+      if (cycleDecisionAt && checkpoint.completed_at) {
+        const cpCompletedAt = new Date(checkpoint.completed_at);
+        if (cpCompletedAt <= cycleDecisionAt) {
+          await t.rollback();
+          return res.status(409).json({
+            success: false,
+            message: `Checkpoint ${checkpoint.checkpoint_id} belongs to an already-approved cycle and cannot be corrected.`,
+          });
+        }
+      }
+
+      // G09 — reject unresolved weight (Req 3)
+      if (score.weight_percent_at_scoring == null) {
+        await t.rollback();
+        return res.status(422).json({
+          success: false,
+          message: `Score ${score_id} has an unresolved weight history. Corrections to pre-G09 scores are not permitted.`,
+        });
+      }
+
+      // Capture before-state
+      beforeScores.push({
+        score_id:                   score.score_id,
+        eval_id:                    score.eval_id,
+        criterion_id:               score.criterion_id,
+        raw_score:                  Number.parseFloat(score.raw_score),
+        weight_percent_at_scoring:  Number.parseFloat(score.weight_percent_at_scoring),
+        weighted_contribution:      score.weighted_contribution != null
+          ? Number.parseFloat(score.weighted_contribution)
+          : null,
+      });
+
+      // Calculate new contribution using frozen weight
+      const newContribution = calcContribution(raw_score, score.weight_percent_at_scoring);
+
+      // Apply correction
+      await score.update({
+        raw_score:              raw_score,
+        weighted_contribution:  newContribution,
+      }, { transaction: t });
+
+      afterScores.push({
+        score_id:                  score.score_id,
+        eval_id:                   score.eval_id,
+        criterion_id:              score.criterion_id,
+        raw_score:                 raw_score,
+        weight_percent_at_scoring: Number.parseFloat(score.weight_percent_at_scoring),
+        weighted_contribution:     newContribution,
+      });
+
+      affectedCheckpointIds.add(checkpoint.checkpoint_id);
+    }
+
+    // ── 7. Recalculate ManagerEvaluation.weighted_score for affected checkpoints
+    for (const cpId of affectedCheckpointIds) {
+      const mgrEval = await ManagerEvaluation.findOne({
+        where: { checkpoint_id: cpId },
+        lock:  t.LOCK.UPDATE,
+        transaction: t,
+      });
+
+      if (mgrEval) {
+        beforeCheckpointTotals[cpId] = Number.parseFloat(mgrEval.weighted_score);
+
+        // Sum all criterion contributions for this evaluation using frozen weights
+        const allScores = await EvaluationScore.findAll({
+          where: { eval_id: mgrEval.eval_id },
+          transaction: t,
+        });
+
+        const newTotal = allScores.reduce((sum, s) => {
+          // Prefer frozen weight; fall back to stored contribution for pre-G09 rows
+          if (s.weight_percent_at_scoring != null) {
+            return sum + calcContribution(Number.parseFloat(s.raw_score), s.weight_percent_at_scoring);
+          }
+          return sum + (s.weighted_contribution != null ? Number.parseFloat(s.weighted_contribution) : 0);
+        }, 0);
+        const newTotalRounded = Number.parseFloat(newTotal.toFixed(2));
+
+        await mgrEval.update({ weighted_score: newTotalRounded }, { transaction: t });
+        afterCheckpointTotals[cpId] = newTotalRounded;
+      }
+    }
+
+    // ── 8. Recalculate cumulative score from current-cycle completed checkpoints
+    // Consistent with original submitManagerEvaluation formula: average of all
+    // completed checkpoints' weighted_score within the current unapproved cycle.
+    const allCompletedCps = await EvaluationCheckpoint.findAll({
+      where: { period_id: period.period_id, status: 'COMPLETED' },
+      include: [{
+        model:      ManagerEvaluation,
+        as:         'managerEvaluation',
+        attributes: ['weighted_score'],
+      }],
+      transaction: t,
+    });
+
+    // Filter to current cycle (after last approved Director decision)
+    const cycleCheckpoints = cycleDecisionAt
+      ? allCompletedCps.filter((cp) => cp.completed_at && new Date(cp.completed_at) > cycleDecisionAt)
+      : allCompletedCps;
+
+    const beforeCumulative = Number.parseFloat(rec.cumulative_score);
+    const beforeRecType    = rec.recommendation_type;
+
+    let newCumulative, newRecType;
+    if (cycleCheckpoints.length > 0) {
+      const scores   = cycleCheckpoints.map((cp) => Number.parseFloat(cp.managerEvaluation?.weighted_score || 0));
+      newCumulative  = Number.parseFloat(
+        (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2)
+      );
+      newRecType     = deriveRecommendation(newCumulative);
+    } else {
+      // No cycle checkpoints found — retain existing values
+      newCumulative = beforeCumulative;
+      newRecType    = beforeRecType;
+    }
+
+    // ── 9. Write revision history (required — not best-effort) ───────────────
+    await RecommendationRevision.create({
+      rec_id:                     rec.rec_id,
+      actor_id:                   req.user.user_id,
+      revised_at:                 new Date(),
+      correction_reason:          correction_reason.trim(),
+      before_scores:              beforeScores.length    > 0 ? beforeScores              : null,
+      after_scores:               afterScores.length     > 0 ? afterScores               : null,
+      before_checkpoint_totals:   Object.keys(beforeCheckpointTotals).length > 0 ? beforeCheckpointTotals : null,
+      after_checkpoint_totals:    Object.keys(afterCheckpointTotals).length  > 0 ? afterCheckpointTotals  : null,
+      before_cumulative_score:    beforeCumulative,
+      after_cumulative_score:     newCumulative,
+      before_recommendation_type: beforeRecType,
+      after_recommendation_type:  newRecType,
+      before_justification:       rec.justification  || null,
+      after_justification:        justification.trim(),
+      hr_return_reason:           rec.hr_endorsement_notes || null,
+      director_return_reason:     rec.director_reason      || null,
+    }, { transaction: t });
+
+    // ── 10. Update FinalRecommendation — restart review, clear all stale fields
+    await rec.update({
+      approval_status:          'PENDING_HR_REVIEW',
+      justification:             justification.trim(),
+      cumulative_score:          newCumulative,
+      recommendation_type:       newRecType,
+      // HR decision fields
+      endorsed_by:               null,
+      endorsed_at:               null,
+      hr_endorsement_notes:      null,
+      submitted_to_director_at:  null,
+      // Director decision fields
+      director_id:               null,
+      director_decision_at:      null,
+      director_reason:           null,
+    }, { transaction: t });
+
+    // ── 11. Sync ProbationPeriod summary ──────────────────────────────────────
+    await period.update({
+      cumulative_score:     newCumulative,
+      final_recommendation: newRecType,
+      updated_at:           new Date(),
+    }, { transaction: t });
+
+    // ── 12. COMMIT ────────────────────────────────────────────────────────────
+    await t.commit();
+
+    // ── 13. Post-commit: audit log and notifications (fire-and-forget) ────────
+    createAuditLog({
+      userId:      req.user.user_id,
+      actionType:  'RECOMMENDATION_REVISED_AND_RESUBMITTED',
+      description: `Recommendation ID ${recId} revised and resubmitted. Cumulative: ${beforeCumulative}% → ${newCumulative}%. Type: ${beforeRecType} → ${newRecType}. ${score_corrections.length} score(s) corrected.`,
+      ipAddress:   getIp(req),
+    }).catch(() => {});
+
+    void notifyHR(
+      `A probation recommendation (${newRecType}) has been revised and resubmitted for your review.`,
+      rec.rec_id
+    );
+
+    return res.json({
+      success: true,
+      message: 'Recommendation revised and resubmitted for HR review.',
+      data: {
+        rec_id:              rec.rec_id,
+        approval_status:     'PENDING_HR_REVIEW',
+        cumulative_score:    newCumulative,
+        recommendation_type: newRecType,
+        scores_corrected:    score_corrections.length,
+      },
+    });
+
+  } catch (error) {
+    await t.rollback();
+    console.error('[directorController.reviseAndResubmitRecommendation]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to revise and resubmit recommendation.' });
   }
 };
 
@@ -750,6 +1185,7 @@ module.exports = {
   endorseRecommendation,
   returnToManagerByHR,
   resubmitRecommendation,
+  reviseAndResubmitRecommendation, // G08
   approveRecommendation,
   returnByDirector,
   listAllRecommendations,

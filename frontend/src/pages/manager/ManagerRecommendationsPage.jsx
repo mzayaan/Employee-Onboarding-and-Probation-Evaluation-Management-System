@@ -3,12 +3,14 @@
 //
 // Line Manager — My Submitted Recommendations
 //
-// Shows all probation recommendations the manager has submitted:
-//   • PENDING_HR_REVIEW    — awaiting HR endorsement
-//   • RETURNED_TO_MANAGER  — HR returned; manager can resubmit with revised justification
-//   • PENDING_DIRECTOR     — HR endorsed; awaiting Director decision
-//   • UNDER_REVIEW         — Director reviewing
-//   • APPROVED             — Director approved
+// Shows all probation recommendations the manager has submitted.
+// When a recommendation is RETURNED_TO_MANAGER the manager sees:
+//   • HR and/or Director return reasons (Req 8)
+//   • Eligible checkpoint scores, pre-filled, editable 1–5 (Req 8, Req 3)
+//   • Mandatory correction_reason textarea (Req 8)
+//   • Mandatory justification textarea (pre-filled) (Req 8)
+//   • Revise-and-Resubmit action via POST /revise-and-resubmit (Req 8)
+//   • Revision history (Req 5, Req 8)
 //
 // Route:  /manager/recommendations
 // FR-15 | NFR-03 | Objective 3
@@ -18,17 +20,25 @@ import { useEffect, useState, useCallback } from 'react'
 import AppShell from '@/components/shared/AppShell'
 import {
   listMyRecommendations,
-  resubmitRecommendation,
+  getRecommendation,
+  reviseAndResubmit,
 } from '@/api/directorApi'
 import { downloadReport } from '@/api/reportApi'
 import {
   BadgeCheck, Loader2, AlertCircle, CheckCircle2,
   ChevronDown, ChevronUp, RefreshCw, RotateCcw, FileDown,
+  History, Info,
 } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDate = (iso) =>
   iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+
+const fmtDateTime = (iso) =>
+  iso ? new Date(iso).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  }) : '—'
 
 const REC_COLOURS = {
   CONFIRM:  { bg: 'bg-green-50',  text: 'text-green-700',  ring: 'ring-green-200',  label: 'Confirm Employment'  },
@@ -37,11 +47,11 @@ const REC_COLOURS = {
 }
 
 const STATUS_LABELS = {
-  PENDING_HR_REVIEW:    { label: 'Awaiting HR Review',  bg: 'bg-blue-50',   text: 'text-blue-700'   },
+  PENDING_HR_REVIEW:    { label: 'Awaiting HR Review',         bg: 'bg-blue-50',   text: 'text-blue-700'   },
   RETURNED_TO_MANAGER:  { label: 'Returned — Action Required', bg: 'bg-amber-50',  text: 'text-amber-700'  },
-  PENDING_DIRECTOR:     { label: 'Awaiting Director',   bg: 'bg-purple-50', text: 'text-purple-700' },
-  UNDER_REVIEW:         { label: 'Under Review',        bg: 'bg-sky-50',    text: 'text-sky-700'    },
-  APPROVED:             { label: 'Approved',            bg: 'bg-green-50',  text: 'text-green-700'  },
+  PENDING_DIRECTOR:     { label: 'Awaiting Director',          bg: 'bg-purple-50', text: 'text-purple-700' },
+  UNDER_REVIEW:         { label: 'Under Review',               bg: 'bg-sky-50',    text: 'text-sky-700'    },
+  APPROVED:             { label: 'Approved',                   bg: 'bg-green-50',  text: 'text-green-700'  },
 }
 
 function StatusBadge({ status }) {
@@ -62,19 +72,184 @@ function RecBadge({ type }) {
   )
 }
 
+// ── Revision history panel ───────────────────────────────────────────────────
+function RevisionHistory({ revisions }) {
+  if (!revisions?.length) return null
+  return (
+    <div className="rounded-xl bg-slate-50 ring-1 ring-slate-200 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <History className="h-4 w-4 text-slate-500" />
+        <p className="text-sm font-semibold text-slate-700">Correction History</p>
+      </div>
+      <div className="space-y-3">
+        {revisions.map((rev, idx) => (
+          <div key={rev.revision_id ?? idx} className="rounded-lg bg-white ring-1 ring-slate-100 px-4 py-3 text-xs space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-slate-700">
+                {rev.actor ? `${rev.actor.first_name} ${rev.actor.last_name}` : 'Manager'}
+              </span>
+              <span className="text-slate-400">{fmtDateTime(rev.revised_at)}</span>
+              {(rev.before_recommendation_type !== rev.after_recommendation_type) && (
+                <span className="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 font-medium">
+                  {rev.before_recommendation_type} → {rev.after_recommendation_type}
+                </span>
+              )}
+              {rev.before_cumulative_score != null && rev.after_cumulative_score != null &&
+               Number.parseFloat(rev.before_cumulative_score) !== Number.parseFloat(rev.after_cumulative_score) && (
+                <span className="text-slate-500">
+                  Score: {Number.parseFloat(rev.before_cumulative_score).toFixed(1)}%
+                  {' → '}
+                  {Number.parseFloat(rev.after_cumulative_score).toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <p className="text-slate-600">
+              <span className="font-medium">Reason: </span>{rev.correction_reason}
+            </p>
+            {rev.hr_return_reason && (
+              <p className="text-amber-700">
+                <span className="font-medium">HR return reason (at time): </span>{rev.hr_return_reason}
+              </p>
+            )}
+            {rev.director_return_reason && (
+              <p className="text-purple-700">
+                <span className="font-medium">Director return reason (at time): </span>{rev.director_return_reason}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Score correction form (shown when RETURNED_TO_MANAGER) ───────────────────
+function ScoreCorrectionForm({ detailRec, corrections, onScoreChange }) {
+  const checkpoints = detailRec?.probationPeriod?.checkpoints ?? []
+  if (!checkpoints.length) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-500 ring-1 ring-slate-200">
+        <Info className="h-3.5 w-3.5 flex-shrink-0" />
+        No completed checkpoint scores are available for correction.
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+        Evaluation Scores by Checkpoint
+      </p>
+      {checkpoints.map((cp) => {
+        const eval_ = cp.managerEvaluation
+        const scores = eval_?.scores ?? []
+        return (
+          <div key={cp.checkpoint_id} className="rounded-lg bg-white ring-1 ring-slate-200 overflow-hidden">
+            <div className="bg-slate-50 px-4 py-2 flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700">
+                Checkpoint {cp.checkpoint_number ?? cp.checkpoint_id}
+                {cp.checkpoint_label ? ` — ${cp.checkpoint_label}` : ''}
+              </span>
+              <span className="text-xs text-slate-400">
+                Completed {fmtDate(cp.completed_at)}
+                {eval_ && (
+                  <> · Total: <span className="font-semibold text-slate-600">{Number.parseFloat(eval_.weighted_score ?? 0).toFixed(1)}%</span></>
+                )}
+              </span>
+            </div>
+            {scores.length === 0 ? (
+              <p className="px-4 py-3 text-xs text-slate-400">No scores recorded.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {scores.map((score) => {
+                  const currentVal = corrections[score.score_id] ?? score.raw_score
+                  const isChanged = Number(currentVal) !== Number(score.raw_score)
+                  return (
+                    <div key={score.score_id} className="flex items-center justify-between gap-4 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-slate-700 truncate">
+                          {score.name_at_scoring ?? score.criterion?.name ?? `Criterion ${score.criterion_id}`}
+                        </p>
+                        <p className="text-xs text-slate-400">
+                          Weight: {score.weight_percent_at_scoring != null
+                            ? `${Number.parseFloat(score.weight_percent_at_scoring).toFixed(1)}%`
+                            : <span className="text-amber-600">unresolved (locked)</span>}
+                        </p>
+                      </div>
+                      {score.weight_percent_at_scoring == null ? (
+                        // Pre-G09 score — cannot be corrected
+                        <div className="flex items-center gap-1 text-xs text-amber-600">
+                          <span className="font-semibold">{score.raw_score}</span>
+                          <span className="text-amber-400">/ 5 (locked)</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          {isChanged && (
+                            <span className="text-xs text-slate-400 line-through">{score.raw_score}</span>
+                          )}
+                          <select
+                            value={currentVal}
+                            onChange={(e) => onScoreChange(score.score_id, Number(e.target.value))}
+                            className={`rounded border px-2 py-1 text-sm font-medium outline-none focus:ring-2 focus:ring-amber-200 ${
+                              isChanged
+                                ? 'border-amber-400 bg-amber-50 text-amber-800'
+                                : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                          >
+                            {[1,2,3,4,5].map((v) => (
+                              <option key={v} value={v}>{v} / 5</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Expandable recommendation row ────────────────────────────────────────────
 function RecRow({ rec, onRefresh }) {
-  const [open,     setOpen]     = useState(false)
-  const [notes,    setNotes]    = useState('')
-  const [busy,     setBusy]     = useState(false)
-  const [err,      setErr]      = useState('')
-  const [ok,       setOk]       = useState(false)
-  const [pdfBusy,  setPdfBusy]  = useState(false)
-  const [pdfErr,   setPdfErr]   = useState('')
+  const [open,          setOpen]          = useState(false)
+  const [justification, setJustification] = useState(rec.justification || '')
+  const [corrReason,    setCorrReason]    = useState('')
+  const [corrections,   setCorrections]   = useState({}) // { score_id: raw_score }
+  const [busy,          setBusy]          = useState(false)
+  const [err,           setErr]           = useState('')
+  const [ok,            setOk]            = useState(false)
+  const [pdfBusy,       setPdfBusy]       = useState(false)
+  const [pdfErr,        setPdfErr]        = useState('')
+  const [showHistory,   setShowHistory]   = useState(false)
+  // Lazy-loaded detail (scores + revisions) — fetched once when form is opened
+  const [detailRec,     setDetailRec]     = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailErr,     setDetailErr]     = useState('')
 
   const emp    = rec.probationPeriod?.employeeProfile
   const period = rec.probationPeriod
   const canResubmit = rec.approval_status === 'RETURNED_TO_MANAGER'
+
+  // Fetch full detail (scores + revisions) once when the correction form is opened
+  useEffect(() => {
+    if (!open || !canResubmit || detailRec || detailLoading) return
+    setDetailLoading(true); setDetailErr('')
+    getRecommendation(rec.rec_id)
+      .then((data) => {
+        setDetailRec(data)
+        // Pre-fill justification from live detail
+        if (data.justification) setJustification(data.justification)
+      })
+      .catch(() => setDetailErr('Could not load score details. You may still revise the justification and resubmit.'))
+      .finally(() => setDetailLoading(false))
+  }, [open, canResubmit, rec.rec_id, detailRec, detailLoading])
+
+  const handleScoreChange = (scoreId, value) =>
+    setCorrections((prev) => ({ ...prev, [scoreId]: value }))
 
   const handleDownloadPdf = async () => {
     const periodId = rec.probationPeriod?.period_id
@@ -96,22 +271,44 @@ function RecRow({ rec, onRefresh }) {
     }
   }
 
-  const handleResubmit = async () => {
-    if (!notes.trim()) {
-      setErr('Revised justification is required when resubmitting.')
+  const handleReviseAndResubmit = async () => {
+    if (!justification.trim()) {
+      setErr('Justification is required.')
       return
     }
+    if (!corrReason.trim()) {
+      setErr('Correction reason is required — please explain what you are changing and why.')
+      return
+    }
+
+    // Build score_corrections: only send scores that differ from the original
+    const scoreCorrections = Object.entries(corrections)
+      .filter(([scoreId, newVal]) => {
+        const allScores = detailRec?.probationPeriod?.checkpoints
+          ?.flatMap((cp) => cp.managerEvaluation?.scores ?? []) ?? []
+        const orig = allScores.find((s) => s.score_id === Number(scoreId))
+        return orig && Number(newVal) !== Number(orig.raw_score)
+      })
+      .map(([scoreId, newVal]) => ({ score_id: Number(scoreId), raw_score: Number(newVal) }))
+
     setBusy(true); setErr(''); setOk(false)
     try {
-      await resubmitRecommendation(rec.rec_id, { justification: notes.trim() })
+      await reviseAndResubmit(rec.rec_id, {
+        justification:     justification.trim(),
+        correction_reason: corrReason.trim(),
+        score_corrections: scoreCorrections,
+      })
       setOk(true)
       setTimeout(() => { onRefresh() }, 800)
     } catch (e) {
-      setErr(e?.response?.data?.message || 'Resubmission failed. Please try again.')
+      setErr(e?.response?.data?.message || 'Revision and resubmission failed. Please try again.')
     } finally {
       setBusy(false)
     }
   }
+
+  // Collect revision history from either lazy-loaded detail or list data
+  const revisions = detailRec?.revisions ?? rec.revisions ?? []
 
   return (
     <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
@@ -150,7 +347,7 @@ function RecRow({ rec, onRefresh }) {
               onClick={(e) => { e.stopPropagation(); setOpen(true) }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
             >
-              <RotateCcw className="h-3.5 w-3.5" /> Resubmit
+              <RotateCcw className="h-3.5 w-3.5" /> Revise &amp; Resubmit
             </button>
           )}
           {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
@@ -161,26 +358,18 @@ function RecRow({ rec, onRefresh }) {
       {open && (
         <div className="border-t border-slate-100 px-6 py-4 space-y-4">
 
-          {/* Justification */}
-          {rec.justification && (
-            <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
-              <p className="font-semibold mb-1 text-xs text-slate-500 uppercase tracking-wide">Your Justification</p>
-              <p>{rec.justification}</p>
-            </div>
-          )}
-
-          {/* HR feedback (if returned) */}
+          {/* HR return reason (Req 8) */}
           {rec.hr_endorsement_notes && (
             <div className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-amber-200">
-              <p className="font-semibold mb-1">HR Feedback:</p>
+              <p className="font-semibold mb-1 text-xs text-amber-600 uppercase tracking-wide">HR Return Reason</p>
               <p>{rec.hr_endorsement_notes}</p>
             </div>
           )}
 
-          {/* Director reason (if APPROVED or returned by Director) */}
+          {/* Director return reason (Req 8) */}
           {rec.director_reason && (
             <div className="rounded-lg bg-purple-50 px-4 py-3 text-sm text-purple-800 ring-1 ring-purple-200">
-              <p className="font-semibold mb-1">Director Decision Notes:</p>
+              <p className="font-semibold mb-1 text-xs text-purple-600 uppercase tracking-wide">Director Return Reason</p>
               <p>{rec.director_reason}</p>
             </div>
           )}
@@ -209,6 +398,21 @@ function RecRow({ rec, onRefresh }) {
             </div>
           </div>
 
+          {/* Revision history toggle (Req 5, Req 8) */}
+          {revisions.length > 0 && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
+              >
+                <History className="h-3.5 w-3.5" />
+                {showHistory ? 'Hide' : 'Show'} correction history ({revisions.length})
+              </button>
+              {showHistory && <div className="mt-2"><RevisionHistory revisions={revisions} /></div>}
+            </div>
+          )}
+
           {/* PDF download — available once approved */}
           {rec.approval_status === 'APPROVED' && (
             <div>
@@ -235,7 +439,7 @@ function RecRow({ rec, onRefresh }) {
           {ok && (
             <div className="flex items-center gap-2 rounded-lg bg-green-50 px-4 py-2.5 text-sm text-green-700 ring-1 ring-green-200">
               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-              Recommendation resubmitted — HR will review shortly.
+              Recommendation revised and resubmitted — HR will review shortly.
             </div>
           )}
 
@@ -246,35 +450,74 @@ function RecRow({ rec, onRefresh }) {
             </div>
           )}
 
-          {/* Resubmit form */}
+          {/* Revise-and-resubmit form (Req 8) */}
           {canResubmit && !ok && (
-            <div className="rounded-xl bg-amber-50 px-5 py-4 ring-1 ring-amber-200 space-y-3">
-              <p className="font-medium text-amber-900 text-sm">
-                Revise and resubmit your justification to address HR feedback above.
+            <div className="rounded-xl bg-amber-50 px-5 py-5 ring-1 ring-amber-200 space-y-4">
+              <p className="font-semibold text-amber-900 text-sm">
+                Revise your submission to address the return reason above.
               </p>
-              <textarea
-                rows={4}
-                value={notes}
-                onChange={(e) => { setNotes(e.target.value); setErr('') }}
-                placeholder="Provide your revised justification for this probation recommendation…"
-                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 resize-none"
-              />
+
+              {/* Checkpoint score corrections (Req 3, Req 8) */}
+              {detailLoading ? (
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading checkpoint scores…
+                </div>
+              ) : detailErr ? (
+                <div className="flex items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-700">
+                  <Info className="h-3.5 w-3.5 flex-shrink-0" /> {detailErr}
+                </div>
+              ) : detailRec ? (
+                <ScoreCorrectionForm
+                  detailRec={detailRec}
+                  corrections={corrections}
+                  onScoreChange={handleScoreChange}
+                />
+              ) : null}
+
+              {/* Correction reason — required (Req 8) */}
+              <div>
+                <label className="block text-xs font-semibold text-amber-800 mb-1">
+                  Correction Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={corrReason}
+                  onChange={(e) => { setCorrReason(e.target.value); setErr('') }}
+                  placeholder="Explain what scores or information you have corrected and why…"
+                  className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 resize-none"
+                />
+              </div>
+
+              {/* Justification — required (Req 8) */}
+              <div>
+                <label className="block text-xs font-semibold text-amber-800 mb-1">
+                  Revised Justification <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  value={justification}
+                  onChange={(e) => { setJustification(e.target.value); setErr('') }}
+                  placeholder="Provide your revised justification for this probation recommendation…"
+                  className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 resize-none"
+                />
+              </div>
+
               <div className="flex gap-2">
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={handleResubmit}
+                  onClick={handleReviseAndResubmit}
                   className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-amber-700 transition"
                 >
                   {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-                  <RotateCcw className="h-4 w-4" /> Resubmit for HR Review
+                  <RotateCcw className="h-4 w-4" /> Revise &amp; Resubmit for HR Review
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setNotes(''); setErr('') }}
+                  onClick={() => { setCorrReason(''); setErr(''); setCorrections({}) }}
                   className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
                 >
-                  Clear
+                  Reset
                 </button>
               </div>
             </div>
@@ -303,7 +546,7 @@ export default function ManagerRecommendationsPage() {
   useEffect(() => { load() }, [load])
 
   const actionRequired = recs.filter((r) => r.approval_status === 'RETURNED_TO_MANAGER').length
-  const pending = recs.filter((r) => ['PENDING_HR_REVIEW', 'PENDING_DIRECTOR', 'UNDER_REVIEW'].includes(r.approval_status))
+  const pending  = recs.filter((r) => ['PENDING_HR_REVIEW', 'PENDING_DIRECTOR', 'UNDER_REVIEW'].includes(r.approval_status))
   const returned = recs.filter((r) => r.approval_status === 'RETURNED_TO_MANAGER')
   const approved = recs.filter((r) => r.approval_status === 'APPROVED')
 
@@ -323,7 +566,7 @@ export default function ManagerRecommendationsPage() {
               My Recommendations
             </h1>
             <p className="mt-0.5 text-sm text-slate-500">
-              Track the status of probation recommendations you have submitted.
+              Track and manage the probation recommendations you have submitted.
             </p>
           </div>
         </div>

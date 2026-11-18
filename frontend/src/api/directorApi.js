@@ -51,12 +51,29 @@ export const returnToManagerByHR = (recId, body) =>
   api.post(`/director/${recId}/return-to-manager`, body).then((r) => r.data)
 
 /**
- * Manager resubmits a returned recommendation → PENDING_HR_REVIEW
+ * Manager resubmits a returned recommendation (justification-only path)
+ * → PENDING_HR_REVIEW
  * @param {number} recId
  * @param {{ justification: string }} body
  */
 export const resubmitRecommendation = (recId, body) =>
   api.post(`/director/${recId}/resubmit`, body).then((r) => r.data)
+
+/**
+ * Manager revises evaluation scores and resubmits a RETURNED_TO_MANAGER
+ * recommendation for fresh HR review.                              (G08)
+ *
+ * Transition: RETURNED_TO_MANAGER → PENDING_HR_REVIEW
+ *
+ * @param {number} recId
+ * @param {{
+ *   justification:     string,
+ *   correction_reason: string,
+ *   score_corrections?: Array<{ score_id: number, raw_score: number }>
+ * }} body
+ */
+export const reviseAndResubmit = (recId, body) =>
+  api.post(`/director/${recId}/revise-and-resubmit`, body).then((r) => r.data)
 
 // ── Director actions ───────────────────────────────────────────────────────
 

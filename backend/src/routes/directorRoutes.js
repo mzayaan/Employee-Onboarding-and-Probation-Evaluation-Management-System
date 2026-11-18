@@ -26,6 +26,7 @@ const {
   endorseRecommendation,
   returnToManagerByHR,
   resubmitRecommendation,
+  reviseAndResubmitRecommendation,
   approveRecommendation,
   returnByDirector,
   listAllRecommendations,
@@ -110,7 +111,7 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// Manager: resubmit returned recommendation → PENDING_HR_REVIEW
+// Manager: resubmit returned recommendation (justification-only path)
 // POST /api/director/:recId/resubmit
 // Body: { justification (required) }
 // ---------------------------------------------------------------------------
@@ -118,6 +119,19 @@ router.post(
   '/:recId/resubmit',
   authorise('LINE_MANAGER', 'HR_ADMIN'),
   resubmitRecommendation
+);
+
+// ---------------------------------------------------------------------------
+// Manager: revise scores and resubmit returned recommendation      (G08)
+// POST /api/director/:recId/revise-and-resubmit
+// Body: { justification, correction_reason, score_corrections? }
+// Transition: RETURNED_TO_MANAGER → PENDING_HR_REVIEW
+// FR-15, FR-18 | G08 | NFR-02, NFR-03 | Objective 3
+// ---------------------------------------------------------------------------
+router.post(
+  '/:recId/revise-and-resubmit',
+  authorise('LINE_MANAGER'),
+  reviseAndResubmitRecommendation
 );
 
 // ---------------------------------------------------------------------------
