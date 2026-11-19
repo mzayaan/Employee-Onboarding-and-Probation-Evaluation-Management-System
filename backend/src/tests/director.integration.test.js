@@ -63,6 +63,8 @@ const makeMockRec = (override = {}) => ({
   director_decision_at: null,
   director_reason:    null,
   rejection_count:    0,
+  revision_count:     0,   // G08 — optimistic-lock counter; must be declared or rec.revision_count + 1 = NaN
+  justification:      'Initial recommendation justification.',
   probationPeriod:    {
     period_id:  1,
     profile_id: 1,            // G02 — required for employment_status sync
@@ -150,6 +152,11 @@ jest.mock('../models', () => {
     },
     EvaluationCriterion: {
       findAll: jest.fn().mockResolvedValue([]),
+    },
+    // G08 — resubmitRecommendation now writes a RecommendationRevision history row;
+    // without this entry the model is undefined and the create() call throws a TypeError.
+    RecommendationRevision: {
+      create: jest.fn().mockResolvedValue({ revision_id: 1 }),
     },
   };
 });

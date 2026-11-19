@@ -457,6 +457,7 @@ const resubmitRecommendation = async (req, res) => {
     const rec = await FinalRecommendation.findByPk(recId, {
       lock:        t.LOCK.UPDATE,
       transaction: t,
+      include:     [{ model: ProbationPeriod, as: 'probationPeriod' }],
     });
     if (!rec) {
       await t.rollback();
@@ -478,6 +479,48 @@ const resubmitRecommendation = async (req, res) => {
       await t.rollback();
       return res.status(403).json({ success: false, message: 'Access denied. You may only resubmit your own recommendation.' });
     }
+
+    // G08: unified eligibility gate — mirrors reviseAndResubmitRecommendation.
+    // A CANCELLED period can never produce a valid outcome; non-ACTIVE/EXTENDED
+    // periods have already been closed, so a resubmission would be meaningless.
+    const period = rec.probationPeriod;
+    if (!period) {
+      await t.rollback();
+      return res.status(409).json({ success: false, message: 'Cannot resubmit: probation period record not found.' });
+    }
+    if (period.status === 'CANCELLED') {
+      await t.rollback();
+      return res.status(409).json({ success: false, message: 'Cannot resubmit: probation period is cancelled.' });
+    }
+    if (!['ACTIVE', 'EXTENDED'].includes(period.status)) {
+      await t.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `Cannot resubmit: probation period status is "${period.status}". Only ACTIVE or EXTENDED periods are eligible.`,
+      });
+    }
+
+    // G08: unified history protection — write an immutable audit row inside the
+    // same transaction before mutating the recommendation record, mirroring the
+    // approach used by reviseAndResubmitRecommendation (Req 5).
+    await RecommendationRevision.create({
+      rec_id:                     rec.rec_id,
+      actor_id:                   req.user.user_id,
+      revised_at:                 new Date(),
+      correction_reason:          justification.trim(),
+      before_scores:              null,
+      after_scores:               null,
+      before_checkpoint_totals:   null,
+      after_checkpoint_totals:    null,
+      before_cumulative_score:    rec.cumulative_score != null ? parseFloat(rec.cumulative_score) : null,
+      after_cumulative_score:     rec.cumulative_score != null ? parseFloat(rec.cumulative_score) : null,
+      before_recommendation_type: rec.recommendation_type,
+      after_recommendation_type:  rec.recommendation_type,
+      before_justification:       rec.justification  || null,
+      after_justification:        justification.trim(),
+      hr_return_reason:           rec.hr_endorsement_notes || null,
+      director_return_reason:     rec.director_reason      || null,
+    }, { transaction: t });
 
     await rec.update({
       approval_status: 'PENDING_HR_REVIEW',

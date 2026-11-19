@@ -61,6 +61,20 @@ CALL _add_col_if_missing(
 
 
 -- =============================================================================
+-- G08 — final_recommendations.revision_count
+-- Optimistic-lock counter incremented on every manager resubmission.
+-- Checked by endorseRecommendation and approveRecommendation to detect
+-- concurrent revisions between page-load and submit.
+-- =============================================================================
+
+CALL _add_col_if_missing(
+  'final_recommendations',
+  'revision_count',
+  'INT NOT NULL DEFAULT 0 COMMENT \'G08: optimistic-lock counter — incremented on every manager resubmission\''
+);
+
+
+-- =============================================================================
 -- G09 — evaluation_scores.weight_percent_at_scoring
 -- Snapshot of EvaluationCriterion.weight_percent at the time of submission.
 -- Preserves the historical breakdown even if criteria weights are later

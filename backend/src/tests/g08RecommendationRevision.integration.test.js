@@ -777,8 +777,10 @@ describe('POST /api/director/:recId/revise-and-resubmit — atomicity (Req 5, 7)
       .mockResolvedValueOnce(null);
     EvaluationCheckpoint.findAll.mockResolvedValue([makeMockCompletedCp()]);
 
-    // Simulate DB failure on revision insert
-    RecommendationRevision.create.mockRejectedValue(new Error('DB constraint error'));
+    // Simulate DB failure on revision insert — Once so subsequent success-path tests
+    // are not contaminated; mockRejectedValue (permanent) would leave the mock in a
+    // rejected state and cause unrelated tests to receive 500 instead of 200.
+    RecommendationRevision.create.mockRejectedValueOnce(new Error('DB constraint error'));
 
     const res = await request(app)
       .post('/api/director/10/revise-and-resubmit')
@@ -803,6 +805,9 @@ describe('Regression: existing justification-only /resubmit not broken (TC-DIR-0
 
   test('TC-G08-020: POST /resubmit (old path) still → 200 for returned rec', async () => {
     jest.clearAllMocks();
+    // Restore RecommendationRevision.create to success (TC-G08-019 uses mockRejectedValueOnce;
+    // this defensive restore ensures isolation if test order ever changes).
+    RecommendationRevision.create.mockResolvedValue({ revision_id: 1 });
     User.findOne.mockResolvedValue(mockManagerUser);
     FinalRecommendation.findByPk.mockResolvedValue({
       rec_id:            10,
@@ -1046,11 +1051,17 @@ describe('G08 unified ownership regression — /resubmit endpoint', () => {
     User.findOne.mockResolvedValue(mockManagerUser);  // user_id: 5
 
     FinalRecommendation.findByPk.mockResolvedValue({
-      rec_id:          10,
-      approval_status: 'RETURNED_TO_MANAGER',
-      submitted_by:    5,            // same as mockManagerUser.user_id
-      revision_count:  0,
-      update:          jest.fn().mockResolvedValue(true),
+      rec_id:            10,
+      approval_status:   'RETURNED_TO_MANAGER',
+      submitted_by:      5,            // same as mockManagerUser.user_id
+      revision_count:    0,
+      cumulative_score:  '72.00',
+      recommendation_type: 'EXTEND',
+      justification:     'old justification',
+      hr_endorsement_notes: null,
+      director_reason:   null,
+      probationPeriod:   { status: 'ACTIVE' },
+      update:            jest.fn().mockResolvedValue(true),
     });
 
     const res = await request(app)
@@ -1085,11 +1096,17 @@ describe('G08 atomicity and revision_count regression tests', () => {
     User.findOne.mockResolvedValue(mockManagerUser); // user_id: 5
 
     const mockRec = {
-      rec_id:          10,
-      approval_status: 'RETURNED_TO_MANAGER',
-      submitted_by:    5,
-      revision_count:  2,                                    // current counter
-      update:          jest.fn().mockResolvedValue(true),
+      rec_id:              10,
+      approval_status:     'RETURNED_TO_MANAGER',
+      submitted_by:        5,
+      revision_count:      2,                                    // current counter
+      cumulative_score:    '72.00',
+      recommendation_type: 'EXTEND',
+      justification:       'old',
+      hr_endorsement_notes: null,
+      director_reason:     null,
+      probationPeriod:     { status: 'ACTIVE' },
+      update:              jest.fn().mockResolvedValue(true),
     };
     FinalRecommendation.findByPk.mockResolvedValue(mockRec);
 
@@ -1119,11 +1136,17 @@ describe('G08 atomicity and revision_count regression tests', () => {
     User.findOne.mockResolvedValue(mockManagerUser);
 
     FinalRecommendation.findByPk.mockResolvedValue({
-      rec_id:          10,
-      approval_status: 'RETURNED_TO_MANAGER',
-      submitted_by:    5,
-      revision_count:  0,
-      update:          jest.fn().mockResolvedValue(true),
+      rec_id:              10,
+      approval_status:     'RETURNED_TO_MANAGER',
+      submitted_by:        5,
+      revision_count:      0,
+      cumulative_score:    '72.00',
+      recommendation_type: 'EXTEND',
+      justification:       'old',
+      hr_endorsement_notes: null,
+      director_reason:     null,
+      probationPeriod:     { status: 'ACTIVE' },
+      update:              jest.fn().mockResolvedValue(true),
     });
 
     const res = await request(app)
@@ -1204,6 +1227,113 @@ describe('G08 atomicity and revision_count regression tests', () => {
     // transaction that wrapped the stale check, the rec update and the period
     // update atomically.
     expect(freshTx.commit).toHaveBeenCalled();
+  });
+
+});
+
+// =============================================================================
+// TC-G08-034: Model-definition regression — revision_count must be declared
+// in FinalRecommendation.js so Sequelize can read and persist the field.
+//
+// Unlike the integration tests above that mock ../models, this test reads the
+// actual source file from disk.  It cannot be fooled by a mock that returns a
+// revision_count value while the real model omits the column declaration.
+// =============================================================================
+
+describe('G08 model-definition check (filesystem — cannot be masked by mocks)', () => {
+
+  test('TC-G08-034: FinalRecommendation.js declares revision_count as INTEGER with defaultValue 0', () => {
+    const fs   = require('fs');
+    const path = require('path');
+    const src  = fs.readFileSync(
+      path.join(__dirname, '../models/FinalRecommendation.js'),
+      'utf8'
+    );
+    // Field key must be present
+    expect(src).toMatch(/\brevision_count\s*:/);
+    // Type must be INTEGER (not DECIMAL, STRING, etc.)
+    expect(src).toMatch(/DataTypes\.INTEGER/);
+    // defaultValue must be 0 so existing rows do not read as null
+    expect(src).toMatch(/defaultValue\s*:\s*0/);
+  });
+
+});
+
+// =============================================================================
+// TC-G08-035, TC-G08-036: Period eligibility gate on /resubmit endpoint (G08)
+//
+// Before the F7 fix, resubmitRecommendation did NOT load ProbationPeriod and
+// had no period-status check.  A manager could resubmit a recommendation tied
+// to a CANCELLED or COMPLETED period, making the submission meaningless.
+//
+// These tests reproduce each gap so that the fix is evidence-backed.
+// =============================================================================
+
+describe('G08 period eligibility gate regression — /resubmit endpoint', () => {
+
+  test('TC-G08-035: resubmitRecommendation rejects CANCELLED probation period with 409', async () => {
+    jest.clearAllMocks();
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+    User.findOne.mockResolvedValue(mockManagerUser);
+
+    const mockRec = {
+      rec_id:              20,
+      approval_status:     'RETURNED_TO_MANAGER',
+      submitted_by:        5,
+      revision_count:      0,
+      cumulative_score:    '72.00',
+      recommendation_type: 'EXTEND',
+      justification:       'old',
+      hr_endorsement_notes: 'revise this',
+      director_reason:     null,
+      probationPeriod:     { status: 'CANCELLED' },
+      update:              jest.fn().mockResolvedValue(true),
+    };
+    FinalRecommendation.findByPk.mockResolvedValue(mockRec);
+
+    const res = await request(app)
+      .post('/api/director/20/resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: 'Updated justification.' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/cancelled/i);
+    expect(freshTx.rollback).toHaveBeenCalled();
+    // No update must have been issued — the rollback gates the write
+    expect(mockRec.update).not.toHaveBeenCalled();
+  });
+
+  test('TC-G08-036: resubmitRecommendation rejects non-ACTIVE/EXTENDED period with 409', async () => {
+    jest.clearAllMocks();
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+    User.findOne.mockResolvedValue(mockManagerUser);
+
+    const mockRec = {
+      rec_id:              21,
+      approval_status:     'RETURNED_TO_MANAGER',
+      submitted_by:        5,
+      revision_count:      0,
+      cumulative_score:    '72.00',
+      recommendation_type: 'EXTEND',
+      justification:       'old',
+      hr_endorsement_notes: null,
+      director_reason:     null,
+      probationPeriod:     { status: 'COMPLETED' },
+      update:              jest.fn().mockResolvedValue(true),
+    };
+    FinalRecommendation.findByPk.mockResolvedValue(mockRec);
+
+    const res = await request(app)
+      .post('/api/director/21/resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: 'Updated justification.' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/eligible/i);
+    expect(freshTx.rollback).toHaveBeenCalled();
+    expect(mockRec.update).not.toHaveBeenCalled();
   });
 
 });

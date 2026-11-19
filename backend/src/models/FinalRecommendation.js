@@ -60,6 +60,15 @@ const FinalRecommendation = sequelize.define('FinalRecommendation', {
     defaultValue: 0,
     comment: 'Number of times HR returned the recommendation to the manager',
   },
+  // G08: optimistic-lock counter — incremented on every manager resubmission;
+  // checked by endorseRecommendation and approveRecommendation to detect
+  // concurrent revisions between page-load and submit.
+  revision_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+    comment: 'G08: optimistic-lock counter — incremented on every manager resubmission; checked by endorseRecommendation and approveRecommendation to detect concurrent revisions',
+  },
 
   // ── Manager submission fields ──────────────────────────────────────────────
   submitted_by: {
