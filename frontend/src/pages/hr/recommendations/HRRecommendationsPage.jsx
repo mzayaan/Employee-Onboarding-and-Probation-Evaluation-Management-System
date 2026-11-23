@@ -21,11 +21,12 @@ import {
   listAllRecommendations,
   endorseRecommendation,
   returnToManagerByHR,
+  getRevisionHistory,
 } from '@/api/directorApi'
 import { downloadReport } from '@/api/reportApi'
 import {
   ClipboardCheck, Loader2, AlertCircle, CheckCircle2,
-  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, RefreshCw, FileDown,
+  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, RefreshCw, FileDown, History,
 } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -65,6 +66,62 @@ function RecBadge({ type }) {
 }
 
 // ── Expandable action row ─────────────────────────────────────────────────────
+// Shared revision history panel — reused across HR and Director views.
+// G08 (Finding 7): wires the GET /:recId/revision-history endpoint into HR views.
+function RevisionHistoryPanel({ recId }) {
+  const [show,    setShow]    = useState(false)
+  const [items,   setItems]   = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const fmtDT = (iso) => iso ? new Date(iso).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }) : '—'
+
+  const handleToggle = async () => {
+    const next = !show
+    setShow(next)
+    if (next && items === null && !loading) {
+      setLoading(true)
+      try { setItems((await getRevisionHistory(recId)) ?? []) }
+      catch { setItems([]) }
+      finally { setLoading(false) }
+    }
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
+      >
+        <History className="h-3.5 w-3.5" />
+        {loading
+          ? <><Loader2 className="h-3.5 w-3.5 animate-spin ml-1" /> Loading history…</>
+          : <>{show ? 'Hide' : 'Show'} correction history{items ? ` (${items.length})` : ''}</>}
+      </button>
+      {show && items && items.length > 0 && (
+        <div className="mt-2 rounded-xl bg-slate-50 ring-1 ring-slate-200 p-4 space-y-2">
+          {items.map((rev, idx) => (
+            <div key={rev.revision_id ?? idx} className="rounded-lg bg-white ring-1 ring-slate-100 px-4 py-3 text-xs space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-slate-700">
+                  {rev.actor ? `${rev.actor.first_name} ${rev.actor.last_name}` : 'Manager'}
+                </span>
+                <span className="text-slate-400">{fmtDT(rev.revised_at)}</span>
+              </div>
+              <p className="text-slate-600"><span className="font-medium">Reason: </span>{rev.correction_reason}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {show && items && items.length === 0 && (
+        <p className="mt-1 text-xs text-slate-400">No corrections recorded.</p>
+      )}
+    </div>
+  )
+}
+
 function PendingRow({ rec, onRefresh }) {
   const [open,   setOpen]   = useState(false)
   const [mode,   setMode]   = useState(null)   // 'endorse' | 'return'
@@ -172,6 +229,11 @@ function PendingRow({ rec, onRefresh }) {
                 ))}
               </div>
             </div>
+          )}
+
+          {/* Correction history — G08 (Finding 7): wires revision-history endpoint */}
+          {(rec.revision_count ?? 0) > 0 && (
+            <RevisionHistoryPanel recId={rec.rec_id} />
           )}
 
           {/* Previous HR endorsement notes (if any) */}

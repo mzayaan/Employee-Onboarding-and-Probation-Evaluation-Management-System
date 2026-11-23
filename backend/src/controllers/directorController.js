@@ -741,9 +741,14 @@ const reviseAndResubmitRecommendation = async (req, res) => {
     // APPROVED row can theoretically exist with a null director_decision_at if
     // it was inserted by a migration or a legacy code path that did not populate
     // the column; generated_at is always set by the model default.
+    // G08 (Finding 3 — multi-cycle ordering): ORDER BY director_decision_at DESC
+    // puts NULLs LAST in MySQL, so a newer APPROVED cycle whose director_decision_at
+    // is NULL (e.g. inserted by a migration or legacy code path) is ranked below any
+    // older cycle with an actual date.  COALESCE falls back to generated_at so the
+    // most recently generated approved cycle is always returned first.
     const lastApproved = await FinalRecommendation.findOne({
       where: { period_id: period.period_id, approval_status: 'APPROVED' },
-      order: [['director_decision_at', 'DESC']],
+      order: [[sequelize.literal('COALESCE(director_decision_at, generated_at)'), 'DESC']],
       attributes: ['director_decision_at', 'generated_at'],
       transaction: t,
     });
@@ -1382,12 +1387,13 @@ const getRevisionHistory = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Recommendation not found.' });
     }
 
-    // LINE_MANAGER may only view history for their own recommendation.
+    // LINE_MANAGER may only view history for a recommendation that belongs to an
+    // employee they CURRENTLY manage.  Using submitted_by here would let a former
+    // manager (reassigned off the employee) read revision history after handover —
+    // the same restriction applied to the write endpoint.
     if (req.user.role === 'LINE_MANAGER') {
       const profile = await EmployeeProfile.findOne({ where: { profile_id: rec.probationPeriod?.profile_id } });
-      const isOwner = rec.submitted_by === req.user.user_id
-        || (profile && profile.manager_id === req.user.user_id);
-      if (!isOwner) {
+      if (!profile || profile.manager_id !== req.user.user_id) {
         return res.status(403).json({ success: false, message: 'You do not have access to this recommendation.' });
       }
     }

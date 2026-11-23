@@ -76,6 +76,20 @@ export const resubmitRecommendation = (recId, body) =>
 export const reviseAndResubmit = (recId, body) =>
   api.post(`/director/${recId}/revise-and-resubmit`, body).then((r) => r.data)
 
+// ── Revision history ───────────────────────────────────────────────────────
+
+/**
+ * Retrieve the ordered revision (correction) history for one recommendation.
+ * Accessible to: LINE_MANAGER (current owner only), HR_ADMIN, DIRECTOR.
+ *
+ * G08 (Finding 7 — interface completeness)
+ *
+ * @param {number} recId
+ * @returns {Promise<Array>} ordered array of RecommendationRevision rows
+ */
+export const getRevisionHistory = (recId) =>
+  api.get(`/director/${recId}/revision-history`).then((r) => r.data.data)
+
 // ── Director actions ───────────────────────────────────────────────────────
 
 /**

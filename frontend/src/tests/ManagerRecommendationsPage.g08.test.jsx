@@ -47,6 +47,7 @@ vi.mock('@/api/directorApi', () => ({
   listMyRecommendations: vi.fn(),
   getRecommendation:     vi.fn(),
   reviseAndResubmit:     vi.fn(),
+  getRevisionHistory:    vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/api/reportApi', () => ({
@@ -119,6 +120,7 @@ function makeDetail(recId = 1, overrides = {}) {
         {
           checkpoint_id: 100,
           label: '30-Day',
+          completed_at: '2024-10-15T00:00:00.000Z',   // G08: noCompletion guard requires this
           managerEvaluation: {
             eval_id: 200,
             scores: [
@@ -606,6 +608,89 @@ describe('ManagerRecommendationsPage — G08 regression suite', () => {
         screen.getByText(/Conflict: recommendation was revised since you loaded the form/i),
       ).toBeDefined();
     });
+  });
+
+  // ── TC-FE-G08-016: "Reload & retry" button appears on 409 HTTP status ───────
+  // The retry button must be shown when the submission returns HTTP 409.
+  // Before the fix the button condition used err.includes('revision') but the
+  // backend sends "revised" — so the button never appeared.  The fix checks
+  // errStatus === 409 (by HTTP status code, not message substring).
+
+  it('TC-FE-G08-016: "Reload & retry" button appears when submission returns HTTP 409', async () => {
+    const conflictError = {
+      response: {
+        status: 409,
+        data: {
+          message: 'Conflict: recommendation was revised since you loaded the form. Reload and try again.',
+        },
+      },
+    };
+    reviseAndResubmit.mockRejectedValue(conflictError);
+    listMyRecommendations.mockResolvedValue([makeRec({ approval_status: 'RETURNED_TO_MANAGER' })]);
+    getRecommendation.mockResolvedValue(makeDetail(1, { revision_count: 1 }));
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Alice Brown')).toBeDefined());
+
+    const rowButton = screen.getByRole('button', { name: /Alice Brown/i });
+    await userEvent.click(rowButton);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Provide your revised justification/i)).toBeDefined();
+    });
+
+    const justificationTextarea = screen.getByPlaceholderText(/Provide your revised justification/i);
+    await userEvent.clear(justificationTextarea);
+    await userEvent.type(justificationTextarea, 'Valid justification.');
+
+    const corrReasonTextarea = screen.getByPlaceholderText(/Explain what scores or information you have corrected/i);
+    await userEvent.type(corrReasonTextarea, 'Valid correction reason.');
+
+    const submitBtn = screen.getByRole('button', { name: /Revise & Resubmit for HR Review/i });
+    await userEvent.click(submitBtn);
+
+    // Error banner appears
+    await waitFor(() => {
+      expect(
+        screen.getByText(/recommendation was revised since you loaded the form/i),
+      ).toBeDefined();
+    });
+
+    // "Reload & retry" button must be visible — driven by HTTP 409 status, not message substring
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Reload.*retry/i })).toBeDefined();
+    });
+  });
+
+  // ── TC-FE-G08-017: Failed detail load does not auto-retry ───────────────────
+  // When getRecommendation fails, the page must NOT call it again on subsequent
+  // renders.  Before the fix the useEffect guard didn't include the detailFailed
+  // flag, so the hook re-fired every time the component updated, causing an
+  // infinite retry loop.
+
+  it('TC-FE-G08-017: failed detail load calls getRecommendation exactly once (no auto-retry loop)', async () => {
+    getRecommendation.mockRejectedValue(new Error('Network error'));
+    listMyRecommendations.mockResolvedValue([makeRec({ approval_status: 'RETURNED_TO_MANAGER' })]);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Alice Brown')).toBeDefined());
+
+    const rowButton = screen.getByRole('button', { name: /Alice Brown/i });
+    await userEvent.click(rowButton);
+
+    // Wait for the error message to appear
+    await waitFor(() => {
+      expect(screen.getByText(/Could not load score details/i)).toBeDefined();
+    });
+
+    // Allow any queued micro-tasks to settle — if there were a retry loop, more
+    // calls would be recorded.
+    await new Promise((r) => setTimeout(r, 50));
+
+    // getRecommendation should have been called exactly once — no retry
+    expect(getRecommendation).toHaveBeenCalledTimes(1);
   });
 
 });

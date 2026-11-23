@@ -22,6 +22,7 @@ import {
   listMyRecommendations,
   getRecommendation,
   reviseAndResubmit,
+  getRevisionHistory,
 } from '@/api/directorApi'
 import { downloadReport } from '@/api/reportApi'
 import {
@@ -237,6 +238,9 @@ function RecRow({ rec, onRefresh }) {
   const [corrections,   setCorrections]   = useState({}) // { score_id: raw_score }
   const [busy,          setBusy]          = useState(false)
   const [err,           setErr]           = useState('')
+  // G08: store HTTP status of a submission error so we can detect 409 by code,
+  // not by message substring (the backend message contains "revised", not "revision").
+  const [errStatus,     setErrStatus]     = useState(null)
   const [ok,            setOk]            = useState(false)
   const [pdfBusy,       setPdfBusy]       = useState(false)
   const [pdfErr,        setPdfErr]        = useState('')
@@ -245,14 +249,23 @@ function RecRow({ rec, onRefresh }) {
   const [detailRec,     setDetailRec]     = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailErr,     setDetailErr]     = useState('')
+  // G08: guard against infinite retry on a failed detail fetch.  Set to true on
+  // first failure; reset to false only when the user explicitly clicks Reload & retry.
+  const [detailFailed,  setDetailFailed]  = useState(false)
+  // G08: revision history loaded via dedicated endpoint (lazy, on showHistory click)
+  const [historyItems,  setHistoryItems]  = useState(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   const emp    = rec.probationPeriod?.employeeProfile
   const period = rec.probationPeriod
   const canResubmit = rec.approval_status === 'RETURNED_TO_MANAGER'
 
-  // Fetch full detail (scores + revisions) once when the correction form is opened
+  // Fetch full detail (scores + revisions) once when the correction form is opened.
+  // G08 (interface fix): detailFailed prevents an infinite retry loop — a failed
+  // fetch sets detailFailed=true and the effect will not re-run until the user
+  // explicitly clicks "Reload & retry", which resets detailFailed to false.
   useEffect(() => {
-    if (!open || !canResubmit || detailRec || detailLoading) return
+    if (!open || !canResubmit || detailRec || detailLoading || detailFailed) return
     setDetailLoading(true); setDetailErr('')
     getRecommendation(rec.rec_id)
       .then((data) => {
@@ -260,9 +273,12 @@ function RecRow({ rec, onRefresh }) {
         // Pre-fill justification from live detail
         if (data.justification) setJustification(data.justification)
       })
-      .catch(() => setDetailErr('Could not load score details. You may still revise the justification and resubmit.'))
+      .catch(() => {
+        setDetailErr('Could not load score details. You may still revise the justification and resubmit.')
+        setDetailFailed(true)
+      })
       .finally(() => setDetailLoading(false))
-  }, [open, canResubmit, rec.rec_id, detailRec, detailLoading])
+  }, [open, canResubmit, rec.rec_id, detailRec, detailLoading, detailFailed])
 
   const handleScoreChange = (scoreId, value) =>
     setCorrections((prev) => ({ ...prev, [scoreId]: value }))
@@ -322,13 +338,41 @@ function RecRow({ rec, onRefresh }) {
       setTimeout(() => { onRefresh() }, 800)
     } catch (e) {
       setErr(e?.response?.data?.message || 'Revision and resubmission failed. Please try again.')
+      // G08: store HTTP status so the retry button can detect 409 conflicts by
+      // code rather than message substring (backend sends "revised", not "revision").
+      setErrStatus(e?.response?.status ?? null)
     } finally {
       setBusy(false)
     }
   }
 
-  // Collect revision history from either lazy-loaded detail or list data
-  const revisions = detailRec?.revisions ?? rec.revisions ?? []
+  // Collect revision history: prefer items fetched from the dedicated endpoint
+  // (historyItems) so the history panel always reflects the backend's authoritative
+  // record; fall back to embedded revisions from the list/detail payload.
+  const revisions = historyItems ?? detailRec?.revisions ?? rec.revisions ?? []
+
+  // Lazy-load revision history from the dedicated endpoint when panel is opened.
+  // G08 (Finding 7 — interface completeness): the GET /:recId/revision-history
+  // endpoint was not called by any frontend page before this fix.
+  const handleShowHistory = async () => {
+    const next = !showHistory
+    setShowHistory(next)
+    if (next && historyItems === null && !historyLoading) {
+      setHistoryLoading(true)
+      try {
+        const data = await getRevisionHistory(rec.rec_id)
+        // If the endpoint returns items, use them; if empty, fall back to
+        // the embedded revisions already present in detailRec / rec so the
+        // panel still shows history that was loaded with the detail payload.
+        const embedded = detailRec?.revisions ?? rec.revisions ?? []
+        setHistoryItems(data?.length ? data : embedded)
+      } catch {
+        // Fall back to embedded revisions — do not surface a separate error
+      } finally {
+        setHistoryLoading(false)
+      }
+    }
+  }
 
   return (
     <div className="rounded-xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
@@ -419,15 +463,18 @@ function RecRow({ rec, onRefresh }) {
           </div>
 
           {/* Revision history toggle (Req 5, Req 8) */}
-          {revisions.length > 0 && (
+          {/* G08: calls GET /:recId/revision-history via handleShowHistory */}
+          {(revisions.length > 0 || (rec.revision_count ?? 0) > 0) && (
             <div>
               <button
                 type="button"
-                onClick={() => setShowHistory((v) => !v)}
+                onClick={handleShowHistory}
                 className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700"
               >
                 <History className="h-3.5 w-3.5" />
-                {showHistory ? 'Hide' : 'Show'} correction history ({revisions.length})
+                {historyLoading
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading history…</>
+                  : <>{showHistory ? 'Hide' : 'Show'} correction history ({revisions.length})</>}
               </button>
               {showHistory && <div className="mt-2"><RevisionHistory revisions={revisions} /></div>}
             </div>
@@ -470,12 +517,15 @@ function RecRow({ rec, onRefresh }) {
                 <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
                 <span className="flex-1">{err}</span>
               </div>
-              {/* Stale-review conflict: prompt the manager to reload the form so the
-                  latest revision_count is fetched before retrying. */}
-              {(err.includes('revision') || err.includes('concurrent') || err.includes('stale')) && (
+              {/* Stale-review conflict: detect by HTTP 409 status (backend message
+                  contains "revised", not "revision", so substring checks were wrong).
+                  Reload clears the cached detail so the latest revision_count is
+                  re-fetched before the manager retries.  Also resets detailFailed so
+                  a previously-failed detail load is attempted again. */}
+              {(errStatus === 409 || err.includes('revised') || err.includes('revision') || err.includes('concurrent') || err.includes('stale')) && (
                 <button
                   type="button"
-                  onClick={() => { setDetailRec(null); setErr('') }}
+                  onClick={() => { setDetailRec(null); setErr(''); setErrStatus(null); setDetailFailed(false) }}
                   className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-200 transition-colors"
                 >
                   <RotateCcw className="h-3 w-3" /> Reload &amp; retry

@@ -1897,3 +1897,238 @@ describe('TC-G08-040–043: regression tests for unresolved G08 findings (scorin
   });
 
 });
+
+// =============================================================================
+// TC-G08-050 — TC-G08-051: Remaining G08 regressions
+//
+// TC-G08-050  Multi-cycle COALESCE ordering
+//   When cycle 2 is newer than cycle 1 but has director_decision_at = NULL,
+//   ordering by director_decision_at DESC (MySQL NULLs last) selects cycle 1
+//   as the "latest approved", giving the wrong cycle boundary.
+//   Fix: ORDER BY COALESCE(director_decision_at, generated_at) DESC.
+//
+// TC-G08-051  Former-manager blocked on revision-history endpoint
+//   A manager who matches rec.submitted_by but is NO LONGER the employee's
+//   current manager (profile.manager_id ≠ req.user.user_id) must receive 403
+//   from GET /:recId/revision-history.
+//   Fix: check only profile.manager_id, not submitted_by.
+//
+// FR-15, FR-18 | G08 | NFR-02, NFR-03 | Objective 3
+// =============================================================================
+
+describe('TC-G08-050–051: multi-cycle ordering and history-endpoint ownership regressions', () => {
+
+  const { EmployeeProfile } = require('../models');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+    mockTransaction = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(mockTransaction);
+    User.findOne.mockResolvedValue(mockManagerUser);
+    EmployeeProfile.findOne = jest.fn().mockResolvedValue({ manager_id: 5 });
+    RecommendationRevision.create.mockResolvedValue({ revision_id: 99 });
+  });
+
+  // ---------------------------------------------------------------------------
+  // TC-G08-050  Multi-cycle NULL director_decision_at — COALESCE ordering
+  //
+  // Scenario:
+  //   Cycle 1: director_decision_at = '2026-07-01', generated_at = '2026-06-28'
+  //   Cycle 2: director_decision_at = NULL,         generated_at = '2026-09-01'
+  //
+  // Without the COALESCE fix, ORDER BY director_decision_at DESC puts NULLs last,
+  // so cycle 1 (older) is returned as "lastApproved" and its director_decision_at
+  // ('2026-07-01') becomes the cycle boundary.
+  //
+  // A score whose checkpoint was completed at '2026-08-01' (between the two
+  // cycles) should be REJECTED as belonging to the now-approved cycle 2 boundary
+  // (generated_at '2026-09-01' used as COALESCE fallback).
+  //
+  // After fix: 409 (cycle 2 selected, boundary = 2026-09-01; cp.completed_at
+  //            2026-08-01 is before boundary → approved-history guard fires).
+  // Without fix: 200 (cycle 1 selected, boundary = 2026-07-01; cp.completed_at
+  //              2026-08-01 is after boundary → guard bypassed).
+  // ---------------------------------------------------------------------------
+  test('TC-G08-050: score correction in cycle 2 is rejected when cycle 2 has null director_decision_at (COALESCE ordering)', async () => {
+    const baseRec = makeMockRec({
+      submitted_by:    5,
+      revision_count:  0,
+      probationPeriod: makeMockPeriod({ period_id: 1, profile_id: 1, status: 'EXTENDED' }),
+    });
+
+    // findOne: 1st = lock-fetch (the rec), 2nd = lastApproved query
+    // The COALESCE fix ensures cycle 2 (generated_at 2026-09-01) is selected
+    // over cycle 1 (director_decision_at 2026-07-01).
+    // Both cycles are APPROVED; the fix ensures the query returns cycle 2.
+    FinalRecommendation.findOne
+      .mockResolvedValueOnce(baseRec)
+      .mockResolvedValueOnce({
+        // Cycle 2: newer generated_at but null director_decision_at
+        director_decision_at: null,
+        generated_at:         new Date('2026-09-01T00:00:00Z'),
+      });
+
+    // Score whose checkpoint was completed 2026-08-01 — BEFORE cycle 2's
+    // generated_at boundary (2026-09-01), so it falls in the approved cycle 2
+    // window and must be rejected.
+    EvaluationScore.findOne.mockResolvedValue(makeMockScore({
+      managerEvaluation: {
+        eval_id:        50,
+        weighted_score: '75.00',
+        checkpoint_id:  3,
+        checkpoint: {
+          checkpoint_id: 3,
+          period_id:     1,
+          status:        'COMPLETED',
+          completed_at:  new Date('2026-08-01T00:00:00Z'),
+          day_number:    30,
+        },
+      },
+    }));
+
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({
+        justification:     'Attempting to correct a score from the approved cycle.',
+        correction_reason: 'Score looked wrong.',
+        score_corrections: [{ score_id: 100, raw_score: 4 }],
+      });
+
+    // After COALESCE fix: 409 (cycle 2 selected, cp.completed_at ≤ boundary)
+    // Without fix: 200 (cycle 1 selected via NULL-last ordering, boundary 2026-07-01
+    //              is before cp.completed_at 2026-08-01 → guard bypassed)
+    expect(res.status).toBe(409);
+    expect(res.body.success).toBe(false);
+  });
+
+  // Positive counterpart: a score whose checkpoint post-dates even the COALESCE
+  // boundary is NOT rejected — the new-cycle correction is allowed.
+  test('TC-G08-050-pos: score correction AFTER cycle 2 boundary is accepted', async () => {
+    const baseRec = makeMockRec({
+      submitted_by:    5,
+      revision_count:  0,
+      probationPeriod: makeMockPeriod({ period_id: 1, profile_id: 1, status: 'EXTENDED' }),
+    });
+
+    FinalRecommendation.findOne
+      .mockResolvedValueOnce(baseRec)
+      .mockResolvedValueOnce({
+        director_decision_at: null,
+        generated_at:         new Date('2026-09-01T00:00:00Z'),
+      });
+
+    // Score completed 2026-10-01 — AFTER cycle 2's generated_at boundary
+    EvaluationScore.findOne.mockResolvedValue(makeMockScore({
+      managerEvaluation: {
+        eval_id:        50,
+        weighted_score: '75.00',
+        checkpoint_id:  4,
+        checkpoint: {
+          checkpoint_id: 4,
+          period_id:     1,
+          status:        'COMPLETED',
+          completed_at:  new Date('2026-10-01T00:00:00Z'),
+          day_number:    90,
+        },
+      },
+    }));
+
+    ManagerEvaluation.findOne.mockResolvedValue(makeMockMgrEval());
+    EvaluationScore.findAll.mockResolvedValue([]);
+    EvaluationCheckpoint.findAll.mockResolvedValue([makeMockCompletedCp()]);
+
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({
+        justification:     'Correcting new-cycle attendance score.',
+        correction_reason: 'HR asked to adjust.',
+        score_corrections: [{ score_id: 100, raw_score: 4 }],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // TC-G08-051  Former manager blocked from revision-history endpoint
+  //
+  // User B (user_id = 3) originally submitted the recommendation (submitted_by = 3)
+  // but has since been reassigned away; the employee's current manager_id = 5.
+  //
+  // Before fix: the guard was `rec.submitted_by === req.user.user_id || profile.manager_id === ...`
+  //             so user B passes via the submitted_by branch → 200.
+  // After fix:  guard is only `profile.manager_id === req.user.user_id`
+  //             → user B gets 403.
+  // ---------------------------------------------------------------------------
+  test('TC-G08-051: former manager (matches submitted_by but not manager_id) gets 403 on revision-history', async () => {
+    // A token for user_id = 3 — the "former manager"
+    const formerMgrToken = token({
+      user_id: 3, role: 'LINE_MANAGER', first_name: 'Former', last_name: 'Manager',
+    });
+
+    const mockFormerMgr = {
+      user_id: 3, email: 'former@company.com', role: 'LINE_MANAGER',
+      first_name: 'Former', last_name: 'Manager', is_active: true,
+      toJSON: jest.fn().mockReturnValue({ user_id: 3, role: 'LINE_MANAGER' }),
+    };
+    User.findOne.mockResolvedValue(mockFormerMgr);
+
+    // Recommendation submitted by user 3 (the former manager)
+    FinalRecommendation.findByPk.mockResolvedValue({
+      rec_id:              10,
+      approval_status:     'RETURNED_TO_MANAGER',
+      submitted_by:        3,   // ← former manager's user_id
+      revision_count:      1,
+      probationPeriod:     { status: 'ACTIVE', profile_id: 20 },
+      revisions:           [],
+    });
+
+    // But the employee's current manager is user 5 — not user 3
+    EmployeeProfile.findOne = jest.fn().mockResolvedValue({ manager_id: 5 });
+
+    const res = await request(app)
+      .get('/api/director/10/revision-history')
+      .set('Authorization', `Bearer ${formerMgrToken}`);
+
+    // After fix: 403 (profile.manager_id = 5 ≠ req.user.user_id = 3)
+    // Before fix: 200 (submitted_by = 3 = req.user.user_id = 3 → old guard passes)
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/access/i);
+  });
+
+  // Positive counterpart: the CURRENT manager can still read revision history
+  test('TC-G08-051-pos: current manager (matches manager_id) can read revision history', async () => {
+    User.findOne.mockResolvedValue(mockManagerUser);  // user_id: 5
+
+    FinalRecommendation.findByPk.mockResolvedValue({
+      rec_id:              10,
+      approval_status:     'RETURNED_TO_MANAGER',
+      submitted_by:        3,   // different from current manager
+      revision_count:      1,
+      probationPeriod:     { status: 'ACTIVE', profile_id: 20 },
+    });
+
+    // Current manager_id = 5 (matches mgrToken user_id)
+    EmployeeProfile.findOne = jest.fn().mockResolvedValue({ manager_id: 5 });
+
+    // The revision-history controller loads revisions after the access check
+    const { RecommendationRevision } = require('../models');
+    // RecommendationRevision.findAll is not in the top-level mock — add it here
+    if (!RecommendationRevision.findAll) {
+      RecommendationRevision.findAll = jest.fn();
+    }
+    RecommendationRevision.findAll.mockResolvedValue([]);
+
+    const res = await request(app)
+      .get('/api/director/10/revision-history')
+      .set('Authorization', `Bearer ${mgrToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+});

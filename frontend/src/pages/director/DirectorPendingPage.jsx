@@ -18,15 +18,97 @@ import {
   listPendingDirector,
   approveRecommendation,
   returnByDirector,
+  getRevisionHistory,
 } from '@/api/directorApi'
 import {
   ShieldCheck, Loader2, AlertCircle, CheckCircle2,
-  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, RefreshCw,
+  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, RefreshCw, History,
 } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDate = (iso) =>
   iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+
+const fmtDT = (iso) => {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+// ── Revision history panel (lazy-loaded on first open) ───────────────────────
+// G08 (Finding 7 — interface completeness): Directors can review the correction
+// history for any recommendation they are evaluating.
+
+function RevisionHistoryPanel({ recId }) {
+  const [show,    setShow]    = useState(false)
+  const [items,   setItems]   = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleToggle = async () => {
+    const next = !show
+    setShow(next)
+    if (next && items === null && !loading) {
+      setLoading(true)
+      try {
+        const data = await getRevisionHistory(recId)
+        setItems(data ?? [])
+      } catch {
+        setItems([])  // fall back silently
+      } finally {
+        setLoading(false)
+      }
+    }
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+      >
+        <History className="h-3.5 w-3.5" />
+        {show ? 'Hide correction history' : 'Show correction history'}
+      </button>
+
+      {show && (
+        <div className="mt-3 rounded-lg bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
+          {loading && (
+            <p className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading history…
+            </p>
+          )}
+          {!loading && items !== null && items.length === 0 && (
+            <p className="text-sm text-slate-500">No correction history recorded.</p>
+          )}
+          {!loading && items && items.length > 0 && (
+            <ol className="space-y-3">
+              {items.map((r) => (
+                <li key={r.revision_id} className="text-sm">
+                  <p className="font-medium text-slate-700">
+                    Revision #{r.revision_id} — {fmtDT(r.created_at)}
+                  </p>
+                  {r.correction_reason && (
+                    <p className="text-slate-500 mt-0.5">
+                      <span className="font-medium">Reason:</span> {r.correction_reason}
+                    </p>
+                  )}
+                  {r.before_recommendation_type && r.after_recommendation_type && (
+                    <p className="text-slate-500">
+                      <span className="font-medium">Recommendation:</span>{' '}
+                      {r.before_recommendation_type} → {r.after_recommendation_type}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const REC_COLOURS = {
   CONFIRM:  { bg: 'bg-green-50',  text: 'text-green-700',  ring: 'ring-green-200',  label: 'Confirm Employment'  },
@@ -183,6 +265,11 @@ function PendingCard({ rec, onRefresh }) {
               <p className="font-semibold mb-1">HR Endorsement Notes:</p>
               <p>{rec.hr_endorsement_notes}</p>
             </div>
+          )}
+
+          {/* Correction / revision history — G08 (Finding 7) */}
+          {(rec.revision_count ?? 0) > 0 && (
+            <RevisionHistoryPanel recId={rec.rec_id} />
           )}
 
           {/* Success banner */}
