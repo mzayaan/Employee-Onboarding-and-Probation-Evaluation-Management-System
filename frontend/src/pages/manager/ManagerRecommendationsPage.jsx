@@ -124,6 +124,10 @@ function RevisionHistory({ revisions }) {
 }
 
 // ── Score correction form (shown when RETURNED_TO_MANAGER) ───────────────────
+// G08 (Finding 7 — protected-control rendering):
+//   • Checkpoints with no completed_at cannot be cycle-verified by the backend
+//     and will be rejected on submission.  Show them as read-only with a label.
+//   • Scores with an unresolved weight (pre-G09 rows) are already locked.
 function ScoreCorrectionForm({ detailRec, corrections, onScoreChange }) {
   const checkpoints = detailRec?.probationPeriod?.checkpoints ?? []
   if (!checkpoints.length) {
@@ -142,15 +146,24 @@ function ScoreCorrectionForm({ detailRec, corrections, onScoreChange }) {
       {checkpoints.map((cp) => {
         const eval_ = cp.managerEvaluation
         const scores = eval_?.scores ?? []
+        // G08 (Finding 7): a checkpoint with no completed_at cannot have its
+        // cycle membership verified — the backend will reject any correction
+        // attempt.  Display the whole checkpoint as read-only.
+        const noCompletion = !cp.completed_at
         return (
-          <div key={cp.checkpoint_id} className="rounded-lg bg-white ring-1 ring-slate-200 overflow-hidden">
+          <div key={cp.checkpoint_id} className={`rounded-lg bg-white ring-1 overflow-hidden ${noCompletion ? 'ring-slate-100 opacity-60' : 'ring-slate-200'}`}>
             <div className="bg-slate-50 px-4 py-2 flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-700">
                 Checkpoint {cp.checkpoint_number ?? cp.checkpoint_id}
                 {cp.checkpoint_label ? ` — ${cp.checkpoint_label}` : ''}
+                {noCompletion && (
+                  <span className="ml-2 text-amber-600 font-normal">(incomplete — read-only)</span>
+                )}
               </span>
               <span className="text-xs text-slate-400">
-                Completed {fmtDate(cp.completed_at)}
+                {noCompletion
+                  ? <span className="text-amber-500">No completion date</span>
+                  : <>Completed {fmtDate(cp.completed_at)}</>}
                 {eval_ && (
                   <> · Total: <span className="font-semibold text-slate-600">{Number.parseFloat(eval_.weighted_score ?? 0).toFixed(1)}%</span></>
                 )}
@@ -163,6 +176,9 @@ function ScoreCorrectionForm({ detailRec, corrections, onScoreChange }) {
                 {scores.map((score) => {
                   const currentVal = corrections[score.score_id] ?? score.raw_score
                   const isChanged = Number(currentVal) !== Number(score.raw_score)
+                  // A score is editable only when: the checkpoint has a completion
+                  // date AND the weight is resolved.
+                  const isEditable = !noCompletion && score.weight_percent_at_scoring != null
                   return (
                     <div key={score.score_id} className="flex items-center justify-between gap-4 px-4 py-2.5">
                       <div className="min-w-0">
@@ -175,11 +191,11 @@ function ScoreCorrectionForm({ detailRec, corrections, onScoreChange }) {
                             : <span className="text-amber-600">unresolved (locked)</span>}
                         </p>
                       </div>
-                      {score.weight_percent_at_scoring == null ? (
-                        // Pre-G09 score — cannot be corrected
-                        <div className="flex items-center gap-1 text-xs text-amber-600">
+                      {!isEditable ? (
+                        // Read-only — either no completion date or unresolved weight
+                        <div className="flex items-center gap-1 text-xs text-slate-500">
                           <span className="font-semibold">{score.raw_score}</span>
-                          <span className="text-amber-400">/ 5 (locked)</span>
+                          <span className="text-slate-400">/ 5 (locked)</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
@@ -447,10 +463,24 @@ function RecRow({ rec, onRefresh }) {
             </div>
           )}
 
-          {/* Error banner */}
+          {/* Error banner — G08 (Finding 7): include reload/retry for 409 conflicts */}
           {err && (
-            <div className="flex items-center gap-2 rounded-lg bg-red-50 px-4 py-2.5 text-sm text-red-700 ring-1 ring-red-200">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" /> {err}
+            <div className="rounded-lg bg-red-50 px-4 py-2.5 ring-1 ring-red-200">
+              <div className="flex items-start gap-2 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <span className="flex-1">{err}</span>
+              </div>
+              {/* Stale-review conflict: prompt the manager to reload the form so the
+                  latest revision_count is fetched before retrying. */}
+              {(err.includes('revision') || err.includes('concurrent') || err.includes('stale')) && (
+                <button
+                  type="button"
+                  onClick={() => { setDetailRec(null); setErr('') }}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-red-100 px-3 py-1.5 text-xs font-medium text-red-800 hover:bg-red-200 transition-colors"
+                >
+                  <RotateCcw className="h-3 w-3" /> Reload &amp; retry
+                </button>
+              )}
             </div>
           )}
 

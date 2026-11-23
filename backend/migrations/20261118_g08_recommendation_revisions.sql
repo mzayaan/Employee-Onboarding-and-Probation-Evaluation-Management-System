@@ -17,8 +17,11 @@
 
 CREATE TABLE IF NOT EXISTS `recommendation_revisions` (
   `revision_id`               BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
-  `rec_id`                    INT UNSIGNED     NOT NULL COMMENT 'FK → final_recommendations.rec_id',
-  `actor_id`                  INT UNSIGNED     NOT NULL COMMENT 'FK → users.user_id',
+  -- G08 (Finding 6 — FK signedness): parent final_recommendations.rec_id and
+  -- users.user_id are signed INT columns.  Using INT UNSIGNED here would cause
+  -- MySQL to refuse the foreign-key constraint (ERROR 1215) on a fresh install.
+  `rec_id`                    INT              NOT NULL COMMENT 'FK → final_recommendations.rec_id',
+  `actor_id`                  INT              NOT NULL COMMENT 'FK → users.user_id',
   `revised_at`                DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Server timestamp at commit',
   `correction_reason`         TEXT             NOT NULL COMMENT 'Mandatory explanation for the correction',
 

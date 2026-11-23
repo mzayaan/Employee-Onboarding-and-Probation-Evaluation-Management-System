@@ -449,7 +449,10 @@ const resubmitRecommendation = async (req, res) => {
       revision_count: clientRevCount  = undefined,  // G08 (Finding 1 — stale-review protection)
     } = req.body;
 
-    if (!justification?.trim()) {
+    // G08 (Finding 8 — payload validation): typeof guard matches reviseAndResubmit.
+    // A non-string body field (number, null, object) passes !justification?.trim()
+    // when coerced but must be rejected explicitly to prevent type-confusion bugs.
+    if (!justification || typeof justification !== 'string' || !justification.trim()) {
       return res.status(400).json({ success: false, message: 'justification is required when resubmitting.' });
     }
 
@@ -1361,15 +1364,85 @@ const listAllRecommendations = async (req, res) => {
 };
 
 // =============================================================================
+// GET /api/director/:recId/revision-history
+// LINE_MANAGER (or HR_ADMIN/DIRECTOR) views immutable revision records for a
+// returned probation recommendation.
+// G08 (Finding 7 — interface completeness): exposes the RecommendationRevision
+// audit trail that the controller already writes on every revise-and-resubmit.
+// FR-18 | G08 | NFR-02, NFR-03, NFR-08 | Objective 3
+// =============================================================================
+const getRevisionHistory = async (req, res) => {
+  try {
+    const { recId } = req.params;
+    const rec = await FinalRecommendation.findByPk(recId, {
+      attributes: ['rec_id', 'submitted_by', 'approval_status'],
+      include: [{ model: ProbationPeriod, as: 'probationPeriod', attributes: ['profile_id'] }],
+    });
+    if (!rec) {
+      return res.status(404).json({ success: false, message: 'Recommendation not found.' });
+    }
+
+    // LINE_MANAGER may only view history for their own recommendation.
+    if (req.user.role === 'LINE_MANAGER') {
+      const profile = await EmployeeProfile.findOne({ where: { profile_id: rec.probationPeriod?.profile_id } });
+      const isOwner = rec.submitted_by === req.user.user_id
+        || (profile && profile.manager_id === req.user.user_id);
+      if (!isOwner) {
+        return res.status(403).json({ success: false, message: 'You do not have access to this recommendation.' });
+      }
+    }
+
+    const revisions = await RecommendationRevision.findAll({
+      where:   { rec_id: recId },
+      order:   [['revised_at', 'ASC']],
+      include: [{ model: User, as: 'actor', attributes: ['first_name', 'last_name'] }],
+    });
+
+    return res.json({ success: true, data: revisions });
+  } catch (error) {
+    console.error('[directorController.getRevisionHistory]', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve revision history.' });
+  }
+};
+
+// =============================================================================
 // GET /api/director/my-recommendations
-// LINE_MANAGER views all recommendations they have submitted (any status).
+// LINE_MANAGER views all recommendations they have submitted OR for employees
+// they currently manage (manager_id match on EmployeeProfile).
+// G08 (Finding 7 — interface completeness): the original query used only
+// submitted_by, so a manager who took over an employee mid-probation would not
+// see recommendations submitted by the previous manager.  The fix adds an OR
+// clause covering EmployeeProfile.manager_id.
 // FR-15 | NFR-03 | Objective 3
 // =============================================================================
 const listMyRecommendations = async (req, res) => {
   try {
     const { user_id } = req.user;
+
+    // Find profile_ids for employees this manager currently owns.
+    const managedProfiles = await EmployeeProfile.findAll({
+      where:      { manager_id: user_id },
+      attributes: ['profile_id'],
+    });
+    const managedProfileIds = managedProfiles.map((p) => p.profile_id);
+
+    // Collect period_ids for those profiles so we can join via probationPeriod.
+    const managedPeriods = managedProfileIds.length
+      ? await ProbationPeriod.findAll({
+          where:      { profile_id: managedProfileIds },
+          attributes: ['period_id'],
+        })
+      : [];
+    const managedPeriodIds = managedPeriods.map((p) => p.period_id);
+
+    const { Op } = require('sequelize');
     const recs = await FinalRecommendation.findAll({
-      where: { submitted_by: user_id },
+      where: {
+        [Op.or]: [
+          { submitted_by: user_id },
+          ...(managedPeriodIds.length ? [{ period_id: managedPeriodIds }] : []),
+        ],
+      },
       include: [
         {
           model: ProbationPeriod,
@@ -1407,6 +1480,7 @@ module.exports = {
   returnToManagerByHR,
   resubmitRecommendation,
   reviseAndResubmitRecommendation, // G08
+  getRevisionHistory,              // G08 (Finding 7 — interface completeness)
   approveRecommendation,
   returnByDirector,
   listAllRecommendations,

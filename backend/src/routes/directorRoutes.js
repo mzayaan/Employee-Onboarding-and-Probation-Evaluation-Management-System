@@ -27,6 +27,7 @@ const {
   returnToManagerByHR,
   resubmitRecommendation,
   reviseAndResubmitRecommendation,
+  getRevisionHistory,              // G08 (Finding 7 — interface completeness)
   approveRecommendation,
   returnByDirector,
   listAllRecommendations,
@@ -132,6 +133,19 @@ router.post(
   '/:recId/revise-and-resubmit',
   authorise('LINE_MANAGER'),
   reviseAndResubmitRecommendation
+);
+
+// ---------------------------------------------------------------------------
+// Revision history — immutable audit trail for a returned recommendation (G08)
+// GET /api/director/:recId/revision-history
+// LINE_MANAGER (own recs only) | HR_ADMIN | DIRECTOR
+// G08 (Finding 7 — interface completeness): exposes RecommendationRevision rows
+// FR-18 | G08 | NFR-02, NFR-03, NFR-08 | Objective 3
+// ---------------------------------------------------------------------------
+router.get(
+  '/:recId/revision-history',
+  authorise('LINE_MANAGER', 'HR_ADMIN', 'DIRECTOR'),
+  getRevisionHistory
 );
 
 // ---------------------------------------------------------------------------
