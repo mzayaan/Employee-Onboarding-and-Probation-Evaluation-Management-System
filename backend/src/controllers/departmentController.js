@@ -11,7 +11,7 @@ const { Department, User } = require('../models');
 const { createAuditLog } = require('../utils/auditLogger');
 
 const getIp = (req) =>
-  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+  req.ip || req.socket?.remoteAddress || 'unknown'; // honours trust proxy 1 (G06)
 
 // =============================================================================
 // GET /api/departments

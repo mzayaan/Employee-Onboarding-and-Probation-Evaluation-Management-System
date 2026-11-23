@@ -156,7 +156,7 @@ const checkOnboardingCompletion = async (profileId, transaction = null) => {
 };
 
 const getIp = (req) =>
-  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+  req.ip || req.socket?.remoteAddress || 'unknown'; // honours trust proxy 1 (G06)
 
 // =============================================================================
 // POST /api/employees
@@ -1051,7 +1051,7 @@ const toggleUserStatus = async (req, res) => {
       userId:      req.user.user_id,
       actionType:  newStatus ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
       description: `User ${user.first_name} ${user.last_name} (ID: ${id}) ${newStatus ? 'activated' : 'deactivated'} by HR.`,
-      ipAddress:   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress,
+      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours trust proxy 1 (G06)
     });
 
     return res.json({

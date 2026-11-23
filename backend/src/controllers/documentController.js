@@ -21,7 +21,7 @@ const { createNotification } = require('../services/notificationService');
 const { checkOnboardingCompletion } = require('./employeeController');
 
 const getIp = (req) =>
-  req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+  req.ip || req.socket?.remoteAddress || 'unknown'; // honours trust proxy 1 (G06)
 
 // =============================================================================
 // GET /api/documents/types
