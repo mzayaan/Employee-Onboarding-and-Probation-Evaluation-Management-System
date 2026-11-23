@@ -65,7 +65,7 @@ const createCriterion = async (req, res) => {
       userId:      req.user.user_id,
       actionType:  'CRITERIA_CREATED',
       description: `Created criterion "${criterion.name}" with weight ${weight}%.`,
-      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours trust proxy 1 (G06)
+      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours app trust proxy setting (G06)
     });
 
     res.status(201).json({ success: true, data: criterion });
@@ -151,7 +151,7 @@ const updateCriterion = async (req, res) => {
       userId:      req.user.user_id,
       actionType:  'CRITERIA_UPDATED',
       description: `Updated criterion "${criterion.name}".`,
-      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours trust proxy 1 (G06)
+      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours app trust proxy setting (G06)
     });
 
     res.json({ success: true, data: criterion });
@@ -180,7 +180,7 @@ const deactivateCriterion = async (req, res) => {
       userId:      req.user.user_id,
       actionType:  'CRITERIA_DEACTIVATED',
       description: `Deactivated criterion "${criterion.name}".`,
-      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours trust proxy 1 (G06)
+      ipAddress:   req.ip || req.socket?.remoteAddress || 'unknown', // honours app trust proxy setting (G06)
     });
 
     res.json({ success: true, message: 'Criterion deactivated.' });

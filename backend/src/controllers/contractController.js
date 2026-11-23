@@ -579,8 +579,11 @@ const signContract = async (req, res) => {
     const signingDate  = now.toISOString().slice(0, 10); // YYYY-MM-DD for DATEONLY column
 
     // Capture client IP for audit record.
-    // Uses req.ip which Express derives safely from X-Forwarded-For when
-    // app.set('trust proxy', 1) is configured — prevents header forgery (G06-D7).
+    // req.ip correctness depends on the TRUST_PROXY env var (see app.js, G06-D7).
+    // When TRUST_PROXY is unset (default), req.ip = socket.remoteAddress — safe
+    // for direct/local access.  When TRUST_PROXY=1 is set for a proxied
+    // deployment, Express derives req.ip from XFF after stripping the trusted
+    // proxy hop, preventing XFF header forgery from reaching this value.
     const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
 
     // ── D3: atomic concurrency guard ──────────────────────────────────────────

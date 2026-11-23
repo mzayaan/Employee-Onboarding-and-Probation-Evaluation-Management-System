@@ -6,16 +6,22 @@
 --
 -- Context (G06-D1 / G06-D6):
 --   signed_at is DataTypes.DATEONLY — it stores only a calendar date, not a
---   time-of-day.  After the G06 fix, the precise signing instant is already
---   captured indirectly via:
---     1. updated_at   (DataTypes.DATE = DATETIME) on the contracts row itself.
---     2. created_at   (DATETIME) of the SIGN_CONTRACT audit_logs entry.
---   Both of those are sufficient for a viva demonstration and for practical
---   audit purposes.
+--   time-of-day.  After the G06 fix, the precise signing instant is captured
+--   directly in signed_at_ts by contractController.js (signContract function).
 --
---   This migration adds an OPTIONAL dedicated column so the precise instant is
---   self-contained on the contracts record without needing a JOIN to audit_logs.
---   It is NOT required for the system to function correctly.
+-- *** THIS MIGRATION IS REQUIRED ***
+--   contractController.js (signContract) unconditionally sets
+--   signed_at_ts: now in the Contract.update() payload.  Without the column
+--   present in the database, MySQL will throw:
+--     "Unknown column 'signed_at_ts' in 'field list'"
+--   on every contract signing attempt.  This migration must be applied before
+--   the signContract endpoint is used.
+--
+--   The column is added as NULL so that historical rows that were signed before
+--   this migration was applied are preserved with signed_at_ts = NULL (see
+--   historical-row rationale below).  Only new signings will have a non-NULL
+--   value.  The calendar-date approximation (signed_at) and the SIGN_CONTRACT
+--   audit_logs entry remain available for any rows signed before this migration.
 --
 -- DO NOT APPLY to the live database without supervisor/HR approval.
 -- Apply with:

@@ -17,11 +17,31 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 
-// Trust the first proxy hop so req.ip resolves to the real client IP rather than
-// the proxy's address (G06-D7: prevents X-Forwarded-For header forgery).
-// Set to 1 for a single reverse proxy (Railway/Vercel edge); adjust for deeper
-// proxy chains in the deployment environment.
-app.set('trust proxy', 1);
+// ── Reverse-proxy trust configuration (G06-D7) ────────────────────────────────
+// TRUST_PROXY is unset by default so the app is safe when run directly (no
+// proxy in front).  With no setting, Express keeps trust proxy = false:
+//   req.ip === socket.remoteAddress — unforgeable by any client.
+//
+// Set TRUST_PROXY=1 in the deployment environment ONLY when ALL incoming
+// connections are verified to pass through exactly one trusted reverse proxy
+// (e.g. Railway or a Vercel edge function).  Do NOT set it if the app can be
+// reached directly without passing through that proxy — with trust proxy 1,
+// any direct client can forge its recorded IP by supplying X-Forwarded-For.
+//
+// Valid TRUST_PROXY values (passed through to Express):
+//   unset / "false" / "0"  — no proxy trust; req.ip = socket address (default)
+//   "1" / "2" / …          — trust N hops from the right of XFF
+//   "loopback"             — trust loopback addresses as proxies
+//   "192.168.1.0/24,…"    — comma-separated list of trusted proxy IP ranges
+//
+// Verify the actual deployment topology before changing this value.
+const TRUST_PROXY = process.env.TRUST_PROXY;
+if (TRUST_PROXY && TRUST_PROXY !== 'false' && TRUST_PROXY !== '0') {
+  const proxyValue = /^\d+$/.test(TRUST_PROXY) ? parseInt(TRUST_PROXY, 10) : TRUST_PROXY;
+  app.set('trust proxy', proxyValue);
+}
+// If TRUST_PROXY is unset or 'false'/'0', Express keeps its default (false):
+// req.ip === socket.remoteAddress — clients cannot forge their IP via XFF.
 
 // =============================================================================
 // SECURITY MIDDLEWARE

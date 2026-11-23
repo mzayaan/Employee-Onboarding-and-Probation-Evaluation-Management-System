@@ -68,7 +68,7 @@ const recBorderColour = (t) =>
   ({ CONFIRM: '#86efac', EXTEND: '#fcd34d', DISMISS: '#fca5a5' }[t] || BORDER);
 
 const getIp = (req) =>
-  req.ip || req.socket?.remoteAddress || 'unknown'; // honours trust proxy 1 (G06)
+  req.ip || req.socket?.remoteAddress || 'unknown'; // honours app trust proxy setting (G06)
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
 

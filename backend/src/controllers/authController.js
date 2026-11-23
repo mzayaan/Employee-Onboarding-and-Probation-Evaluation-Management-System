@@ -13,10 +13,12 @@ const { createAuditLog }           = require('../utils/auditLogger');
 const { sendPasswordResetEmail }   = require('../utils/mailer');
 const { validatePasswordStrength } = require('../utils/passwordValidator');
 
-// Helper: extract real IP from request (handles reverse proxies).
-// Relies on app.set('trust proxy', 1) in app.js — Express derives req.ip from
-// X-Forwarded-For safely, ignoring any extra proxy hops beyond the trusted count
-// (G06-D7: prevents clients from forging the IP via a crafted header).
+// Helper: extract real IP from request.
+// req.ip is set by Express according to the app's trust proxy configuration
+// (TRUST_PROXY env var — see app.js, G06-D7).  When TRUST_PROXY is unset
+// (the default), req.ip === socket.remoteAddress and XFF is ignored entirely,
+// so direct clients cannot forge their IP.  When TRUST_PROXY matches the real
+// proxy hop count, req.ip resolves through XFF correctly.
 const getIp = (req) => req.ip || req.socket?.remoteAddress || 'unknown';
 
 // =============================================================================

@@ -11,7 +11,7 @@ const { createAuditLog }     = require('../utils/auditLogger');
 const { createNotification } = require('../services/notificationService');
 
 const getIp = (req) =>
-  req.ip || req.socket?.remoteAddress || 'unknown'; // honours trust proxy 1 (G06)
+  req.ip || req.socket?.remoteAddress || 'unknown'; // honours app trust proxy setting (G06)
 
 // Helper: verify caller has scope access to a given employee profile.
 // HR_ADMIN: unrestricted.

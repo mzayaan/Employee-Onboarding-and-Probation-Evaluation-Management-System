@@ -21,7 +21,7 @@ const { createNotification } = require('../services/notificationService');
 const { checkOnboardingCompletion } = require('./employeeController');
 
 const getIp = (req) =>
-  req.ip || req.socket?.remoteAddress || 'unknown'; // honours trust proxy 1 (G06)
+  req.ip || req.socket?.remoteAddress || 'unknown'; // honours app trust proxy setting (G06)
 
 // =============================================================================
 // GET /api/documents/types

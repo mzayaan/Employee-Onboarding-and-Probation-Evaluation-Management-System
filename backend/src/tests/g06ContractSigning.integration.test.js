@@ -785,32 +785,40 @@ describe('signContract — persistence and signed-terms protection', () => {
 });
 
 // =============================================================================
-// 10. Supertest proxy regression — Express trust proxy 1 (G06-D7)
+// 10. Supertest proxy regression — Express trust proxy behaviour (G06-D7)
 //
 // These tests run the REAL Express middleware stack via Supertest, not a mock.
-// They verify that app.set('trust proxy', 1) in app.js means:
-//   • req.ip resolves to the rightmost entry in X-Forwarded-For (added by the
-//     trusted proxy at the socket layer), not a forged value prepended by the
-//     client.
-//   • A client cannot choose its own recorded IP by prepending values to XFF.
+// They cover three distinct scenarios:
 //
-// A minimal Express app is used so no JWT / DB middleware is needed.
-// The important invariant is that the same trust proxy setting used in app.js
-// (value 1) governs the resolution — this test makes that concrete.
+//   TC-G06-55/56/57  Correct behaviour with trust proxy 1 (simulates
+//                    TRUST_PROXY=1 in a verified proxied deployment).
+//
+//   TC-G06-58        The forgery RISK introduced by trust proxy 1 when the app
+//                    is accessed directly (no real proxy in front).  This is
+//                    why TRUST_PROXY defaults to unset in app.js — the value
+//                    must only be set after the deployment topology is verified.
+//
+//   TC-G06-59        The safe default: trust proxy false (TRUST_PROXY unset).
+//                    XFF is ignored; req.ip = socket.remoteAddress always.
 //
 // Meaningful verification: assigning req.ip directly in a controller mock
 // (TC-G06-45) confirms the controller reads req.ip, but does not verify that
-// Express strips forged XFF entries.  These Supertest tests close that gap.
+// Express resolves or ignores XFF correctly.  These Supertest tests close that
+// gap by running the real Express middleware.
 // =============================================================================
-describe('Express trust proxy 1 — req.ip resolution via Supertest (G06-D7)', () => {
-  // Build a throwaway Express app identical in trust-proxy config to app.js
-  // but with no auth/database middleware so it runs without network.
+describe('Express trust proxy behaviour — req.ip resolution via Supertest (G06-D7)', () => {
+  // Build a minimal Express app with trust proxy 1 configured.
+  // This simulates the TRUST_PROXY=1 scenario (verified proxied deployment).
+  // No auth/database middleware is needed — tests run without network.
   const express  = require('express');
   const request  = require('supertest');
 
   const makeProxyApp = () => {
     const app = express();
-    app.set('trust proxy', 1); // matches app.js line 24
+    // Simulates TRUST_PROXY=1 set for a deployment behind a single trusted proxy.
+    // With this setting the socket-level connection is treated as the trusted
+    // proxy, so XFF is consulted to resolve req.ip.
+    app.set('trust proxy', 1);
     app.get('/probe', (req, res) => {
       res.json({
         resolvedIp:  req.ip,
@@ -820,22 +828,24 @@ describe('Express trust proxy 1 — req.ip resolution via Supertest (G06-D7)', (
     return app;
   };
 
-  test('TC-G06-55: with trust proxy 1, XFF rightmost entry is used as req.ip (not forged leading value)', async () => {
-    // Client prepends a forged IP; the trusted proxy (Supertest connects on
-    // loopback) appends its own entry.  trust proxy 1 strips the forged part
-    // and resolves req.ip to the rightmost (proxy-appended) entry.
+  test('TC-G06-55: trust proxy 1 — rightmost XFF entry is req.ip (leading forged value is ignored)', async () => {
+    // With trust proxy 1, Express reads the rightmost XFF entry as the client
+    // IP (the value the trusted proxy at the socket layer added).  Leading
+    // entries the client may have prepended are discarded.
+    // In a real deployment: client→proxy→app; proxy appends real client IP.
+    // In Supertest: the test client IS at the socket layer, so it controls
+    // the rightmost entry — but the test demonstrates the correct resolution
+    // direction when trust proxy 1 matches the deployment hop count.
     const app = makeProxyApp();
     const res = await request(app)
       .get('/probe')
       .set('x-forwarded-for', '10.99.99.99, 192.168.1.50');
     expect(res.status).toBe(200);
-    // The rightmost entry '192.168.1.50' is what the trusted proxy reported.
     expect(res.body.resolvedIp).toBe('192.168.1.50');
-    // The forged leading value must NOT be used.
     expect(res.body.resolvedIp).not.toBe('10.99.99.99');
   });
 
-  test('TC-G06-56: single XFF entry resolves as req.ip (normal proxy hop)', async () => {
+  test('TC-G06-56: trust proxy 1 — single XFF entry resolves as req.ip (normal proxy hop)', async () => {
     const app = makeProxyApp();
     const res = await request(app)
       .get('/probe')
@@ -844,35 +854,69 @@ describe('Express trust proxy 1 — req.ip resolution via Supertest (G06-D7)', (
     expect(res.body.resolvedIp).toBe('203.0.113.42');
   });
 
-  test('TC-G06-57: without XFF header, req.ip falls back to socket address (loopback in test)', async () => {
+  test('TC-G06-57: trust proxy 1 — without XFF, req.ip falls back to socket address (loopback in test)', async () => {
     const app = makeProxyApp();
     const res = await request(app)
       .get('/probe');
-    // No XFF — req.ip is the socket's remote address which Supertest uses.
     expect(res.status).toBe(200);
-    // Should be a loopback address (127.0.0.1 or ::1 or ::ffff:127.0.0.1).
     expect(res.body.resolvedIp).toMatch(/127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/);
   });
 
-  test('TC-G06-58: with trust proxy 0 (misconfigured), raw XFF first entry is exposed (documents the attack surface)', async () => {
-    // Demonstrates why trust proxy 1 is required: without it, req.ip is just
-    // the socket address and X-Forwarded-For is not consulted, so a downstream
-    // handler that reads req.headers['x-forwarded-for'] directly would still
-    // expose the forged value.  This test is documentation, not a production
-    // path — the actual app.js uses trust proxy 1.
+  test('TC-G06-58: trust proxy 1 with direct access enables XFF forgery — demonstrates why TRUST_PROXY must match deployment topology', async () => {
+    // This is the attack risk that the TRUST_PROXY env-var default-false
+    // protects against.
+    //
+    // With trust proxy 1, Express treats the socket-level connection as the
+    // "trusted proxy" and reads req.ip from XFF.  When the app is behind a
+    // real proxy this is correct — the proxy reliably sets the rightmost XFF
+    // entry to the genuine client IP.
+    //
+    // However, if TRUST_PROXY=1 is set but the app can be reached DIRECTLY
+    // (no proxy in front of it), any direct client can send any value in
+    // X-Forwarded-For and req.ip will be set to that value.
+    //
+    // In Supertest the test client connects on loopback.  With trust proxy 1,
+    // loopback is indistinguishable from a "trusted proxy" at the socket
+    // layer, so a single XFF entry is taken as req.ip unchanged — exactly the
+    // forgery path an attacker would use if they could reach the app directly.
+    //
+    // The fix: keep TRUST_PROXY unset (default false) in app.js and set it
+    // to the correct hop count ONLY in a verified proxied deployment.
     const app = express();
-    app.set('trust proxy', 0); // intentionally wrong — illustrates the problem
-    app.get('/probe', (req, res) => {
-      // Mimic the OLD (vulnerable) getIp pattern that some controllers used
-      // before the G06 fix: reading the raw header directly.
-      const rawIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
-      res.json({ rawIp });
-    });
+    app.set('trust proxy', 1); // simulates TRUST_PROXY=1 with no real proxy in front
+    app.get('/probe', (req, res) => res.json({ resolvedIp: req.ip }));
+
     const res = await request(app)
       .get('/probe')
-      .set('x-forwarded-for', 'forged-attacker-ip, real-proxy-ip');
-    // The old pattern returns the forged leading value — this is the
-    // vulnerability that the G06 fix eliminates.
-    expect(res.body.rawIp).toBe('forged-attacker-ip');
+      .set('x-forwarded-for', 'attacker-chosen-ip');
+    expect(res.status).toBe(200);
+    // With trust proxy 1 and direct access, req.ip equals the client-supplied
+    // XFF value.  Setting TRUST_PROXY=1 without a verified proxy in front is
+    // therefore a misconfiguration that enables IP forgery.
+    expect(res.body.resolvedIp).toBe('attacker-chosen-ip');
+  });
+
+  test('TC-G06-59: trust proxy false (default/unset) ignores XFF — req.ip is always the socket address', async () => {
+    // This is the app.js default when TRUST_PROXY is unset in the environment.
+    // Express keeps trust proxy = false: req.ip === socket.remoteAddress and
+    // X-Forwarded-For is completely ignored.
+    // A direct client cannot forge its recorded IP regardless of what it sends.
+    const app = express();
+    // trust proxy is NOT set — matches app.js when TRUST_PROXY is unset
+    app.get('/probe', (req, res) => res.json({
+      resolvedIp: req.ip,
+      socketIp:   req.socket?.remoteAddress,
+    }));
+
+    const res = await request(app)
+      .get('/probe')
+      .set('x-forwarded-for', 'attacker-chosen-ip');
+    expect(res.status).toBe(200);
+    // XFF must be completely ignored; req.ip must NOT be the forged value.
+    expect(res.body.resolvedIp).not.toBe('attacker-chosen-ip');
+    // req.ip must equal the actual socket address (loopback in Supertest).
+    expect(res.body.resolvedIp).toMatch(/127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/);
+    // req.ip and socketIp must agree — no proxy resolution occurred.
+    expect(res.body.resolvedIp).toBe(res.body.socketIp);
   });
 });
