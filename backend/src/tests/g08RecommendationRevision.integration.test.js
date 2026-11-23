@@ -18,7 +18,7 @@
 //   Req 8 — Complete interface: all gates enforced at API level
 //
 // FR-15, FR-18 | G08 | NFR-02, NFR-03 | Objective 3
-// Test cases: TC-G08-001 through TC-G08-019
+// Test cases: TC-G08-001 through TC-G08-039
 // =============================================================================
 
 // ── Dependency mocks ──────────────────────────────────────────────────────────
@@ -1014,6 +1014,42 @@ describe('G08 stale revision protection — endorse and approve endpoints', () =
     expect(res.body.success).toBe(true);
   });
 
+  // TC-G08-028b: Director approves with CORRECT revision_count — no false positive (G08)
+  // Positive counterpart to TC-G08-028: proves the stale check does NOT fire when the
+  // client sends the current revision_count (manager-side stale-version rejection).
+  test('TC-G08-028b: approve with correct revision_count → not blocked by stale check', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+
+    const mockDirectorUser = {
+      user_id: 7, email: 'director@company.com', role: 'DIRECTOR',
+      first_name: 'Director', last_name: 'Smith', is_active: true,
+      toJSON: jest.fn().mockReturnValue({ user_id: 7, role: 'DIRECTOR' }),
+    };
+    User.findOne.mockResolvedValue(mockDirectorUser);
+
+    // DB has revision_count: 2 — Director sends the same value (not stale)
+    FinalRecommendation.findByPk.mockResolvedValue({
+      ...makeMockRec({ approval_status: 'PENDING_DIRECTOR', recommendation_type: 'CONFIRM' }),
+      probationPeriod: makeMockPeriod(),
+      revision_count:  2,
+      submitted_by:    5,
+      update:          jest.fn().mockResolvedValue(true),
+    });
+
+    const res = await request(app)
+      .post('/api/director/10/approve')
+      .set('Authorization', `Bearer ${directorToken}`)
+      .send({ director_reason: 'All criteria satisfied.', revision_count: 2 });
+
+    // 2 === 2 → stale check passes; approve completes normally
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
 });
 
 // =============================================================================
@@ -1334,6 +1370,177 @@ describe('G08 period eligibility gate regression — /resubmit endpoint', () => 
     expect(res.body.message).toMatch(/eligible/i);
     expect(freshTx.rollback).toHaveBeenCalled();
     expect(mockRec.update).not.toHaveBeenCalled();
+  });
+
+});
+
+// =============================================================================
+// TC-G08-037: Mandatory revision history — /revise-and-resubmit (Req 5)
+//
+// Verifies that RecommendationRevision.create is called on every successful
+// revise-and-resubmit, and that the audit row contains the required fields.
+// Before the F7 fix, RecommendationRevision.create was absent from /resubmit
+// and absent from the transaction in /revise-and-resubmit.
+// =============================================================================
+
+describe('G08 mandatory revision history regression — /revise-and-resubmit endpoint (Req 5)', () => {
+
+  // TC-G08-037: RecommendationRevision.create called with required fields on success
+  test('TC-G08-037: revise-and-resubmit creates a RecommendationRevision audit row (Req 5)', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+    User.findOne.mockResolvedValue(mockManagerUser);
+
+    FinalRecommendation.findOne
+      .mockResolvedValueOnce(makeMockRec())
+      .mockResolvedValueOnce(null);
+
+    EvaluationCheckpoint.findAll.mockResolvedValue([makeMockCompletedCp()]);
+    // Restore create so it resolves (jest.clearAllMocks only clears calls, not implementation)
+    RecommendationRevision.create.mockResolvedValue({ revision_id: 99 });
+
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+
+    // RecommendationRevision.create must have been called exactly once
+    expect(RecommendationRevision.create).toHaveBeenCalledTimes(1);
+
+    const createArgs = RecommendationRevision.create.mock.calls[0][0];
+    // Must identify the recommendation being revised
+    expect(createArgs).toHaveProperty('rec_id');
+    // Must record who initiated the revision (controller field: actor_id)
+    expect(createArgs).toHaveProperty('actor_id');
+    // Must capture the state before the revision (audit trail)
+    expect(createArgs).toHaveProperty('before_recommendation_type');
+    // Must record the reason for the correction
+    expect(createArgs).toHaveProperty('correction_reason');
+  });
+
+});
+
+// =============================================================================
+// TC-G08-038 — TC-G08-039: Stale field clearing — Req 6
+//
+// Verifies that every resubmission (both /revise-and-resubmit and /resubmit)
+// resets all HR endorsement and Director decision fields to null so that the
+// next HR review starts from a clean slate.
+//
+// Before the fix these fields were left populated from the previous round,
+// causing HR to see a "ghost" endorsement on a recommendation that had just
+// been returned to the manager.
+// =============================================================================
+
+describe('G08 stale field clearing regression (Req 6)', () => {
+
+  // TC-G08-038: /revise-and-resubmit clears stale HR + Director fields
+  test('TC-G08-038: revise-and-resubmit clears stale HR and Director fields on success (Req 6)', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+    User.findOne.mockResolvedValue(mockManagerUser);
+
+    // Rec still carries HR endorsement and submission-to-director data from the previous cycle
+    const baseRec = makeMockRec({
+      endorsed_by:              2,
+      endorsed_at:              new Date('2026-09-10'),
+      hr_endorsement_notes:     'Score looks off — please check attendance.',
+      submitted_to_director_at: new Date('2026-09-11'),
+      director_id:              7,
+      director_decision_at:     null,
+      director_reason:          null,
+    });
+
+    FinalRecommendation.findOne
+      .mockResolvedValueOnce(baseRec)
+      .mockResolvedValueOnce(null);
+
+    EvaluationCheckpoint.findAll.mockResolvedValue([makeMockCompletedCp()]);
+    RecommendationRevision.create.mockResolvedValue({ revision_id: 1 });
+
+    const res = await request(app)
+      .post('/api/director/10/revise-and-resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send(VALID_BODY);
+
+    expect(res.status).toBe(200);
+
+    // rec.update must have been called — verify the first call's field arguments
+    expect(baseRec.update).toHaveBeenCalled();
+    const updateArgs = baseRec.update.mock.calls[0][0];
+
+    // All stale HR + Director fields must be explicitly null (Req 6)
+    expect(updateArgs.endorsed_by).toBeNull();
+    expect(updateArgs.endorsed_at).toBeNull();
+    expect(updateArgs.hr_endorsement_notes).toBeNull();
+    expect(updateArgs.submitted_to_director_at).toBeNull();
+    expect(updateArgs.director_id).toBeNull();
+    expect(updateArgs.director_decision_at).toBeNull();
+    expect(updateArgs.director_reason).toBeNull();
+
+    // Status must restart the review cycle
+    expect(updateArgs.approval_status).toBe('PENDING_HR_REVIEW');
+  });
+
+  // TC-G08-039: /resubmit clears stale HR + Director fields
+  test('TC-G08-039: resubmitRecommendation clears stale HR and Director fields on success (Req 6)', async () => {
+    jest.clearAllMocks();
+    FinalRecommendation.findOne.mockReset();
+
+    const freshTx = makeMockTransaction();
+    sequelize.transaction.mockResolvedValue(freshTx);
+    User.findOne.mockResolvedValue(mockManagerUser); // user_id: 5
+
+    // Rec carries data from the previous endorsement and director-submission round
+    const mockRec = {
+      rec_id:                   10,
+      approval_status:          'RETURNED_TO_MANAGER',
+      submitted_by:             5,
+      revision_count:           1,
+      cumulative_score:         '72.00',
+      recommendation_type:      'EXTEND',
+      justification:            'old justification',
+      endorsed_by:              2,
+      endorsed_at:              new Date('2026-09-10'),
+      hr_endorsement_notes:     'Please revise the attendance score.',
+      submitted_to_director_at: new Date('2026-09-11'),
+      director_id:              7,
+      director_decision_at:     null,
+      director_reason:          null,
+      probationPeriod:          { status: 'ACTIVE' },
+      update:                   jest.fn().mockResolvedValue(true),
+    };
+    FinalRecommendation.findByPk.mockResolvedValue(mockRec);
+
+    const res = await request(app)
+      .post('/api/director/10/resubmit')
+      .set('Authorization', `Bearer ${mgrToken}`)
+      .send({ justification: 'Resubmitting with corrected attendance reasoning.' });
+
+    expect(res.status).toBe(200);
+
+    // rec.update must have cleared every stale field (Req 6)
+    expect(mockRec.update).toHaveBeenCalled();
+    const updateArgs = mockRec.update.mock.calls[0][0];
+
+    expect(updateArgs.endorsed_by).toBeNull();
+    expect(updateArgs.endorsed_at).toBeNull();
+    expect(updateArgs.hr_endorsement_notes).toBeNull();
+    expect(updateArgs.submitted_to_director_at).toBeNull();
+    expect(updateArgs.director_id).toBeNull();
+    expect(updateArgs.director_decision_at).toBeNull();
+    expect(updateArgs.director_reason).toBeNull();
+
+    // Status must restart the review cycle
+    expect(updateArgs.approval_status).toBe('PENDING_HR_REVIEW');
   });
 
 });
