@@ -173,6 +173,10 @@ jest.mock('../models', () => {
       authenticate: jest.fn().mockResolvedValue(undefined),
       // Manual-transaction style (not callback) used by reviseAndResubmit
       transaction: jest.fn().mockImplementation(() => Promise.resolve(mockTransaction)),
+      // G08 TC-G08-050: reviseAndResubmitRecommendation calls sequelize.literal() for
+      // the COALESCE ORDER clause.  Return the SQL string as-is so the production
+      // code path runs without hitting the real Sequelize engine.
+      literal: jest.fn((sql) => sql),
     },
     User: {
       findOne:  jest.fn().mockResolvedValue(mockManagerUser),

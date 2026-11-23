@@ -178,8 +178,10 @@ function ScoreCorrectionForm({ detailRec, corrections, onScoreChange }) {
                   const currentVal = corrections[score.score_id] ?? score.raw_score
                   const isChanged = Number(currentVal) !== Number(score.raw_score)
                   // A score is editable only when: the checkpoint has a completion
-                  // date AND the weight is resolved.
-                  const isEditable = !noCompletion && score.weight_percent_at_scoring != null
+                  // date, the weight is resolved, AND the backend marks it eligible
+                  // (i.e. the checkpoint falls within the current correction cycle,
+                  // not a previously-approved cycle whose evidence is now locked).
+                  const isEditable = !noCompletion && score.weight_percent_at_scoring != null && score.correction_eligible !== false
                   return (
                     <div key={score.score_id} className="flex items-center justify-between gap-4 px-4 py-2.5">
                       <div className="min-w-0">
@@ -547,8 +549,21 @@ function RecRow({ rec, onRefresh }) {
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading checkpoint scores…
                 </div>
               ) : detailErr ? (
-                <div className="flex items-center gap-2 rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-700">
-                  <Info className="h-3.5 w-3.5 flex-shrink-0" /> {detailErr}
+                <div className="rounded-lg bg-amber-100 px-3 py-2 text-xs text-amber-700 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Info className="h-3.5 w-3.5 flex-shrink-0" /> {detailErr}
+                  </div>
+                  {/* G08: manual retry after a detail-load failure (TC-FE-G08-018).
+                      Resetting detailFailed to false re-enables the useEffect guard so
+                      one new fetch is attempted when the user clicks this button. */}
+                  <button
+                    type="button"
+                    data-testid="detail-retry-btn"
+                    onClick={() => { setDetailFailed(false); setDetailErr('') }}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-amber-200 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-300 transition-colors"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Retry loading scores
+                  </button>
                 </div>
               ) : detailRec ? (
                 <ScoreCorrectionForm

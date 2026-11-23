@@ -276,6 +276,36 @@ const getRecommendation = async (req, res) => {
       SENSITIVE_FIELDS.forEach((f) => delete nestedProfile[f]);
     }
 
+    // G08: for RETURNED_TO_MANAGER records, compute correction_eligible per score.
+    // A score is eligible only if its checkpoint completed_at falls after the last
+    // approved cycle boundary (same COALESCE ordering used by reviseAndResubmit).
+    // Scores from checkpoints completed before the latest approved cycle are read-only
+    // so the manager cannot retroactively revise already-incorporated evidence.
+    if (rec.approval_status === 'RETURNED_TO_MANAGER') {
+      const periodId = rec.probationPeriod?.period_id ?? recData.period_id;
+      const lastApproved = periodId
+        ? await FinalRecommendation.findOne({
+            where:      { period_id: periodId, approval_status: 'APPROVED' },
+            order:      [[sequelize.literal('COALESCE(director_decision_at, generated_at)'), 'DESC']],
+            attributes: ['director_decision_at', 'generated_at'],
+          })
+        : null;
+      const cycleDecisionAt = lastApproved?.director_decision_at
+        ? new Date(lastApproved.director_decision_at)
+        : lastApproved?.generated_at
+          ? new Date(lastApproved.generated_at)
+          : null;
+
+      const checkpoints = recData.probationPeriod?.checkpoints ?? [];
+      for (const cp of checkpoints) {
+        const scores = cp.managerEvaluation?.scores ?? [];
+        const cpDate = cp.completed_at ? new Date(cp.completed_at) : null;
+        for (const score of scores) {
+          score.correction_eligible = cycleDecisionAt === null || (cpDate !== null && cpDate > cycleDecisionAt);
+        }
+      }
+    }
+
     return res.json({ success: true, data: recData });
   } catch (error) {
     console.error('[directorController.getRecommendation]', error.message);

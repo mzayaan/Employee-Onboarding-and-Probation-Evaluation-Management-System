@@ -27,6 +27,10 @@
 //                  scores with weight_percent_at_scoring == null are shown as
 //                  "locked" and have no <select> element (G09 protection).
 //   TC-FE-G08-013  APPROVED rec: PDF download button visible; RETURNED rec: not.
+//   TC-FE-G08-018  "Retry loading scores" button appears after detail-load failure
+//                  and clicking it triggers a second getRecommendation call.
+//   TC-FE-G08-019  Score with correction_eligible=false renders as read-only
+//                  (no combobox) even when weight and date are both present.
 //
 // FR-15, FR-18 | G08 | NFR-02, NFR-03 | Objective 3
 // =============================================================================
@@ -691,6 +695,112 @@ describe('ManagerRecommendationsPage — G08 regression suite', () => {
 
     // getRecommendation should have been called exactly once — no retry
     expect(getRecommendation).toHaveBeenCalledTimes(1);
+  });
+
+  // ── TC-FE-G08-018: detail-load retry button resets failure state ─────────────
+  // After a failed detail fetch the UI must display a "Retry loading scores"
+  // button.  Clicking it should trigger a second getRecommendation call (the
+  // detailFailed flag is reset, so the useEffect guard allows one new attempt).
+
+  it('TC-FE-G08-018: "Retry loading scores" button triggers a second fetch after detail-load failure', async () => {
+    // First call fails; second call succeeds so we can confirm the retry path.
+    getRecommendation
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockResolvedValueOnce(makeDetail());
+
+    listMyRecommendations.mockResolvedValue([makeRec({ approval_status: 'RETURNED_TO_MANAGER' })]);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Alice Brown')).toBeDefined());
+
+    const rowButton = screen.getByRole('button', { name: /Alice Brown/i });
+    await userEvent.click(rowButton);
+
+    // Error banner must appear
+    await waitFor(() => {
+      expect(screen.getByText(/Could not load score details/i)).toBeDefined();
+    });
+
+    // The retry button must be present
+    const retryBtn = screen.getByTestId('detail-retry-btn');
+    expect(retryBtn).toBeDefined();
+
+    // Clicking retry must trigger a second fetch
+    await userEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(getRecommendation).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ── TC-FE-G08-019: approved-cycle checkpoints rendered read-only ──────────────
+  // When a score has correction_eligible === false, the UI must render a read-only
+  // display (no <select>) instead of an editable control, even though the checkpoint
+  // has a completed_at date and a resolved weight_percent_at_scoring.
+
+  it('TC-FE-G08-019: score with correction_eligible=false renders as read-only (no select)', async () => {
+    const detailWithLockedScore = makeDetail(1, {
+      probationPeriod: {
+        period_id: 10,
+        end_date:  '2025-01-31',
+        checkpoints: [
+          {
+            checkpoint_id: 100,
+            label: '30-Day',
+            completed_at: '2024-10-15T00:00:00.000Z',
+            managerEvaluation: {
+              eval_id: 200,
+              scores: [
+                {
+                  score_id:                 1001,
+                  criterion_id:             1,
+                  raw_score:                4,
+                  weight_percent_at_scoring: '20.00',
+                  name_at_scoring:          'Job Performance',
+                  correction_eligible:      false,   // ← locked: prior-cycle score
+                  criterion:               { name: 'Job Performance' },
+                },
+                {
+                  score_id:                 1002,
+                  criterion_id:             2,
+                  raw_score:                3,
+                  weight_percent_at_scoring: '20.00',
+                  name_at_scoring:          'Attendance',
+                  correction_eligible:      true,    // ← eligible: current-cycle score
+                  criterion:               { name: 'Attendance' },
+                },
+              ],
+            },
+          },
+        ],
+        employeeProfile: {
+          job_title:  'Software Engineer',
+          department: { name: 'Engineering' },
+          user: { first_name: 'Alice', last_name: 'Brown' },
+        },
+      },
+    });
+
+    getRecommendation.mockResolvedValue(detailWithLockedScore);
+    listMyRecommendations.mockResolvedValue([makeRec({ approval_status: 'RETURNED_TO_MANAGER' })]);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Alice Brown')).toBeDefined());
+
+    const rowButton = screen.getByRole('button', { name: /Alice Brown/i });
+    await userEvent.click(rowButton);
+
+    // Wait for the correction form to render
+    await waitFor(() => {
+      expect(screen.getByText('Job Performance')).toBeDefined();
+    });
+
+    // Only one combobox must be rendered — for the eligible score.
+    // The score with correction_eligible=false must NOT have a select.
+    const selects = screen.getAllByRole('combobox');
+    expect(selects).toHaveLength(1);
   });
 
 });
