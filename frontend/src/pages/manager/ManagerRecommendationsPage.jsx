@@ -293,10 +293,14 @@ function RecRow({ rec, onRefresh }) {
 
     setBusy(true); setErr(''); setOk(false)
     try {
+      // G08 (Finding 7 — interface completeness): include the optimistic-lock counter
+      // so the backend can reject the submission if another revision was saved since
+      // this form was loaded (stale-review protection, Finding 1).
       await reviseAndResubmit(rec.rec_id, {
         justification:     justification.trim(),
         correction_reason: corrReason.trim(),
         score_corrections: scoreCorrections,
+        revision_count:    detailRec?.revision_count ?? rec.revision_count,
       })
       setOk(true)
       setTimeout(() => { onRefresh() }, 800)

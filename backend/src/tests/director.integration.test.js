@@ -139,6 +139,10 @@ jest.mock('../models', () => {
     EmployeeProfile: {
       findByPk: jest.fn().mockResolvedValue({ user_id: 9, profile_id: 1 }),
       update:   jest.fn().mockResolvedValue([1]),
+      // G08 (Finding 4): resubmitRecommendation now checks ownership via
+      // EmployeeProfile.manager_id.  Default manager_id: 5 matches mockManagerUser
+      // so all existing happy-path tests pass the new ownership check.
+      findOne:  jest.fn().mockResolvedValue({ manager_id: 5 }),
     },
     EvaluationCheckpoint: {
       findOne: jest.fn().mockResolvedValue({ checkpoint_id: 3, day_number: 90 }),

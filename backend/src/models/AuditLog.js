@@ -52,7 +52,8 @@ const AuditLog = sequelize.define('AuditLog', {
       'RECOMMENDATION_SUBMITTED',       // manager submits → PENDING_HR_REVIEW
       'RECOMMENDATION_ENDORSED',        // HR endorses → PENDING_DIRECTOR
       'RECOMMENDATION_RETURNED_BY_HR',  // HR returns → RETURNED_TO_MANAGER
-      'RECOMMENDATION_RESUBMITTED',     // manager resubmits → PENDING_HR_REVIEW
+      'RECOMMENDATION_RESUBMITTED',              // manager resubmits (justification-only) → PENDING_HR_REVIEW
+      'RECOMMENDATION_REVISED_AND_RESUBMITTED', // G08: manager corrects scores then resubmits → PENDING_HR_REVIEW
       'RECOMMENDATION_APPROVED',        // Director approves → APPROVED; period updated
       'RECOMMENDATION_RETURNED_BY_DIRECTOR', // Director returns → RETURNED_TO_MANAGER
       // Reports

@@ -69,7 +69,8 @@ export const resubmitRecommendation = (recId, body) =>
  * @param {{
  *   justification:     string,
  *   correction_reason: string,
- *   score_corrections?: Array<{ score_id: number, raw_score: number }>
+ *   score_corrections?: Array<{ score_id: number, raw_score: number }>,
+ *   revision_count?:   number  // G08 (Finding 7): optimistic-lock counter for stale-review protection
  * }} body
  */
 export const reviseAndResubmit = (recId, body) =>

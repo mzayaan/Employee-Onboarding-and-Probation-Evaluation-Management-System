@@ -444,7 +444,10 @@ const resubmitRecommendation = async (req, res) => {
   let t;
   try {
     const { recId } = req.params;
-    const { justification = '' } = req.body;
+    const {
+      justification                   = '',
+      revision_count: clientRevCount  = undefined,  // G08 (Finding 1 — stale-review protection)
+    } = req.body;
 
     if (!justification?.trim()) {
       return res.status(400).json({ success: false, message: 'justification is required when resubmitting.' });
@@ -472,12 +475,14 @@ const resubmitRecommendation = async (req, res) => {
       });
     }
 
-    // G08: unified ownership — any caller may only resubmit their own recommendation.
-    // The previous guard conditioned on role === 'LINE_MANAGER', which allowed an
-    // HR_ADMIN to bypass ownership and resubmit on behalf of any manager.
-    if (rec.submitted_by !== req.user.user_id) {
+    // G08 (Finding 1 — stale-review protection): reject if the client's optimistic-lock
+    // counter no longer matches the DB value, indicating a concurrent revision.
+    if (clientRevCount !== undefined && clientRevCount !== rec.revision_count) {
       await t.rollback();
-      return res.status(403).json({ success: false, message: 'Access denied. You may only resubmit your own recommendation.' });
+      return res.status(409).json({
+        success: false,
+        message: 'Conflict: recommendation was revised since you loaded the form. Reload and try again.',
+      });
     }
 
     // G08: unified eligibility gate — mirrors reviseAndResubmitRecommendation.
@@ -497,6 +502,23 @@ const resubmitRecommendation = async (req, res) => {
       return res.status(409).json({
         success: false,
         message: `Cannot resubmit: probation period status is "${period.status}". Only ACTIVE or EXTENDED periods are eligible.`,
+      });
+    }
+
+    // G08 (Finding 4 — ownership consistency): verify via EmployeeProfile.manager_id,
+    // not rec.submitted_by.  submitted_by captures who originally generated the
+    // recommendation, but the manager may have been reassigned since then.  Only the
+    // currently assigned manager should be able to resubmit.
+    const empProfile = await EmployeeProfile.findOne({
+      where:       { profile_id: period.profile_id },
+      attributes:  ['manager_id'],
+      transaction: t,
+    });
+    if (!empProfile || empProfile.manager_id !== req.user.user_id) {
+      await t.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You are not the currently assigned manager for this employee.',
       });
     }
 
@@ -621,17 +643,21 @@ const reviseAndResubmitRecommendation = async (req, res) => {
   try {
     const { recId } = req.params;
     const {
-      justification      = '',
-      correction_reason  = '',
-      score_corrections  = [],
+      justification                   = '',
+      correction_reason               = '',
+      score_corrections               = [],
+      revision_count: clientRevCount  = undefined,  // G08 (Finding 1 — stale-review protection)
     } = req.body;
 
     // ── Validate required text fields ────────────────────────────────────────
-    if (!justification?.trim()) {
+    // G08 (Finding 8 — payload validation): use explicit typeof check before
+    // calling .trim() so that non-string values (number, object, null) cannot
+    // reach the string method and throw a 500 instead of returning a clean 400.
+    if (!justification || typeof justification !== 'string' || !justification.trim()) {
       await t.rollback();
       return res.status(400).json({ success: false, message: 'justification is required.' });
     }
-    if (!correction_reason?.trim()) {
+    if (!correction_reason || typeof correction_reason !== 'string' || !correction_reason.trim()) {
       await t.rollback();
       return res.status(400).json({ success: false, message: 'correction_reason is required.' });
     }
@@ -658,16 +684,42 @@ const reviseAndResubmitRecommendation = async (req, res) => {
       });
     }
 
-    // ── 3. Ownership / role gate ──────────────────────────────────────────────
-    // G08: unified ownership — consistent with /resubmit, any caller may only
-    // revise their own recommendation (removes the LINE_MANAGER role condition).
-    if (rec.submitted_by !== req.user.user_id) {
+    // ── 2b. Stale-review protection (G08 Finding 1) ───────────────────────────
+    // When the client supplies revision_count, compare it against the DB value.
+    // A mismatch means the manager loaded a stale form after the recommendation
+    // was already revised by a concurrent submission.  Mirrors the identical
+    // guards in endorseRecommendation and approveRecommendation.
+    if (clientRevCount !== undefined && clientRevCount !== rec.revision_count) {
       await t.rollback();
-      return res.status(403).json({ success: false, message: 'Access denied. You may only revise your own recommendation.' });
+      return res.status(409).json({
+        success: false,
+        message: 'Conflict: recommendation was revised since you loaded the form. Reload and try again.',
+      });
+    }
+
+    // ── 3. Ownership gate — current EmployeeProfile.manager_id (G08 Finding 4) ─
+    // The read path (getRecommendation) already checks the CURRENT manager_id
+    // from EmployeeProfile.  The write path previously checked only the
+    // historical submitted_by field, which allows a former manager who is no
+    // longer assigned to this employee to continue revising a recommendation
+    // after a reassignment.  Aligning both paths to the current manager_id
+    // closes the inconsistency.
+    const period = rec.probationPeriod;
+
+    const empProfile = await EmployeeProfile.findOne({
+      where:       { profile_id: period.profile_id },
+      attributes:  ['manager_id'],
+      transaction: t,
+    });
+    if (!empProfile || empProfile.manager_id !== req.user.user_id) {
+      await t.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You are not the currently assigned manager for this employee.',
+      });
     }
 
     // ── 4. Period status gate ─────────────────────────────────────────────────
-    const period = rec.probationPeriod;
     if (period.status === 'CANCELLED') {
       await t.rollback();
       return res.status(409).json({ success: false, message: 'Cannot revise: probation period is cancelled.' });
@@ -681,15 +733,22 @@ const reviseAndResubmitRecommendation = async (req, res) => {
     }
 
     // ── 5. Determine cycle boundary (last APPROVED Director decision) ─────────
+    // G08 (Finding 3, Bug 2): fetch generated_at alongside director_decision_at
+    // so it can serve as a fallback when director_decision_at is null.  An
+    // APPROVED row can theoretically exist with a null director_decision_at if
+    // it was inserted by a migration or a legacy code path that did not populate
+    // the column; generated_at is always set by the model default.
     const lastApproved = await FinalRecommendation.findOne({
       where: { period_id: period.period_id, approval_status: 'APPROVED' },
       order: [['director_decision_at', 'DESC']],
-      attributes: ['director_decision_at'],
+      attributes: ['director_decision_at', 'generated_at'],
       transaction: t,
     });
     const cycleDecisionAt = lastApproved?.director_decision_at
       ? new Date(lastApproved.director_decision_at)
-      : null;
+      : lastApproved?.generated_at
+        ? new Date(lastApproved.generated_at)
+        : null;
 
     // ── 6. Apply score corrections (if provided) ──────────────────────────────
     // G08: validate that score_corrections is an array before iterating.
@@ -712,6 +771,12 @@ const reviseAndResubmitRecommendation = async (req, res) => {
     const processedScoreIds        = new Set();
 
     for (const corr of score_corrections) {
+      // G08 (Finding 8 — payload validation): each element must be a plain object;
+      // a null, primitive or nested array would throw on destructuring without this guard.
+      if (corr === null || typeof corr !== 'object' || Array.isArray(corr)) {
+        await t.rollback();
+        return res.status(422).json({ success: false, message: 'Each element of score_corrections must be an object.' });
+      }
       const { score_id, raw_score } = corr;
 
       // G08: validate score_id is a positive integer before the DB lookup.
@@ -778,8 +843,18 @@ const reviseAndResubmitRecommendation = async (req, res) => {
         });
       }
 
-      // Approved-cycle protection (Req 2)
-      if (cycleDecisionAt && checkpoint.completed_at) {
+      // Approved-cycle protection (Req 2 / G08 Finding 3)
+      if (cycleDecisionAt) {
+        // G08 (Finding 3, Bug 1): when the cycle boundary is known but the
+        // checkpoint has no completed_at, we cannot determine which cycle it
+        // belongs to.  Reject the correction rather than silently accepting it.
+        if (!checkpoint.completed_at) {
+          await t.rollback();
+          return res.status(409).json({
+            success: false,
+            message: `Checkpoint ${checkpoint.checkpoint_id} has no completion timestamp; its cycle membership cannot be verified. Correction rejected.`,
+          });
+        }
         const cpCompletedAt = new Date(checkpoint.completed_at);
         if (cpCompletedAt <= cycleDecisionAt) {
           await t.rollback();
@@ -876,23 +951,28 @@ const reviseAndResubmitRecommendation = async (req, res) => {
       transaction: t,
     });
 
-    // Filter to current cycle (after last approved Director decision)
-    const cycleCheckpoints = cycleDecisionAt
-      ? allCompletedCps.filter((cp) => cp.completed_at && new Date(cp.completed_at) > cycleDecisionAt)
-      : allCompletedCps;
-
+    // G08 (Finding 2 — scoring-policy consistency): the cumulative score is an
+    // average of ALL completed checkpoints for the period, exactly as the original
+    // submitManagerEvaluation formula computes it.  Filtering to only the current
+    // cycle's checkpoints (those after cycleDecisionAt) would produce a different
+    // result — a justification-only resubmission with no score changes would still
+    // alter the cumulative score and recommendation type, which is incorrect.
+    //
+    // The cycle-boundary filter already serves its intended purpose: it restricts
+    // which checkpoints can be EDITED (Approved-cycle protection, Req 2 above).
+    // It must NOT also change the averaging denominator.
     const beforeCumulative = Number.parseFloat(rec.cumulative_score);
     const beforeRecType    = rec.recommendation_type;
 
     let newCumulative, newRecType;
-    if (cycleCheckpoints.length > 0) {
-      const scores   = cycleCheckpoints.map((cp) => Number.parseFloat(cp.managerEvaluation?.weighted_score || 0));
+    if (allCompletedCps.length > 0) {
+      const scores   = allCompletedCps.map((cp) => Number.parseFloat(cp.managerEvaluation?.weighted_score || 0));
       newCumulative  = Number.parseFloat(
         (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2)
       );
       newRecType     = deriveRecommendation(newCumulative);
     } else {
-      // No cycle checkpoints found — retain existing values
+      // No completed checkpoints found — retain existing values
       newCumulative = beforeCumulative;
       newRecType    = beforeRecType;
     }

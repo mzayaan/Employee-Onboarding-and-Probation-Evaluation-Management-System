@@ -30,13 +30,18 @@ const RecommendationRevision = sequelize.define('RecommendationRevision', {
   },
 
   rec_id: {
-    type:      DataTypes.INTEGER.UNSIGNED,
+    // G08 (Finding 6 — FK signedness): parent final_recommendations.rec_id is
+    // DataTypes.INTEGER (signed), so this FK column must also be signed INTEGER.
+    // Using INTEGER.UNSIGNED would cause MySQL to refuse the foreign-key constraint.
+    type:      DataTypes.INTEGER,
     allowNull: false,
     comment:   'FK → final_recommendations.rec_id',
   },
 
   actor_id: {
-    type:      DataTypes.INTEGER.UNSIGNED,
+    // G08 (Finding 6 — FK signedness): parent users.user_id is DataTypes.INTEGER
+    // (signed), so this FK column must also be signed INTEGER.
+    type:      DataTypes.INTEGER,
     allowNull: false,
     comment:   'FK → users.user_id — the Line Manager who submitted the correction',
   },

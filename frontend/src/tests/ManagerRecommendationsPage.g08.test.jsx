@@ -523,4 +523,89 @@ describe('ManagerRecommendationsPage — G08 regression suite', () => {
     expect(getRecommendation).not.toHaveBeenCalled();
   });
 
+  // ── TC-FE-G08-014: revision_count included in payload (Finding 7) ──────────
+  // The page must pass detailRec.revision_count in the submission body so the
+  // backend can reject a stale form with 409 (G08 Finding 1 stale-review protection).
+
+  it('TC-FE-G08-014 (Finding 7 — interface): revision_count from detailRec included in reviseAndResubmit payload', async () => {
+    reviseAndResubmit.mockResolvedValue({ success: true });
+    listMyRecommendations
+      .mockResolvedValueOnce([makeRec({ approval_status: 'RETURNED_TO_MANAGER' })])
+      .mockResolvedValue([]);
+    // detailRec has revision_count: 3 — the page must forward this value
+    getRecommendation.mockResolvedValue(makeDetail(1, { revision_count: 3 }));
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Alice Brown')).toBeDefined());
+
+    const rowButton = screen.getByRole('button', { name: /Alice Brown/i });
+    await userEvent.click(rowButton);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Provide your revised justification/i)).toBeDefined();
+    });
+
+    const justificationTextarea = screen.getByPlaceholderText(/Provide your revised justification/i);
+    await userEvent.clear(justificationTextarea);
+    await userEvent.type(justificationTextarea, 'Valid justification.');
+
+    const corrReasonTextarea = screen.getByPlaceholderText(/Explain what scores or information you have corrected/i);
+    await userEvent.type(corrReasonTextarea, 'Valid correction reason.');
+
+    const submitBtn = screen.getByRole('button', { name: /Revise & Resubmit for HR Review/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(reviseAndResubmit).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ revision_count: 3 }),
+      );
+    });
+  });
+
+  // ── TC-FE-G08-015: stale-review 409 message shown in banner (Finding 7) ────
+  // When the backend returns 409 with the stale-review conflict message, the
+  // error banner must display that message so the user knows to reload.
+
+  it('TC-FE-G08-015 (Finding 7 — interface): 409 stale-review conflict message propagated to error banner', async () => {
+    const conflictError = {
+      response: {
+        data: {
+          message: 'Conflict: recommendation was revised since you loaded the form. Reload and try again.',
+        },
+      },
+    };
+    reviseAndResubmit.mockRejectedValue(conflictError);
+    listMyRecommendations.mockResolvedValue([makeRec({ approval_status: 'RETURNED_TO_MANAGER' })]);
+    getRecommendation.mockResolvedValue(makeDetail(1, { revision_count: 1 }));
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Alice Brown')).toBeDefined());
+
+    const rowButton = screen.getByRole('button', { name: /Alice Brown/i });
+    await userEvent.click(rowButton);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Provide your revised justification/i)).toBeDefined();
+    });
+
+    const justificationTextarea = screen.getByPlaceholderText(/Provide your revised justification/i);
+    await userEvent.clear(justificationTextarea);
+    await userEvent.type(justificationTextarea, 'Valid justification.');
+
+    const corrReasonTextarea = screen.getByPlaceholderText(/Explain what scores or information you have corrected/i);
+    await userEvent.type(corrReasonTextarea, 'Valid correction reason.');
+
+    const submitBtn = screen.getByRole('button', { name: /Revise & Resubmit for HR Review/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Conflict: recommendation was revised since you loaded the form/i),
+      ).toBeDefined();
+    });
+  });
+
 });
